@@ -18,6 +18,7 @@ set -euo pipefail
 
 VARIANT_ENV_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/env"
 SITE_MODULE_PATH="${SITE_MODULE_PATH:-${SHARED_PATH}/cse/modulefiles}"
+export SPACK_DISABLE_LOCAL_CONFIG=1
 
 # Determine which cse-init file to install
 if [[ "${CSE_VARIANT}" == "v1-minimal-externals" ]]; then

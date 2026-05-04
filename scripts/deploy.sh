@@ -116,6 +116,11 @@ export GCC_VERSION="${GCC_VERSION_OVERRIDE:-${GCC_VERSION:-13.2.0}}"
 # Defaults to the installer's own primary group so personal builds work out of
 # the box.  Pass --group <name> to target a shared system group (e.g. cse).
 export CSE_GROUP="${CSE_GROUP_OVERRIDE:-${CSE_GROUP:-$(id -gn)}}"
+# Prevent Spack from merging the installer's personal ~/.spack/ config into
+# the environment.  Without this, stale user-scope packages.yaml entries
+# (wrong compiler constraints, old versions, etc.) silently override the
+# environment's authoritative packages.yaml.
+export SPACK_DISABLE_LOCAL_CONFIG=1
 
 # ------------------------------------------------------------------
 # Auto-detect module system (or use override)
