@@ -14,9 +14,14 @@ set -euo pipefail
 
 SPACK_VERSION="${SPACK_VERSION:-v1.1.1}"
 SPACK_SITE="${SHARED_PATH}/cse/spack-site"
-# Isolate from personal ~/.spack/ config — prevents stale user-scope entries
-# from overriding the environment's packages.yaml, compilers, etc.
+# Prevent Spack from reading ~/.spack/ config or /etc/spack/ site config,
+# and redirect the user cache out of the home directory.
+# All three vars are required: DISABLE_LOCAL_CONFIG blocks config scopes but
+# not the cache; USER_CACHE_PATH redirects the cache; SYSTEM_CONFIG_PATH
+# blocks /etc/spack/ site-wide config that HPC admins sometimes pre-populate.
 export SPACK_DISABLE_LOCAL_CONFIG=1
+export SPACK_USER_CACHE_PATH="${SHARED_PATH}/cse/cache/bootstrap"
+export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
 VARIANT_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}"
 
 _run() {

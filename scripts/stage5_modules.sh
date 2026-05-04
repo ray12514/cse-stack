@@ -19,6 +19,8 @@ set -euo pipefail
 VARIANT_ENV_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/env"
 SITE_MODULE_PATH="${SITE_MODULE_PATH:-${SHARED_PATH}/cse/modulefiles}"
 export SPACK_DISABLE_LOCAL_CONFIG=1
+export SPACK_USER_CACHE_PATH="${SHARED_PATH}/cse/cache/spack"
+export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
 
 # Determine which cse-init file to install
 if [[ "${CSE_VARIANT}" == "v1-openmpi" ]]; then
