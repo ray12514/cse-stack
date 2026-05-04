@@ -3,6 +3,11 @@ spack:
     - ./packages.yaml
     - ./config.yaml
     - ./modules.yaml
+{% if gcc_bootstrap_yaml_exists %}
+    # Written by scripts/stage2_spack.sh — survives re-renders of the
+    # other includes because it lives next to (not inside) the env dir.
+    - ../gcc-bootstrap.yaml
+{% endif %}
 
   view:
     mpi:
