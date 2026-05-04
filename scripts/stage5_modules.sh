@@ -63,7 +63,7 @@ echo "Stage 5: installing cse-init/${INIT_NAME} to ${INIT_DST}..."
 umask 022
 mkdir -p "$(dirname "${INIT_DST}")"
 cp "${INIT_SRC}" "${INIT_DST}"
-chgrp cse "${INIT_DST}" 2>/dev/null || true
+chgrp "${CSE_GROUP:-$(id -gn)}" "${INIT_DST}" 2>/dev/null || true
 
 echo "Stage 5: done."
 echo ""
