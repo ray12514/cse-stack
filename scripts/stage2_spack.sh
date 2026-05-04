@@ -56,15 +56,16 @@ fi
 # ------------------------------------------------------------------
 GCC_VERSION="${GCC_VERSION:-13.3.0}"
 BOOTSTRAP_DIR="${VARIANT_DIR}/spack-bootstrap"
-BOOTSTRAP_PREFIX="${VARIANT_DIR}/bootstrap/gcc-${GCC_VERSION}"
+GCC_BOOTSTRAP_YAML="${VARIANT_DIR}/gcc-bootstrap.yaml"
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    echo "[dry-run] Stage 2: would bootstrap GCC ${GCC_VERSION} at ${BOOTSTRAP_PREFIX}"
+    echo "[dry-run] Stage 2: would bootstrap GCC ${GCC_VERSION} via ${BOOTSTRAP_DIR}/spack"
     echo "[dry-run]   git clone --depth 1 --branch ${SPACK_VERSION} https://github.com/spack/spack.git ${BOOTSTRAP_DIR}/spack"
     echo "[dry-run]   . ${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
     echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils"
-    echo "[dry-run]   spack view copy -f ${BOOTSTRAP_PREFIX} /<hash>"
-    echo "[dry-run]   write ${VARIANT_DIR}/gcc-bootstrap.yaml (gcc@${GCC_VERSION} external)"
+    echo "[dry-run]   GCC_PREFIX=\$(spack location -i /<hash>)"
+    echo "[dry-run]   spack compiler add \${GCC_PREFIX}/bin"
+    echo "[dry-run]   write ${GCC_BOOTSTRAP_YAML} (gcc@${GCC_VERSION} external at \${GCC_PREFIX})"
 else
     # Warn if the install root is not owned by the expected group.
     # This is advisory — a mismatch on a personal workdir is fine.
@@ -78,10 +79,9 @@ else
 
     umask 002
 
-    if [[ -f "${BOOTSTRAP_PREFIX}/bin/gcc" ]]; then
-        echo "Stage 2: bootstrap GCC already present at ${BOOTSTRAP_PREFIX}"
+    if grep -q "gcc@${GCC_VERSION}" "${GCC_BOOTSTRAP_YAML}" 2>/dev/null; then
+        echo "Stage 2: bootstrap GCC already registered (${GCC_BOOTSTRAP_YAML})"
     else
-        echo "Stage 2: bootstrapping GCC ${GCC_VERSION} (this may take a while)..."
         mkdir -p "${BOOTSTRAP_DIR}"
         if [[ ! -d "${BOOTSTRAP_DIR}/spack" ]]; then
             git clone --depth 1 --branch "${SPACK_VERSION}" \
@@ -125,37 +125,27 @@ else
         spack compiler list
         # ---- End bootstrap compiler detection ----
 
-        spack install -j "${SPACK_INSTALL_JOBS:-4}" --no-checksum "gcc@${GCC_VERSION}" ~bootstrap +binutils
-        GCC_HASH=$(spack find --format '{hash:7}' "gcc@${GCC_VERSION}" | head -n1)
-        if [[ -z "${GCC_HASH}" ]]; then
-            echo "==> Error: gcc@${GCC_VERSION} not found after install." >&2
-            exit 1
+        # Skip build if GCC already in the Spack store.
+        if spack find "gcc@${GCC_VERSION}" &>/dev/null; then
+            echo "Stage 2: gcc@${GCC_VERSION} already installed — skipping build."
+            GCC_HASH=$(spack find --format '{hash:7}' "gcc@${GCC_VERSION}" | head -n1)
+            GCC_PREFIX=$(spack location -i "/${GCC_HASH}")
+        else
+            echo "Stage 2: bootstrapping GCC ${GCC_VERSION} (this may take a while)..."
+            spack install -j "${SPACK_INSTALL_JOBS:-4}" --no-checksum "gcc@${GCC_VERSION}" ~bootstrap +binutils
+            GCC_HASH=$(spack find --format '{hash:7}' "gcc@${GCC_VERSION}" | head -n1)
+            [[ -z "${GCC_HASH}" ]] && { echo "==> Error: gcc@${GCC_VERSION} not found after install."; exit 1; }
+            GCC_PREFIX=$(spack location -i "/${GCC_HASH}")
         fi
-        # Select the installed package by hash only — `/gcc@version/hash` is
-        # fragile across Spack releases; `/<hash>` is the canonical form.
-        # -f: force overwrite of conflicting files (e.g. share/info/dir,
-        # the GNU info directory index that every package provides — see
-        # spack/spack#9029).
-        spack view --verbose copy -f "${BOOTSTRAP_PREFIX}" "/${GCC_HASH}"
-        echo "Stage 2: bootstrap GCC installed at ${BOOTSTRAP_PREFIX}"
-
-        # Register the freshly-built GCC as the primary compiler from the
-        # view path directly. Avoids `spack location -i`, which fails with
-        # "Spec matches no installed packages" when the env/scope context
-        # changes between install and lookup. Downstream stages (stage 4)
-        # will concretize using this version, not the system GCC that was
-        # only needed to compile it. Writes to the redirected
-        # SPACK_USER_CONFIG_PATH, never to ~/.spack.
-        echo "Stage 2: registering gcc@${GCC_VERSION} as primary compiler from ${BOOTSTRAP_PREFIX}..."
-        spack compiler add "${BOOTSTRAP_PREFIX}/bin"
+        echo "Stage 2: gcc@${GCC_VERSION} installed at ${GCC_PREFIX}"
+        spack compiler add "${GCC_PREFIX}/bin"
         spack compiler list
 
         # Record the freshly-built GCC as an external in a dedicated include
         # file alongside the environment. spack.yaml's `include:` picks this
         # up; stage 4 re-renders of packages.yaml/config.yaml/modules.yaml
         # leave this file untouched. `cat >` (overwrite) is intentional —
-        # makes re-runs idempotent and lets the caller change BOOTSTRAP_PREFIX.
-        GCC_BOOTSTRAP_YAML="${VARIANT_DIR}/gcc-bootstrap.yaml"
+        # makes re-runs idempotent and lets the caller change GCC_PREFIX.
         if ! grep -q "gcc@${GCC_VERSION}" "${GCC_BOOTSTRAP_YAML}" 2>/dev/null; then
             echo "Stage 2: writing gcc@${GCC_VERSION} external to ${GCC_BOOTSTRAP_YAML}..."
             cat > "${GCC_BOOTSTRAP_YAML}" <<EOF
@@ -163,12 +153,12 @@ packages:
   gcc:
     externals:
     - spec: gcc@${GCC_VERSION} languages='c,c++,fortran'
-      prefix: ${BOOTSTRAP_PREFIX}
+      prefix: ${GCC_PREFIX}
       extra_attributes:
         compilers:
-          c:       ${BOOTSTRAP_PREFIX}/bin/gcc
-          cxx:     ${BOOTSTRAP_PREFIX}/bin/g++
-          fortran: ${BOOTSTRAP_PREFIX}/bin/gfortran
+          c:       ${GCC_PREFIX}/bin/gcc
+          cxx:     ${GCC_PREFIX}/bin/g++
+          fortran: ${GCC_PREFIX}/bin/gfortran
     buildable: false
 EOF
         fi
