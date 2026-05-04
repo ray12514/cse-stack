@@ -8,10 +8,14 @@ The CSE provides a curated set of scientific libraries (HDF5, NetCDF-C, NetCDF-F
 
 ## Two Variants
 
-| Variant | Directory | Target System |
-|---------|-----------|---------------|
-| **v1-minimal-externals** | `variants/v1-minimal-externals/` | Generic Linux — Spack builds its own GCC and Open MPI |
-| **v2-cray-integrated** | `variants/v2-cray-integrated/` | Cray systems — PrgEnv-gnu, cray-mpich, and cray-libsci are consumed as externals |
+| Variant | Target System | MPI | Compiler |
+|---------|---------------|-----|----------|
+| **v1-openmpi** | Any Linux | Spack-built OpenMPI@5.0.5 | Spack-built GCC@13.2.0 |
+| **v2-mpich** | Any Linux; optimised for Cray/Slingshot | Spack-built MPICH@3.4.3 or @4.2.2 | Spack-built GCC@13.2.0 |
+
+Both variants build GCC and MPI entirely from Spack — no dependency on vendor compilers or vendor MPI at build time. This produces identical software versions across every deployment site, with only the Spack hash differing by OS and microarchitecture.
+
+On Cray systems, `v2-mpich` detects libfabric and (on PBS) cray-pals from the system modules and registers them as externals so MPICH uses the Slingshot high-speed network automatically.
 
 Both variants expose identical `cse/<package>` module names so users who move between systems need to relearn nothing.
 
@@ -26,7 +30,7 @@ These must be satisfied on the target host **before** running `deploy.sh`.
    pip install jinja2 pyyaml
    ```
 
-2. **Git** and a C compiler (needed by Spack):
+2. **Git** and a C/C++/Fortran compiler (needed by Spack to bootstrap):
    ```bash
    # RHEL/Rocky
    dnf install git gcc g++ gfortran
@@ -40,24 +44,18 @@ These must be satisfied on the target host **before** running `deploy.sh`.
    clusterinspector profile --local   # smoke test
    ```
 
-4. **Group `cse`** must exist and the build user must be a member:
-   ```bash
-   getent group cse           # confirm group exists
-   groups                     # confirm you are in the group
-   ```
-
 ### One-Time Host Setup
 
-Before the first `deploy.sh` run, create the shared root with the correct group ownership and setgid bit:
+Before the first `deploy.sh` run, create the shared root with correct group ownership:
 
 ```bash
 mkdir -p "${SHARED_PATH}/cse/${CSE_RELEASE}"
-chgrp -R cse "${SHARED_PATH}/cse"
+chgrp -R "${CSE_GROUP}" "${SHARED_PATH}/cse"
 chmod -R g+rwxs "${SHARED_PATH}/cse"
 chmod o+rx "${SHARED_PATH}/cse"
 ```
 
-This is a one-time operation per site. The setgid bit on every directory ensures that files created later (by Spack or by hand) inherit group `cse` regardless of the creator's primary group.
+The setgid bit ensures that files created later (by Spack or by hand) inherit the correct group regardless of the creator's primary group. Pass `--group <name>` to `deploy.sh` if your shared filesystem group differs from your primary group; it defaults to `$(id -gn)`.
 
 ---
 
@@ -67,19 +65,19 @@ Validate the scaffold without modifying any system state:
 
 ```bash
 # Clone and enter the repo
-git clone https://github.com/your-org/cse-stack.git
+git clone https://github.com/ray12514/cse-stack.git
 cd cse-stack
 
-# Variant A (generic Linux)
+# Variant A (any Linux)
 ./scripts/deploy.sh \
-    --variant v1-minimal-externals \
+    --variant v1-openmpi \
     --release 2026_04 \
     --shared-path /tmp/cse-test \
     --dry-run
 
 # Variant B (Cray) — use the bundled mock profile if not on a real Cray
 ./scripts/deploy.sh \
-    --variant v2-cray-integrated \
+    --variant v2-mpich \
     --release 2026_04 \
     --shared-path /tmp/cse-test \
     --mock-profile profiles/mock-cray.yaml \
@@ -93,34 +91,49 @@ Dry-run prints every command that would run, renders the YAML templates to stdou
 ## Full Deploy
 
 ```bash
-# Source the environment helper first
-source scripts/activate.sh --shared-path /your/shared/path --release 2026_04
-
-# Deploy Variant A
+# Deploy v1-openmpi
 ./scripts/deploy.sh \
-    --variant v1-minimal-externals \
+    --variant v1-openmpi \
     --release 2026_04 \
     --shared-path /your/shared/path
 
-# Deploy Variant B (on a Cray host with PrgEnv-gnu loaded)
-module load PrgEnv-gnu
+# Deploy v2-mpich (MPICH version auto-detected from system; override if needed)
 ./scripts/deploy.sh \
-    --variant v2-cray-integrated \
+    --variant v2-mpich \
     --release 2026_04 \
     --shared-path /your/shared/path
+
+# Deploy with a source mirror (air-gapped or restricted networks)
+./scripts/deploy.sh \
+    --variant v1-openmpi \
+    --release 2026_04 \
+    --shared-path /your/shared/path \
+    --mirror-path /path/to/mirror
+
+# Deploy with a binary build cache (fast re-deploy)
+./scripts/deploy.sh \
+    --variant v1-openmpi \
+    --release 2026_04 \
+    --shared-path /your/shared/path \
+    --buildcache-uri file:///path/to/cache
 ```
 
 ### `deploy.sh` Options
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `--variant` | Yes | `v1-minimal-externals` or `v2-cray-integrated` |
+| `--variant` | Yes | `v1-openmpi` or `v2-mpich` |
 | `--release` | Yes | Release tag, e.g. `2026_04` |
 | `--shared-path` | Yes | Path to the shared CSE filesystem root |
 | `--dry-run` | No | Print plan and rendered YAML; do not modify system |
 | `--from-stage N` | No | Skip stages 1 through N-1 (assumes outputs exist) |
 | `--module-system` | No | Override auto-detected module system (`lmod` or `tcl`) |
-| `--mock-profile` | No | Path to a mock Cluster Inspector YAML for Variant B testing |
+| `--mock-profile` | No | Path to a mock Cluster Inspector YAML for testing |
+| `--group` | No | Shared filesystem group (default: `$(id -gn)`) |
+| `--gcc-version` | No | GCC version to bootstrap (default: `13.2.0`) |
+| `--mpich-version` | No | MPICH version for v2-mpich (default: auto-detected from profile) |
+| `--mirror-path` | No | Local path to a Spack source mirror |
+| `--buildcache-uri` | No | URI for a Spack binary build cache (push after install, pull before) |
 
 ### Staged Scripts
 
@@ -129,9 +142,9 @@ Each stage is independently runnable. `deploy.sh` composes them.
 | Script | Purpose |
 |--------|---------|
 | `stage1_profile.sh` | Run Cluster Inspector, write `profiles/<hostname>-<timestamp>.yaml` |
-| `stage2_spack.sh` | Clone Spack; bootstrap GCC (Variant A only) |
+| `stage2_spack.sh` | Clone Spack (v1.1.1); bootstrap GCC into `<variant>/bootstrap/` |
 | `stage3_externals.sh` | Render `packages.yaml` from the system profile |
-| `stage4_build.sh` | Render remaining YAML templates; `spack concretize + install` |
+| `stage4_build.sh` | Render remaining YAML templates; `spack concretize + install`; push build cache |
 | `stage5_modules.sh` | `spack module refresh`; install `cse-init` activation module |
 
 ---
@@ -140,7 +153,7 @@ Each stage is independently runnable. `deploy.sh` composes them.
 
 After a successful deploy:
 
-### Variant A (generic Linux)
+### v1-openmpi
 
 ```bash
 module load cse-init/openmpi
@@ -152,29 +165,35 @@ mpif90 -I$NETCDF_FORTRAN_DIR/include -L$NETCDF_FORTRAN_DIR/lib \
 srun -n 4 ./my_program
 ```
 
-### Variant B (Cray — Slurm)
+### v2-mpich (any Linux or Cray)
 
 ```bash
-module load PrgEnv-gnu
-module load cse-init/cray-mpich
-module load cse/cray-mpich cse/netcdf-fortran-mpi
+module load cse-init/mpich
+module avail cse
+# cse/cmake  cse/mpich  cse/hdf5-mpi  cse/hdf5-serial  cse/netcdf-c-mpi  ...
+module load cse/mpich cse/hdf5-mpi cse/netcdf-fortran-mpi
 mpif90 -I$NETCDF_FORTRAN_DIR/include -L$NETCDF_FORTRAN_DIR/lib \
        -lnetcdff my_program.f90 -o my_program
 srun -n 4 ./my_program
 ```
 
-### Variant B (Cray — PBS + PALS)
+On Cray/Slingshot, MPICH uses the system libfabric for OFI transport automatically — no extra module loads or environment flags required.
 
-```bash
-module load PrgEnv-gnu
-module load cse-init/cray-mpich
-module load cse/cray-mpich cse/cray-pals cse/netcdf-fortran-mpi
-mpif90 -I$NETCDF_FORTRAN_DIR/include -L$NETCDF_FORTRAN_DIR/lib \
-       -lnetcdff my_program.f90 -o my_program
-mpiexec -n 4 ./my_program
-```
+For PBS systems with PALS, substitute `mpiexec -n 4 ./my_program`.
 
-> **Note**: Use `mpicc`/`mpif90`/`mpiCC` from `cray-mpich` directly — not the PrgEnv wrappers `cc`/`ftn`/`CC`. The PrgEnv wrappers inject flags that assume the Cray PE defaults; linking against CSE libraries through those wrappers can introduce silent ABI mismatches.
+---
+
+## MPICH Version Selection (v2-mpich)
+
+The MPICH version is chosen to match the ABI of the installed cray-mpich for future runtime splice compatibility:
+
+| cray-mpich series | Spack MPICH spec |
+|-------------------|-----------------|
+| 8.x | `mpich@3.4.3` |
+| 9.x | `mpich@4.2.2` |
+| Non-Cray / not detected | `mpich@4.2.2` |
+
+Override with `--mpich-version <ver>` if needed.
 
 ---
 
@@ -183,7 +202,7 @@ mpiexec -n 4 ./my_program
 Users who prefer a flat tree of headers, libraries, and binaries without `module load`:
 
 ```bash
-export CSE_VIEW=$SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/views/mpi
+export CSE_VIEW=$SHARED_PATH/cse/$CSE_RELEASE/v1-openmpi/views/mpi
 gcc -I$CSE_VIEW/include -L$CSE_VIEW/lib -lnetcdf my_program.c
 ```
 
@@ -212,15 +231,15 @@ With this configuration, `spack install` will reuse CSE-installed packages rathe
 cse-stack/
 ├── README.md
 ├── HANDOFF.md                      # original agent handoff brief
-├── variants/
-│   ├── v1-minimal-externals/       # reference YAML (rendered versions in env/ at deploy time)
-│   └── v2-cray-integrated/
 ├── modules/
 │   └── cse-init/                   # hand-written activation modulefiles (Lua + Tcl)
+│       ├── openmpi.lua / openmpi.tcl
+│       └── mpich.lua   / mpich.tcl
 ├── scripts/
 │   ├── deploy.sh                   # orchestrator
 │   ├── stage{1..5}_*.sh            # individual stages
-│   ├── activate.sh                 # source me
+│   ├── mirror_fetch.sh             # pre-populate a source mirror
+│   ├── buildcache_push.sh          # push binaries to a build cache after install
 │   └── lib/
 │       ├── profile.py              # typed accessors for Cluster Inspector YAML
 │       └── render.py               # Jinja2 template renderer
@@ -234,12 +253,8 @@ cse-stack/
 
 ---
 
-## Open Items (v1.1)
+## Open Items
 
-The following placeholder values in the YAML templates need to be confirmed before the pilot build. None of them change the scaffold structure; they are marked `TODO` in the relevant files.
-
-- Exact GCC version for Variant A (default: `gcc@13.2.0`)
-- PrgEnv-gnu GCC, cray-mpich, cray-libsci, cray-pals versions for Variant B (filled by Stage 1 at runtime)
-- Whether `parallel-netcdf` (PnetCDF) gets its own `cse/parallel-netcdf` module (currently a transitive dep of NetCDF-C)
-- Shared path root per site (currently `/shared_path`)
-- Pilot system identity for Variant B
+- Phase 2: cray-mpich ABI splice via `LD_LIBRARY_PATH` in `cse-init/mpich` (`CSE_MPICH_SPLICE=1` reserved; not yet implemented).
+- Whether `parallel-netcdf` (PnetCDF) gets its own `cse/parallel-netcdf` module (currently a transitive dep of NetCDF-C).
+- Shared path root per site (currently `/shared_path` as default).
