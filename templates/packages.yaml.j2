@@ -14,17 +14,23 @@ packages:
       write: group
       group: {{ cse_group }}
 
-  # OS-level externals (both variants)
+  # OS-level externals — versions detected at render time from the live system.
+  # buildable: false only for openssl (security library; always present on Linux).
+  # All others stay buildable: true; the external entry is a version hint only.
   openssl:
-    buildable: false
+    buildable: {{ "false" if openssl_version else "true" }}
+{% if openssl_version %}
     externals:
-      - spec: openssl@3.0.7
-        prefix: /usr
+      - spec: openssl@{{ openssl_version }}
+        prefix: {{ openssl_prefix }}
+{% endif %}
   curl:
     buildable: true
+{% if curl_version %}
     externals:
-      - spec: curl@7.85.0
-        prefix: /usr
+      - spec: curl@{{ curl_version }}
+        prefix: {{ curl_prefix }}
+{% endif %}
   glibc:
     buildable: false
     externals:
@@ -32,16 +38,18 @@ packages:
         prefix: /usr
   perl:
     buildable: true
+{% if perl_version %}
     externals:
-      - spec: perl@5.32.1
-        prefix: /usr
-
-  # Python is registered as an external hint but left buildable so a downstream
-  # spec that requires a newer Python can trigger a rebuild rather than hard-failing.
+      - spec: perl@{{ perl_version }}
+        prefix: {{ perl_prefix }}
+{% endif %}
   python:
+    buildable: true
+{% if python_version %}
     externals:
-      - spec: python@3.11.5
-        prefix: /usr
+      - spec: python@{{ python_version }}
+        prefix: {{ python_prefix }}
+{% endif %}
 
   # Bootstrapped GCC — registered as external after stage2_spack.sh builds it.
   # Both variants bootstrap GCC from Spack (no vendor compiler dependency).
