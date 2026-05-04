@@ -18,3 +18,9 @@ config:
   shared_linking:
     type: rpath
     bind: true
+
+# Keep Spack's internal bootstrap artifacts (clingo, etc.) inside the shared
+# tree so they are never written to ~/.spack even when SPACK_DISABLE_LOCAL_CONFIG
+# is not explicitly set (e.g. when a user sources the environment manually).
+bootstrap:
+  root: {{ SHARED_PATH }}/cse/{{ CSE_RELEASE }}/spack-bootstrap
