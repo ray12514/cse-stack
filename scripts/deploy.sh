@@ -113,7 +113,9 @@ export MOCK_PROFILE
 # Variant B ignores this; it takes GCC from PrgEnv-gnu via Cluster Inspector.
 export GCC_VERSION="${GCC_VERSION_OVERRIDE:-${GCC_VERSION:-13.2.0}}"
 # CSE_GROUP is the Unix group owning the shared install tree.
-export CSE_GROUP="${CSE_GROUP_OVERRIDE:-${CSE_GROUP:-cse}}"
+# Defaults to the installer's own primary group so personal builds work out of
+# the box.  Pass --group <name> to target a shared system group (e.g. cse).
+export CSE_GROUP="${CSE_GROUP_OVERRIDE:-${CSE_GROUP:-$(id -gn)}}"
 
 # ------------------------------------------------------------------
 # Auto-detect module system (or use override)
