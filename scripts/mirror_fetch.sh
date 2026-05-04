@@ -54,13 +54,9 @@ if [[ ! -f "${VARIANT_ENV_DIR}/spack.lock" ]]; then
     exit 1
 fi
 
-# Locate Spack
+# Locate Spack — both variants use the bootstrap spack instance
 if [[ -z "${SPACK_ROOT:-}" ]]; then
-    if [[ "${VARIANT}" == "v1-minimal-externals" ]]; then
-        SPACK_ROOT="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/spack-bootstrap/spack"
-    else
-        SPACK_ROOT="${SHARED_PATH}/cse/spack-site"
-    fi
+    SPACK_ROOT="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/spack-bootstrap/spack"
 fi
 
 if [[ ! -f "${SPACK_ROOT}/share/spack/setup-env.sh" ]]; then
@@ -91,4 +87,5 @@ echo "  scp -r ${MIRROR_PATH} user@target:${MIRROR_PATH}"
 echo ""
 echo "Then deploy on the restricted system:"
 echo "  ./scripts/deploy.sh --variant ${VARIANT} --release ${RELEASE} \\"
-echo "      --shared-path ${SHARED_PATH} --mirror-path ${MIRROR_PATH} ..."
+echo "      --shared-path ${SHARED_PATH} --mirror-path ${MIRROR_PATH} \\"
+echo "      [--buildcache-uri file:///path/to/cache] ..."

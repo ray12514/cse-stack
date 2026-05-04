@@ -2,20 +2,13 @@ packages:
   all:
     target: [{{ cpu_arch }}]
     providers:
-{% if is_variant_a %}
+{% if is_openmpi %}
       mpi: [openmpi]
 {% else %}
-      mpi:    [cray-mpich]
-      blas:   [cray-libsci]
-      lapack: [cray-libsci]
-      scalapack: [cray-libsci]
+      mpi: [mpich]
 {% endif %}
     require:
-{% if is_variant_a %}
       - "%gcc@{{ gcc_version }}"
-{% else %}
-      - "%gcc@{{ prgenv_gcc_version }}"
-{% endif %}
     permissions:
       read:  world
       write: group
@@ -50,8 +43,8 @@ packages:
       - spec: python@3.11.5
         prefix: /usr
 
-{% if is_variant_a %}
   # Bootstrapped GCC — registered as external after stage2_spack.sh builds it.
+  # Both variants bootstrap GCC from Spack (no vendor compiler dependency).
   gcc:
     buildable: false
     externals:
@@ -64,44 +57,27 @@ packages:
             fortran: {{ bootstrap_prefix }}/bin/gfortran
           extra_rpaths:
             - {{ bootstrap_prefix }}/lib64
-{% else %}
-  # Cray substrate externals — versions read from Stage 1 (Cluster Inspector).
-  gcc:
-    buildable: false
-    externals:
-      - spec: gcc@{{ prgenv_gcc_version }} languages='c,c++,fortran'
-        prefix: {{ prgenv_gcc_prefix }}
-        modules:
-          - PrgEnv-gnu
-          - gcc/{{ prgenv_gcc_version }}
-        extra_attributes:
-          compilers:
-            c:       {{ prgenv_gcc_prefix }}/bin/gcc
-            cxx:     {{ prgenv_gcc_prefix }}/bin/g++
-            fortran: {{ prgenv_gcc_prefix }}/bin/gfortran
 
-  cray-mpich:
+{% if is_mpich and has_libfabric %}
+  # libfabric — system OFI provider (Cray Slingshot HSN).
+  # Detected from modules.loaded by Cluster Inspector; enables MPICH to use
+  # the native high-speed network without building libfabric from source.
+  libfabric:
     buildable: false
     externals:
-      - spec: cray-mpich@{{ cray_mpich_version }} %gcc@{{ prgenv_gcc_version }}
-        modules: [cray-mpich/{{ cray_mpich_version }}]
-        prefix: {{ cray_mpich_prefix }}
+      - spec: libfabric@{{ libfabric_version }}
+        prefix: {{ libfabric_prefix }}
+        modules: [libfabric/{{ libfabric_version }}]
+{% endif %}
 
-  cray-libsci:
+{% if is_mpich and has_cray_pals %}
+  # cray-pals — PBS job launcher / PMIx provider on Cray systems.
+  # Provides mpiexec that hooks into Slingshot for PBS compute node launch.
+  # Absent on Slurm Cray systems; detected automatically by Stage 1.
+  pals:
     buildable: false
     externals:
-      - spec: cray-libsci@{{ cray_libsci_version }}
-        modules: [cray-libsci/{{ cray_libsci_version }}]
-        prefix: {{ cray_libsci_prefix }}
-
-{% if has_cray_pals %}
-  # cray-pals provides mpiexec on PBS Cray systems; absent on Slurm Cray.
-  # Presence is detected automatically by Stage 1 (Cluster Inspector).
-  cray-pals:
-    buildable: false
-    externals:
-      - spec: cray-pals@{{ cray_pals_version }}
+      - spec: pals@{{ cray_pals_version }}
         modules: [cray-pals/{{ cray_pals_version }}]
         prefix: {{ cray_pals_prefix }}
-{% endif %}
 {% endif %}

@@ -249,6 +249,34 @@ class SystemProfile:
         prefix = self._loaded_module_prefix("cray-pals/")
         return prefix or f"/opt/cray/pe/pals/{ver}"  # TODO: confirm
 
+    # ------------------------------------------------------------------
+    # Libfabric (OFI) — present on Cray/Slingshot systems
+    # ------------------------------------------------------------------
+
+    def has_libfabric(self) -> bool:
+        return bool(self._loaded_module_version("libfabric/"))
+
+    def libfabric_version(self) -> str:
+        return self._loaded_module_version("libfabric/") or "1.15.2"
+
+    def libfabric_prefix(self) -> str:
+        ver = self.libfabric_version()
+        prefix = self._loaded_module_prefix("libfabric/")
+        return prefix or f"/opt/cray/pe/libfabric/{ver}"
+
+    def mpich_version_for_spack(self) -> str:
+        """Map detected cray-mpich series to an ABI-compatible upstream MPICH version.
+
+        cray-mpich 8.x is based on MPICH 3.4.x; cray-mpich 9.x on MPICH 4.x.
+        Matching versions preserves ABI compatibility for a future Phase 2 splice.
+        """
+        cray_ver = self.cray_mpich_version()
+        if cray_ver.startswith("9."):
+            return "4.2.2"
+        if cray_ver.startswith("8."):
+            return "3.4.3"
+        return "4.2.2"  # non-Cray or undetected: use latest stable
+
     def cray_cpu_arch(self) -> str:
         """Spack target for Cray compute nodes (e.g. zen3, cascadelake)."""
         arch = self.cpu_arch()

@@ -30,17 +30,6 @@ modules:
       exclude_implicits: true
       projections:
         all: 'cse/{name}'
-{% if is_variant_b %}
-      # Expose the Cray externals as cse/* modules so users have a single
-      # consistent namespace regardless of whether the package was built by
-      # Spack or registered as an external.
-      include:
-        - cray-mpich
-        - cray-libsci
-{% if has_cray_pals %}
-        - cray-pals
-{% endif %}
-{% endif %}
       all:
         autoload: direct
         environment:
@@ -87,7 +76,7 @@ modules:
           set:
             NETCDF_CXX_ROOT: '{prefix}'
 
-{% if is_variant_a %}
+{% if is_openmpi %}
       openmpi:
         environment:
           set:
@@ -96,24 +85,10 @@ modules:
             MPI_DIR:  '{prefix}'
             OMPI_DIR: '{prefix}'
 {% else %}
-      cray-mpich:
+      mpich:
         environment:
           set:
-            MPI_HOME:              '{prefix}'
-            MPI_ROOT:              '{prefix}'
-            MPICH_DIR:             '{prefix}'
-            CRAY_MPICH_PREFIX_DIR: '{prefix}'
-
-      cray-libsci:
-        environment:
-          set:
-            CRAY_LIBSCI_PREFIX_DIR: '{prefix}'
-            LIBSCI_BASE_DIR:        '{prefix}'
-
-{% if has_cray_pals %}
-      cray-pals:
-        environment:
-          set:
-            CRAY_PALS_PREFIX_DIR: '{prefix}'
-{% endif %}
+            MPI_HOME:  '{prefix}'
+            MPI_ROOT:  '{prefix}'
+            MPICH_DIR: '{prefix}'
 {% endif %}
