@@ -42,6 +42,13 @@ def _build_context(profile: SystemProfile, variant: str,
     # MPICH version: explicit env var > auto-detect from cray-mpich series
     mpich_version = (os.environ.get("MPICH_VERSION", "")
                      or profile.mpich_version_for_spack())
+    # make_jobs: threads per package build, written to config:build_jobs.
+    # Sourced from SPACK_MAKE_JOBS (set by deploy.sh --make-jobs) and falls
+    # back to 16 when render.py is invoked outside the deploy pipeline.
+    try:
+        make_jobs = int(os.environ.get("SPACK_MAKE_JOBS", "") or "16")
+    except ValueError:
+        make_jobs = 16
     ctx: dict = {
         "variant": variant,
         "SHARED_PATH": shared_path,
@@ -60,6 +67,8 @@ def _build_context(profile: SystemProfile, variant: str,
         "gcc_version": gcc_version,
         # MPICH version (auto-detected from cray-mpich series for ABI compat)
         "mpich_version": mpich_version,
+        # Threads per package build → templates/config.yaml.j2 build_jobs
+        "make_jobs": make_jobs,
         # Cray detection — libfabric and pals for v2-mpich
         "is_cray":           profile.is_cray(),
         "has_libfabric":     profile.has_libfabric(),

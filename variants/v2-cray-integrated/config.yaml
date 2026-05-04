@@ -10,6 +10,9 @@ config:
 
   source_cache: $SHARED_PATH/cse/cache/source
   misc_cache:   $SHARED_PATH/cse/cache/misc
+  # Reference value only. The deployed config is rendered from
+  # templates/config.yaml.j2 with make_jobs sourced from SPACK_MAKE_JOBS
+  # (deploy.sh --make-jobs).
   build_jobs:   16
 
   shared_linking:

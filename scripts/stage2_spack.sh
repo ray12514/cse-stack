@@ -62,7 +62,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run] Stage 2: would bootstrap GCC ${GCC_VERSION} at ${BOOTSTRAP_PREFIX}"
     echo "[dry-run]   git clone --depth 1 --branch ${SPACK_VERSION} https://github.com/spack/spack.git ${BOOTSTRAP_DIR}/spack"
     echo "[dry-run]   . ${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
-    echo "[dry-run]   spack install --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils"
+    echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils"
     echo "[dry-run]   spack view copy ${BOOTSTRAP_PREFIX} /gcc@${GCC_VERSION}/<hash>"
 else
     # Warn if the install root is not owned by the expected group.
@@ -124,7 +124,7 @@ else
         spack compiler list
         # ---- End bootstrap compiler detection ----
 
-        spack install --no-checksum "gcc@${GCC_VERSION}" ~bootstrap +binutils
+        spack install -j "${SPACK_INSTALL_JOBS:-4}" --no-checksum "gcc@${GCC_VERSION}" ~bootstrap +binutils
         GCC_HASH=$(spack find --format '{hash:7}' "gcc@${GCC_VERSION}" | head -n1)
         spack view --verbose copy "${BOOTSTRAP_PREFIX}" "/gcc@${GCC_VERSION}/${GCC_HASH}"
         echo "Stage 2: bootstrap GCC installed at ${BOOTSTRAP_PREFIX}"
