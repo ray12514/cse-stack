@@ -4,7 +4,7 @@ packages:
     providers:
       mpi: [openmpi]
     require:
-      - "%gcc@13.2.0"    # TODO: confirm GCC version for this release
+      - "%gcc@13.2.0"    # override at deploy time with --gcc-version
     permissions:
       read:  world
       write: group

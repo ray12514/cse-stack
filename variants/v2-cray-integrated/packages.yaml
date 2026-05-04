@@ -1,13 +1,13 @@
 packages:
   all:
-    target: [zen3]    # TODO: confirm against actual Cray node CPU (Stage 1)
+    target: [zen3]    # filled at deploy time from Stage 1 (Cluster Inspector)
     providers:
       mpi:       [cray-mpich]
       blas:      [cray-libsci]
       lapack:    [cray-libsci]
       scalapack: [cray-libsci]
     require:
-      - "%gcc@12.3.0"    # TODO: confirm GCC version inside PrgEnv-gnu (Stage 1)
+      - "%gcc@12.3.0"    # filled at deploy time from PrgEnv-gnu via Stage 1
     permissions:
       read:  world
       write: group
@@ -39,8 +39,8 @@ packages:
       - spec: python@3.11.5
         prefix: /usr
 
-  # Cray substrate — versions filled in by Stage 3 (render from system profile)
-  gcc:    # TODO: confirm GCC version from PrgEnv-gnu on target system (Stage 1)
+  # Cray substrate — versions read from Stage 1 (Cluster Inspector) at deploy time.
+  gcc:
     buildable: false
     externals:
       - spec: gcc@12.3.0 languages='c,c++,fortran'
@@ -54,14 +54,14 @@ packages:
             cxx:     /opt/cray/pe/gcc/12.3.0/snos/bin/g++
             fortran: /opt/cray/pe/gcc/12.3.0/snos/bin/gfortran
 
-  cray-mpich:    # TODO: confirm version and prefix from Stage 1
+  cray-mpich:
     buildable: false
     externals:
       - spec: cray-mpich@8.1.30 %gcc@12.3.0
         modules: [cray-mpich/8.1.30]
         prefix: /opt/cray/pe/mpich/8.1.30/ofi/gnu/12.3
 
-  cray-libsci:    # TODO: confirm version and prefix from Stage 1
+  cray-libsci:
     buildable: false
     externals:
       - spec: cray-libsci@23.12.5
@@ -70,7 +70,7 @@ packages:
 
   # cray-pals provides mpiexec on PBS-based Cray systems.
   # On Slurm Cray systems srun is used; remove this block in that case.
-  # TODO: confirm presence on target Cray system (Stage 1 will detect this)
+  # Stage 1 (Cluster Inspector) detects whether cray-pals is present.
   cray-pals:
     buildable: false
     externals:

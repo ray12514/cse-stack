@@ -171,7 +171,7 @@ class SystemProfile:
     # ------------------------------------------------------------------
 
     def variant_a_gcc_version(self) -> str:
-        # TODO: confirm the GCC version to commit to for Variant A
+        # Default; override at deploy time with --gcc-version flag on deploy.sh.
         return "13.2.0"
 
     # ------------------------------------------------------------------

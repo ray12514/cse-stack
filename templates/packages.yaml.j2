@@ -14,12 +14,12 @@ packages:
 {% if is_variant_a %}
       - "%gcc@{{ gcc_version }}"
 {% else %}
-      - "%gcc@{{ prgenv_gcc_version }}"    # TODO: confirm GCC version inside PrgEnv-gnu
+      - "%gcc@{{ prgenv_gcc_version }}"
 {% endif %}
     permissions:
       read:  world
       write: group
-      group: cse
+      group: {{ cse_group }}
 
   # OS-level externals (both variants)
   openssl:
@@ -51,8 +51,7 @@ packages:
         prefix: /usr
 
 {% if is_variant_a %}
-  # Bootstrapped GCC — registered as external after stage1_profile + stage2_spack
-  # (bootstrap.sh builds GCC from source using the host compiler, then registers it here).
+  # Bootstrapped GCC — registered as external after stage2_spack.sh builds it.
   gcc:
     buildable: false
     externals:
@@ -66,8 +65,8 @@ packages:
           extra_rpaths:
             - {{ bootstrap_prefix }}/lib64
 {% else %}
-  # Cray substrate externals — versions filled in from Stage 1 (Cluster Inspector)
-  gcc:                                     # TODO: confirm GCC version from PrgEnv-gnu
+  # Cray substrate externals — versions read from Stage 1 (Cluster Inspector).
+  gcc:
     buildable: false
     externals:
       - spec: gcc@{{ prgenv_gcc_version }} languages='c,c++,fortran'
@@ -81,14 +80,14 @@ packages:
             cxx:     {{ prgenv_gcc_prefix }}/bin/g++
             fortran: {{ prgenv_gcc_prefix }}/bin/gfortran
 
-  cray-mpich:                              # TODO: confirm version from Stage 1
+  cray-mpich:
     buildable: false
     externals:
       - spec: cray-mpich@{{ cray_mpich_version }} %gcc@{{ prgenv_gcc_version }}
         modules: [cray-mpich/{{ cray_mpich_version }}]
         prefix: {{ cray_mpich_prefix }}
 
-  cray-libsci:                             # TODO: confirm version from Stage 1
+  cray-libsci:
     buildable: false
     externals:
       - spec: cray-libsci@{{ cray_libsci_version }}
@@ -96,9 +95,9 @@ packages:
         prefix: {{ cray_libsci_prefix }}
 
 {% if has_cray_pals %}
-  # cray-pals provides mpiexec on PBS Cray systems.
-  # On Slurm Cray systems srun is used; remove this block in that case.
-  cray-pals:                               # TODO: confirm presence on target Cray system
+  # cray-pals provides mpiexec on PBS Cray systems; absent on Slurm Cray.
+  # Presence is detected automatically by Stage 1 (Cluster Inspector).
+  cray-pals:
     buildable: false
     externals:
       - spec: cray-pals@{{ cray_pals_version }}
