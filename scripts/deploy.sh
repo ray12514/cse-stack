@@ -12,6 +12,7 @@
 #                       [--from-stage N]      \
 #                       [--gcc-version <ver>] \
 #                       [--group <name>]      \
+#                       [--mirror-path <path>]\
 #                       [--module-system {lmod|tcl}]
 #
 # Options:
@@ -24,7 +25,10 @@
 #   --gcc-version     GCC version for Variant A (default: 13.2.0).
 #                     Ignored for Variant B; that version comes from PrgEnv-gnu
 #                     via Stage 1 (Cluster Inspector).
-#   --group           Unix group that owns the shared install tree (default: cse).
+#   --group           Unix group that owns the shared install tree (default: installer's group).
+#   --mirror-path     Path to a local Spack source mirror (file:// or directory path).
+#                     Use scripts/mirror_fetch.sh on an internet-connected host to
+#                     populate the mirror, then transfer it here.
 #   --module-system   Override auto-detected module system (lmod or tcl).
 #   --mock-profile    Path to a mock Cluster Inspector YAML profile.
 #                     Useful for testing Variant B on a non-Cray host.
@@ -46,6 +50,7 @@ DRY_RUN=0
 FROM_STAGE=1
 GCC_VERSION_OVERRIDE=""
 CSE_GROUP_OVERRIDE=""
+MIRROR_PATH=""
 MODULE_SYSTEM_OVERRIDE=""
 MOCK_PROFILE=""
 
@@ -58,6 +63,7 @@ while [[ $# -gt 0 ]]; do
         --from-stage)     FROM_STAGE="$2";             shift 2 ;;
         --gcc-version)    GCC_VERSION_OVERRIDE="$2";   shift 2 ;;
         --group)          CSE_GROUP_OVERRIDE="$2";     shift 2 ;;
+        --mirror-path)    MIRROR_PATH="$2";            shift 2 ;;
         --module-system)  MODULE_SYSTEM_OVERRIDE="$2"; shift 2 ;;
         --mock-profile)   MOCK_PROFILE="$2";           shift 2 ;;
         -h|--help)
@@ -109,6 +115,9 @@ export CSE_SHARED_PATH="${SHARED_PATH}"
 export CSE_VARIANT="${VARIANT}"
 export DRY_RUN
 export MOCK_PROFILE
+# MIRROR_PATH: if set, stage 4 writes mirrors.yaml so Spack fetches from here
+# instead of the internet.  Accepts a filesystem path or file:// / http:// URL.
+export MIRROR_PATH
 # GCC_VERSION is used by stage2_spack.sh (bootstrap) and the render context.
 # Variant B ignores this; it takes GCC from PrgEnv-gnu via Cluster Inspector.
 export GCC_VERSION="${GCC_VERSION_OVERRIDE:-${GCC_VERSION:-13.2.0}}"
@@ -153,6 +162,9 @@ if [[ "${VARIANT}" == "v1-minimal-externals" ]]; then
     echo "  gcc version  : ${GCC_VERSION}"
 fi
 echo "  module system: ${MODULE_SYSTEM}"
+if [[ -n "${MIRROR_PATH}" ]]; then
+    echo "  mirror       : ${MIRROR_PATH}"
+fi
 if [[ ${DRY_RUN} == 1 ]]; then
     echo "  mode         : DRY-RUN (no changes will be made)"
 fi

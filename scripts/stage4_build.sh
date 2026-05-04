@@ -44,6 +44,9 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     _render "config.yaml.j2"  "${VARIANT_ENV_DIR}/config.yaml"
     _render "modules.yaml.j2" "${VARIANT_ENV_DIR}/modules.yaml"
     _render "spack.yaml.j2"   "${VARIANT_ENV_DIR}/spack.yaml"
+    if [[ -n "${MIRROR_PATH:-}" ]]; then
+        echo "[dry-run] Stage 4: would write mirrors.yaml → ${MIRROR_PATH}"
+    fi
     echo "[dry-run] Stage 4: would run:"
     echo "[dry-run]   spack env activate -d ${VARIANT_ENV_DIR}"
     echo "[dry-run]   spack concretize --fresh"
@@ -95,6 +98,21 @@ echo "Stage 4: rendering config.yaml, modules.yaml, spack.yaml..."
 _render "config.yaml.j2"  "${VARIANT_ENV_DIR}/config.yaml"
 _render "modules.yaml.j2" "${VARIANT_ENV_DIR}/modules.yaml"
 _render "spack.yaml.j2"   "${VARIANT_ENV_DIR}/spack.yaml"
+
+# Write mirrors.yaml if a local mirror was provided
+if [[ -n "${MIRROR_PATH:-}" ]]; then
+    # Normalise to a file:// URI if a plain directory path was given
+    if [[ "${MIRROR_PATH}" != *://* ]]; then
+        _MIRROR_URI="file://${MIRROR_PATH}"
+    else
+        _MIRROR_URI="${MIRROR_PATH}"
+    fi
+    echo "Stage 4: configuring local mirror at ${_MIRROR_URI}..."
+    cat > "${VARIANT_ENV_DIR}/mirrors.yaml" <<EOF
+mirrors:
+  cse-local: ${_MIRROR_URI}
+EOF
+fi
 
 # Activate Spack
 if [[ -z "${SPACK_ROOT:-}" ]]; then
