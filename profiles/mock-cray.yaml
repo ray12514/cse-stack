@@ -1,14 +1,18 @@
-# Mock Cluster Inspector system profile for a Cray system.
-# Used to test v2-cray-integrated --dry-run on a non-Cray host:
+# Mock Cluster Inspector system profile for a Cray system (v2-mpich target).
+# Used to test v2-mpich --dry-run on a non-Cray host:
 #
 #   ./scripts/deploy.sh \
-#       --variant v2-cray-integrated \
+#       --variant v2-mpich \
 #       --release test \
 #       --shared-path /tmp/cse-test \
 #       --mock-profile profiles/mock-cray.yaml \
 #       --dry-run
 #
-# TODO: replace placeholder versions with values from the actual target Cray system.
+# This profile exercises:
+#   - libfabric external (Slingshot OFI transport for MPICH)
+#   - cray-pals external (PBS job launcher / PMIx on Cray)
+#   - is_cray() = True (triggers cray_cpu_arch for Spack target)
+#   - MPICH version auto-detection: cray-mpich 8.x → mpich@3.4.3
 
 schema_version: 1
 
@@ -20,7 +24,6 @@ system:
   environment_model: cray-pe
   observed_platform_signals:
     - cray_pe_modules
-    - prgenv_loaded
   classification_confidence: high
 
 os:
@@ -33,33 +36,22 @@ modules:
   system: lmod
   modulepath: /opt/cray/pe/lmod/modulefiles/core
   loaded:
-    - name: PrgEnv-gnu
-      version: "8.3.3"
-    - name: gcc
-      version: "12.3.0"           # TODO: confirm
-      prefix: /opt/cray/pe/gcc/12.3.0/snos
+    - name: libfabric
+      version: "1.15.2"
+      prefix: /opt/cray/pe/libfabric/1.15.2
     - name: cray-mpich
-      version: "8.1.30"           # TODO: confirm from `module list`
+      version: "8.1.30"
       prefix: /opt/cray/pe/mpich/8.1.30/ofi/gnu/12.3
-    - name: cray-libsci
-      version: "23.12.5"          # TODO: confirm from `module list`
-      prefix: /opt/cray/pe/libsci/23.12.5/gnu/12.3
     - name: cray-pals
-      version: "1.4.0"            # TODO: confirm; remove if Slurm (not PBS) Cray
+      version: "1.4.0"
       prefix: /opt/cray/pe/pals/1.4.0
-  active_context:
-    source: active_shell
-    context_name: prgenv-gnu
-    prgenv_module: "PrgEnv-gnu"
-    mpi_module: "cray-mpich/8.1.30"
-    compiler_wrapper_family: cray
 
 scheduler:
-  type: pbs    # TODO: change to "slurm" if the target Cray uses Slurm
+  type: pbs
 
 hardware:
   cpu:
-    microarch: zen3    # TODO: confirm against actual compute node CPU
+    microarch: zen3
     model: AMD EPYC 7763
     sockets: 2
     cores_per_socket: 64
@@ -72,17 +64,13 @@ hardware:
     communication_provider: libfabric
 
 vendor_substrate:
-  prgenv_module: "PrgEnv-gnu"
   mpi_module: "cray-mpich/8.1.30"
   mpi_family: mpich
   source: cray
 
 externals_policy:
   forbid_build:
-    - cray-mpich
-    - cray-libsci
     - cray-pals
-    - gcc
   module_based_externals: true
 
 capabilities:

@@ -36,12 +36,18 @@ def _build_context(profile: SystemProfile, variant: str,
                    gcc_version_override: str = "",
                    cse_group: str = "") -> dict:
     """Build the Jinja2 template context from a system profile + deploy args."""
+    gcc_version = (gcc_version_override
+                   or os.environ.get("GCC_VERSION", "")
+                   or profile.variant_a_gcc_version())
+    # MPICH version: explicit env var > auto-detect from cray-mpich series
+    mpich_version = (os.environ.get("MPICH_VERSION", "")
+                     or profile.mpich_version_for_spack())
     ctx: dict = {
         "variant": variant,
         "SHARED_PATH": shared_path,
         "CSE_RELEASE": release,
-        "is_variant_a": variant == "v1-minimal-externals",
-        "is_variant_b": variant == "v2-cray-integrated",
+        "is_openmpi": variant == "v1-openmpi",
+        "is_mpich":   variant == "v2-mpich",
         # OS
         "glibc_version": profile.glibc_version(),
         "cpu_arch": (profile.cray_cpu_arch() if profile.is_cray()
@@ -50,31 +56,27 @@ def _build_context(profile: SystemProfile, variant: str,
         "module_system": profile.module_system(),
         # Scheduler
         "scheduler_type": profile.scheduler_type(),
-        # Variant A — GCC version: runtime override > env var > profile default
-        "gcc_version": (gcc_version_override
-                        or os.environ.get("GCC_VERSION", "")
-                        or profile.variant_a_gcc_version()),
-        # Variant B
-        "is_cray": profile.is_cray(),
-        "prgenv_gcc_version": profile.prgenv_gcc_version(),
-        "prgenv_gcc_prefix": profile.prgenv_gcc_prefix(),
-        "cray_mpich_version": profile.cray_mpich_version(),
-        "cray_mpich_prefix": profile.cray_mpich_prefix(),
-        "cray_libsci_version": profile.cray_libsci_version(),
-        "cray_libsci_prefix": profile.cray_libsci_prefix(),
-        "has_cray_pals": profile.has_cray_pals(),
+        # GCC — both variants bootstrap from Spack
+        "gcc_version": gcc_version,
+        # MPICH version (auto-detected from cray-mpich series for ABI compat)
+        "mpich_version": mpich_version,
+        # Cray detection — libfabric and pals for v2-mpich
+        "is_cray":           profile.is_cray(),
+        "has_libfabric":     profile.has_libfabric(),
+        "libfabric_version": profile.libfabric_version(),
+        "libfabric_prefix":  profile.libfabric_prefix(),
+        "has_cray_pals":     profile.has_cray_pals(),
         "cray_pals_version": profile.cray_pals_version(),
-        "cray_pals_prefix": profile.cray_pals_prefix(),
+        "cray_pals_prefix":  profile.cray_pals_prefix(),
     }
-    # Derived paths used heavily in templates
-    variant_slug = "v1-minimal" if variant == "v1-minimal-externals" else "v2-cray-integrated"
-    ctx["variant_slug"] = variant_slug
-    ctx["store_root"] = f"{shared_path}/cse/{release}/{variant_slug}/store"
-    ctx["module_root"] = f"{shared_path}/cse/{release}/{variant_slug}/modules"
-    ctx["views_root"] = f"{shared_path}/cse/{release}/{variant_slug}/views"
+    # variant_slug == variant name — no shortening needed
+    ctx["variant_slug"] = variant
+    ctx["store_root"] = f"{shared_path}/cse/{release}/{variant}/store"
+    ctx["module_root"] = f"{shared_path}/cse/{release}/{variant}/modules"
+    ctx["views_root"] = f"{shared_path}/cse/{release}/{variant}/views"
     ctx["bootstrap_prefix"] = (
-        f"{shared_path}/cse/{release}/{variant_slug}/bootstrap"
-        f"/gcc-{ctx['gcc_version']}"
+        f"{shared_path}/cse/{release}/{variant}/bootstrap"
+        f"/gcc-{gcc_version}"
     )
     ctx["cse_group"] = cse_group or os.environ.get("CSE_GROUP", "cse")
     return ctx
@@ -101,7 +103,7 @@ def render_template(template_path: str, profile_path: Optional[str],
             "vendor_substrate": {"prgenv_module": "", "mpi_module": "",
                                   "source": "unknown"},
         }
-        if variant == "v2-cray-integrated":
+        if variant == "v2-mpich":
             # Inject Cray signals so the template gets plausible values
             stub["system"]["platform_class"] = "cray"
             stub["vendor_substrate"]["source"] = "cray"
@@ -146,7 +148,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--output", default="", help="Output file path (omit to print to stdout)")
     p.add_argument("--profile", default="", help="Path to Cluster Inspector YAML profile")
     p.add_argument("--variant", required=True,
-                   choices=["v1-minimal-externals", "v2-cray-integrated"])
+                   choices=["v1-openmpi", "v2-mpich"])
     p.add_argument("--shared-path", required=True, dest="shared_path")
     p.add_argument("--release", required=True)
     p.add_argument("--dry-run", action="store_true", dest="dry_run")

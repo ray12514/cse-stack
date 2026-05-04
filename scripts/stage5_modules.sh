@@ -21,10 +21,10 @@ SITE_MODULE_PATH="${SITE_MODULE_PATH:-${SHARED_PATH}/cse/modulefiles}"
 export SPACK_DISABLE_LOCAL_CONFIG=1
 
 # Determine which cse-init file to install
-if [[ "${CSE_VARIANT}" == "v1-minimal-externals" ]]; then
+if [[ "${CSE_VARIANT}" == "v1-openmpi" ]]; then
     INIT_NAME="openmpi"
 else
-    INIT_NAME="cray-mpich"
+    INIT_NAME="mpich"
 fi
 
 if [[ "${MODULE_SYSTEM}" == "lmod" ]]; then
@@ -47,11 +47,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
 fi
 
 if [[ -z "${SPACK_ROOT:-}" ]]; then
-    if [[ "${CSE_VARIANT}" == "v1-minimal-externals" ]]; then
-        SPACK_ROOT="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/spack-bootstrap/spack"
-    else
-        SPACK_ROOT="${SHARED_PATH}/cse/spack-site"
-    fi
+    SPACK_ROOT="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/spack-bootstrap/spack"
 fi
 # shellcheck source=/dev/null
 . "${SPACK_ROOT}/share/spack/setup-env.sh"
@@ -69,10 +65,9 @@ chgrp "${CSE_GROUP:-$(id -gn)}" "${INIT_DST}" 2>/dev/null || true
 echo "Stage 5: done."
 echo ""
 echo "Users can now load the CSE environment with:"
-if [[ "${CSE_VARIANT}" == "v1-minimal-externals" ]]; then
+if [[ "${CSE_VARIANT}" == "v1-openmpi" ]]; then
     echo "  module load cse-init/openmpi"
 else
-    echo "  module load PrgEnv-gnu"
-    echo "  module load cse-init/cray-mpich"
+    echo "  module load cse-init/mpich"
 fi
 echo "  module avail cse"

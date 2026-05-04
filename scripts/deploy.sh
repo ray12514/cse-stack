@@ -5,33 +5,39 @@
 # this script just composes them and manages shared environment variables.
 #
 # Usage:
-#   ./scripts/deploy.sh --variant {v1-minimal-externals|v2-cray-integrated} \
-#                       --release <tag>       \
-#                       --shared-path <path>  \
-#                       [--dry-run]           \
-#                       [--from-stage N]      \
-#                       [--gcc-version <ver>] \
-#                       [--group <name>]      \
-#                       [--mirror-path <path>]\
+#   ./scripts/deploy.sh --variant {v1-openmpi|v2-mpich} \
+#                       --release <tag>            \
+#                       --shared-path <path>       \
+#                       [--dry-run]                \
+#                       [--from-stage N]           \
+#                       [--gcc-version <ver>]      \
+#                       [--mpich-version <ver>]    \
+#                       [--group <name>]           \
+#                       [--mirror-path <path>]     \
+#                       [--buildcache-uri <uri>]   \
 #                       [--module-system {lmod|tcl}]
 #
 # Options:
-#   --variant         Required. Which deployment variant to build.
+#   --variant         Required. Deployment variant: v1-openmpi or v2-mpich.
 #   --release         Required. Release tag (e.g. 2026_04).
 #   --shared-path     Required. Path to the shared CSE filesystem root.
 #   --dry-run         Print every command that would run; render template YAML;
 #                     exit 0 without modifying any state.
 #   --from-stage N    Skip stages 1 through N-1 (assumes their outputs exist).
-#   --gcc-version     GCC version for Variant A (default: 13.2.0).
-#                     Ignored for Variant B; that version comes from PrgEnv-gnu
-#                     via Stage 1 (Cluster Inspector).
+#   --gcc-version     Spack GCC version to bootstrap (default: 13.2.0).
+#   --mpich-version   Override auto-detected MPICH version for v2-mpich.
+#                     Normally inferred from cray-mpich series via Cluster Inspector
+#                     (cray-mpich 8.x → 3.4.3; 9.x → 4.2.2).
 #   --group           Unix group that owns the shared install tree (default: installer's group).
 #   --mirror-path     Path to a local Spack source mirror (file:// or directory path).
 #                     Use scripts/mirror_fetch.sh on an internet-connected host to
 #                     populate the mirror, then transfer it here.
+#   --buildcache-uri  URI of a Spack binary build cache (file://, s3://, https://).
+#                     Stage 4 pulls cache hits before building and pushes new binaries after.
+#                     Use scripts/buildcache_push.sh for a standalone push.
 #   --module-system   Override auto-detected module system (lmod or tcl).
 #   --mock-profile    Path to a mock Cluster Inspector YAML profile.
-#                     Useful for testing Variant B on a non-Cray host.
+#                     Useful for testing v2-mpich on a non-Cray host.
 set -euo pipefail
 
 # ------------------------------------------------------------------
@@ -49,8 +55,10 @@ SHARED_PATH=""
 DRY_RUN=0
 FROM_STAGE=1
 GCC_VERSION_OVERRIDE=""
+MPICH_VERSION_OVERRIDE=""
 CSE_GROUP_OVERRIDE=""
 MIRROR_PATH=""
+BUILDCACHE_URI=""
 MODULE_SYSTEM_OVERRIDE=""
 MOCK_PROFILE=""
 
@@ -61,9 +69,11 @@ while [[ $# -gt 0 ]]; do
         --shared-path)    SHARED_PATH="$2";            shift 2 ;;
         --dry-run)        DRY_RUN=1;                   shift   ;;
         --from-stage)     FROM_STAGE="$2";             shift 2 ;;
-        --gcc-version)    GCC_VERSION_OVERRIDE="$2";   shift 2 ;;
+        --gcc-version)    GCC_VERSION_OVERRIDE="$2";    shift 2 ;;
+        --mpich-version)  MPICH_VERSION_OVERRIDE="$2"; shift 2 ;;
         --group)          CSE_GROUP_OVERRIDE="$2";     shift 2 ;;
         --mirror-path)    MIRROR_PATH="$2";            shift 2 ;;
+        --buildcache-uri) BUILDCACHE_URI="$2";         shift 2 ;;
         --module-system)  MODULE_SYSTEM_OVERRIDE="$2"; shift 2 ;;
         --mock-profile)   MOCK_PROFILE="$2";           shift 2 ;;
         -h|--help)
@@ -93,8 +103,13 @@ if [[ -z "${SHARED_PATH}" ]]; then
     echo "ERROR: --shared-path is required" >&2
     errors=1
 fi
-if [[ "${VARIANT}" != "v1-minimal-externals" && "${VARIANT}" != "v2-cray-integrated" ]]; then
-    echo "ERROR: --variant must be v1-minimal-externals or v2-cray-integrated" >&2
+if [[ "${VARIANT}" != "v1-openmpi" && "${VARIANT}" != "v2-mpich" ]]; then
+    echo "ERROR: --variant must be v1-openmpi or v2-mpich" >&2
+    if [[ "${VARIANT}" == "v1-minimal-externals" ]]; then
+        echo "       (v1-minimal-externals has been renamed to v1-openmpi)" >&2
+    elif [[ "${VARIANT}" == "v2-cray-integrated" ]]; then
+        echo "       (v2-cray-integrated has been renamed to v2-mpich)" >&2
+    fi
     errors=1
 fi
 if [[ "${FROM_STAGE}" -lt 1 || "${FROM_STAGE}" -gt 5 ]]; then
@@ -118,9 +133,17 @@ export MOCK_PROFILE
 # MIRROR_PATH: if set, stage 4 writes mirrors.yaml so Spack fetches from here
 # instead of the internet.  Accepts a filesystem path or file:// / http:// URL.
 export MIRROR_PATH
+# BUILDCACHE_URI: if set, stage 4 pulls cache hits before installing and pushes
+# new binaries after.  Accepts file://, s3://, or https:// URIs.
+export BUILDCACHE_URI
 # GCC_VERSION is used by stage2_spack.sh (bootstrap) and the render context.
-# Variant B ignores this; it takes GCC from PrgEnv-gnu via Cluster Inspector.
+# Both variants now bootstrap GCC from Spack.
 export GCC_VERSION="${GCC_VERSION_OVERRIDE:-${GCC_VERSION:-13.2.0}}"
+# MPICH_VERSION: explicit override for v2-mpich; when unset render.py auto-detects
+# from cray-mpich series via Cluster Inspector (8.x→3.4.3, 9.x→4.2.2).
+if [[ -n "${MPICH_VERSION_OVERRIDE}" ]]; then
+    export MPICH_VERSION="${MPICH_VERSION_OVERRIDE}"
+fi
 # CSE_GROUP is the Unix group owning the shared install tree.
 # Defaults to the installer's own primary group so personal builds work out of
 # the box.  Pass --group <name> to target a shared system group (e.g. cse).
@@ -158,8 +181,9 @@ echo "  variant      : ${VARIANT}"
 echo "  release      : ${RELEASE}"
 echo "  shared-path  : ${SHARED_PATH}"
 echo "  group        : ${CSE_GROUP}"
-if [[ "${VARIANT}" == "v1-minimal-externals" ]]; then
-    echo "  gcc version  : ${GCC_VERSION}"
+echo "  gcc version  : ${GCC_VERSION}"
+if [[ "${VARIANT}" == "v2-mpich" ]]; then
+    echo "  mpich version: ${MPICH_VERSION:-auto-detect from profile}"
 fi
 echo "  module system: ${MODULE_SYSTEM}"
 if [[ -n "${MIRROR_PATH}" ]]; then
@@ -198,11 +222,10 @@ if [[ ${DRY_RUN} == 1 ]]; then
 else
     echo " Deploy complete."
     echo " Users can now load the CSE environment with:"
-    if [[ "${VARIANT}" == "v1-minimal-externals" ]]; then
+    if [[ "${VARIANT}" == "v1-openmpi" ]]; then
         echo "   module load cse-init/openmpi"
     else
-        echo "   module load PrgEnv-gnu"
-        echo "   module load cse-init/cray-mpich"
+        echo "   module load cse-init/mpich"
     fi
     echo "   module avail cse"
 fi

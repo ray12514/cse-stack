@@ -45,12 +45,18 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     _render "modules.yaml.j2" "${VARIANT_ENV_DIR}/modules.yaml"
     _render "spack.yaml.j2"   "${VARIANT_ENV_DIR}/spack.yaml"
     if [[ -n "${MIRROR_PATH:-}" ]]; then
-        echo "[dry-run] Stage 4: would write mirrors.yaml → ${MIRROR_PATH}"
+        echo "[dry-run] Stage 4: would add source mirror ${MIRROR_PATH} to mirrors.yaml"
+    fi
+    if [[ -n "${BUILDCACHE_URI:-}" ]]; then
+        echo "[dry-run] Stage 4: would add build cache ${BUILDCACHE_URI} to mirrors.yaml"
     fi
     echo "[dry-run] Stage 4: would run:"
     echo "[dry-run]   spack env activate -d ${VARIANT_ENV_DIR}"
     echo "[dry-run]   spack concretize --fresh"
     echo "[dry-run]   spack install --fail-fast"
+    if [[ -n "${BUILDCACHE_URI:-}" ]]; then
+        echo "[dry-run]   spack buildcache push --unsigned ${BUILDCACHE_URI}"
+    fi
     exit 0
 fi
 
@@ -99,28 +105,28 @@ _render "config.yaml.j2"  "${VARIANT_ENV_DIR}/config.yaml"
 _render "modules.yaml.j2" "${VARIANT_ENV_DIR}/modules.yaml"
 _render "spack.yaml.j2"   "${VARIANT_ENV_DIR}/spack.yaml"
 
-# Write mirrors.yaml if a local mirror was provided
-if [[ -n "${MIRROR_PATH:-}" ]]; then
-    # Normalise to a file:// URI if a plain directory path was given
-    if [[ "${MIRROR_PATH}" != *://* ]]; then
-        _MIRROR_URI="file://${MIRROR_PATH}"
-    else
-        _MIRROR_URI="${MIRROR_PATH}"
+# Write mirrors.yaml if a source mirror or build cache was provided
+if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
+    : > "${VARIANT_ENV_DIR}/mirrors.yaml"
+    printf 'mirrors:\n' >> "${VARIANT_ENV_DIR}/mirrors.yaml"
+    if [[ -n "${MIRROR_PATH:-}" ]]; then
+        if [[ "${MIRROR_PATH}" != *://* ]]; then
+            _MIRROR_URI="file://${MIRROR_PATH}"
+        else
+            _MIRROR_URI="${MIRROR_PATH}"
+        fi
+        echo "Stage 4: configuring source mirror at ${_MIRROR_URI}..."
+        printf '  cse-local: %s\n' "${_MIRROR_URI}" >> "${VARIANT_ENV_DIR}/mirrors.yaml"
     fi
-    echo "Stage 4: configuring local mirror at ${_MIRROR_URI}..."
-    cat > "${VARIANT_ENV_DIR}/mirrors.yaml" <<EOF
-mirrors:
-  cse-local: ${_MIRROR_URI}
-EOF
+    if [[ -n "${BUILDCACHE_URI:-}" ]]; then
+        echo "Stage 4: configuring build cache at ${BUILDCACHE_URI}..."
+        printf '  cse-buildcache: %s\n' "${BUILDCACHE_URI}" >> "${VARIANT_ENV_DIR}/mirrors.yaml"
+    fi
 fi
 
-# Activate Spack
+# Activate Spack — both variants use the bootstrap spack instance
 if [[ -z "${SPACK_ROOT:-}" ]]; then
-    if [[ "${CSE_VARIANT}" == "v1-minimal-externals" ]]; then
-        SPACK_ROOT="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/spack-bootstrap/spack"
-    else
-        SPACK_ROOT="${SHARED_PATH}/cse/spack-site"
-    fi
+    SPACK_ROOT="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/spack-bootstrap/spack"
 fi
 # shellcheck source=/dev/null
 . "${SPACK_ROOT}/share/spack/setup-env.sh"
@@ -133,5 +139,10 @@ spack concretize --fresh
 
 echo "Stage 4: installing (this will take a while on first run)..."
 spack install --fail-fast
+
+if [[ -n "${BUILDCACHE_URI:-}" ]]; then
+    echo "Stage 4: pushing installed packages to build cache at ${BUILDCACHE_URI}..."
+    spack buildcache push --unsigned "${BUILDCACHE_URI}"
+fi
 
 echo "Stage 4: done."
