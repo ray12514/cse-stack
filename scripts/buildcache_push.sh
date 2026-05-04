@@ -69,6 +69,8 @@ if [[ ! -f "${SPACK_ROOT}/share/spack/setup-env.sh" ]]; then
 fi
 
 export SPACK_DISABLE_LOCAL_CONFIG=1
+export SPACK_USER_CACHE_PATH="${SHARED_PATH}/cse/cache/spack"
+export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
 # shellcheck source=/dev/null
 . "${SPACK_ROOT}/share/spack/setup-env.sh"
 
