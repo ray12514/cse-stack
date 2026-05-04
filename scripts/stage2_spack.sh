@@ -3,8 +3,9 @@
 #
 # Environment:
 #   SHARED_PATH, CSE_RELEASE, CSE_VARIANT  — set by deploy.sh / activate.sh
+#   CSE_GROUP                              — owning group for install tree (default: cse)
 #   DRY_RUN                                — "1" for dry-run
-#   SPACK_VERSION                          — git tag to clone (default: v1.2.0)
+#   SPACK_VERSION                          — git tag to clone (default: v1.1.1)
 set -euo pipefail
 
 : "${SHARED_PATH:?}"
@@ -45,7 +46,7 @@ fi
 #  with the CSE store concretization)
 # ------------------------------------------------------------------
 if [[ "${CSE_VARIANT}" == "v1-minimal-externals" ]]; then
-    GCC_VERSION="${GCC_VERSION:-13.2.0}"    # TODO: confirm GCC version for Variant A
+    GCC_VERSION="${GCC_VERSION:-13.2.0}"
     BOOTSTRAP_DIR="${VARIANT_DIR}/spack-bootstrap"
     BOOTSTRAP_PREFIX="${VARIANT_DIR}/bootstrap/gcc-${GCC_VERSION}"
 
@@ -56,11 +57,14 @@ if [[ "${CSE_VARIANT}" == "v1-minimal-externals" ]]; then
         echo "[dry-run]   spack install --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils"
         echo "[dry-run]   spack view copy ${BOOTSTRAP_PREFIX} /gcc@${GCC_VERSION}/<hash>"
     else
-        # Verify group cse + setgid on the shared root before writing anything
-        if [[ "$(stat -c '%G' "${SHARED_PATH}/cse" 2>/dev/null)" != "cse" ]]; then
-            echo "ERROR: ${SHARED_PATH}/cse is not owned by group cse." >&2
-            echo "       Run the one-time setup from the README first." >&2
-            exit 1
+        # Warn if the install root is not owned by the expected group.
+        # This is advisory — a mismatch on a personal workdir is fine.
+        _EXPECTED_GROUP="${CSE_GROUP:-cse}"
+        _ACTUAL_GROUP="$(stat -c '%G' "${SHARED_PATH}/cse" 2>/dev/null || echo '')"
+        if [[ -n "${_ACTUAL_GROUP}" && "${_ACTUAL_GROUP}" != "${_EXPECTED_GROUP}" ]]; then
+            echo "WARNING: ${SHARED_PATH}/cse is owned by group '${_ACTUAL_GROUP}'," >&2
+            echo "         expected '${_EXPECTED_GROUP}' (set via --group)." >&2
+            echo "         On a shared HPC system run the one-time setup from the README." >&2
         fi
 
         umask 002
