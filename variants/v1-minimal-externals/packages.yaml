@@ -1,0 +1,50 @@
+packages:
+  all:
+    target: [x86_64_v3]
+    providers:
+      mpi: [openmpi]
+    require:
+      - "%gcc@13.2.0"    # TODO: confirm GCC version for this release
+    permissions:
+      read:  world
+      write: group
+      group: cse
+
+  openssl:
+    buildable: false
+    externals:
+      - spec: openssl@3.0.7
+        prefix: /usr
+  curl:
+    buildable: false
+    externals:
+      - spec: curl@7.85.0
+        prefix: /usr
+  glibc:
+    buildable: false
+    externals:
+      - spec: glibc@2.34
+        prefix: /usr
+  perl:
+    buildable: false
+    externals:
+      - spec: perl@5.32.1
+        prefix: /usr
+  python:
+    externals:
+      - spec: python@3.11.5
+        prefix: /usr
+
+  # Bootstrapped GCC — registered as external after scripts/stage2_spack.sh
+  gcc:
+    buildable: false
+    externals:
+      - spec: gcc@13.2.0 languages='c,c++,fortran'
+        prefix: $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.2.0
+        extra_attributes:
+          compilers:
+            c:       $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.2.0/bin/gcc
+            cxx:     $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.2.0/bin/g++
+            fortran: $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.2.0/bin/gfortran
+          extra_rpaths:
+            - $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.2.0/lib64

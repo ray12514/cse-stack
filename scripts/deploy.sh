@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# deploy.sh — CSE deploy orchestrator.
+#
+# Runs Stage 1–5 in order.  Each stage script is independently runnable;
+# this script just composes them and manages shared environment variables.
+#
+# Usage:
+#   ./scripts/deploy.sh --variant {v1-minimal-externals|v2-cray-integrated} \
+#                       --release <tag>       \
+#                       --shared-path <path>  \
+#                       [--dry-run]           \
+#                       [--from-stage N]      \
+#                       [--module-system {lmod|tcl}]
+#
+# Options:
+#   --variant         Required. Which deployment variant to build.
+#   --release         Required. Release tag (e.g. 2026_04).
+#   --shared-path     Required. Path to the shared CSE filesystem root.
+#   --dry-run         Print every command that would run; render template YAML;
+#                     exit 0 without modifying any state.
+#   --from-stage N    Skip stages 1 through N-1 (assumes their outputs exist).
+#   --module-system   Override auto-detected module system (lmod or tcl).
+#   --mock-profile    Path to a mock Cluster Inspector YAML profile.
+#                     Useful for testing Variant B on a non-Cray host.
+set -euo pipefail
+
+# ------------------------------------------------------------------
+# Locate the repository root regardless of where the script is called from
+# ------------------------------------------------------------------
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export REPO_ROOT
+
+# ------------------------------------------------------------------
+# Parse arguments
+# ------------------------------------------------------------------
+VARIANT=""
+RELEASE=""
+SHARED_PATH=""
+DRY_RUN=0
+FROM_STAGE=1
+MODULE_SYSTEM_OVERRIDE=""
+MOCK_PROFILE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --variant)        VARIANT="$2";               shift 2 ;;
+        --release)        RELEASE="$2";               shift 2 ;;
+        --shared-path)    SHARED_PATH="$2";           shift 2 ;;
+        --dry-run)        DRY_RUN=1;                  shift   ;;
+        --from-stage)     FROM_STAGE="$2";            shift 2 ;;
+        --module-system)  MODULE_SYSTEM_OVERRIDE="$2"; shift 2 ;;
+        --mock-profile)   MOCK_PROFILE="$2";          shift 2 ;;
+        -h|--help)
+            sed -n '3,30p' "${BASH_SOURCE[0]}"
+            exit 0
+            ;;
+        *)
+            echo "deploy.sh: unknown argument: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# ------------------------------------------------------------------
+# Validate required arguments
+# ------------------------------------------------------------------
+errors=0
+if [[ -z "${VARIANT}" ]]; then
+    echo "ERROR: --variant is required (v1-minimal-externals | v2-cray-integrated)" >&2
+    errors=1
+fi
+if [[ -z "${RELEASE}" ]]; then
+    echo "ERROR: --release is required (e.g. 2026_04)" >&2
+    errors=1
+fi
+if [[ -z "${SHARED_PATH}" ]]; then
+    echo "ERROR: --shared-path is required" >&2
+    errors=1
+fi
+if [[ "${VARIANT}" != "v1-minimal-externals" && "${VARIANT}" != "v2-cray-integrated" ]]; then
+    echo "ERROR: --variant must be v1-minimal-externals or v2-cray-integrated" >&2
+    errors=1
+fi
+if [[ "${FROM_STAGE}" -lt 1 || "${FROM_STAGE}" -gt 5 ]]; then
+    echo "ERROR: --from-stage must be between 1 and 5" >&2
+    errors=1
+fi
+if [[ ${errors} -gt 0 ]]; then
+    exit 1
+fi
+
+# ------------------------------------------------------------------
+# Export environment for stage scripts
+# ------------------------------------------------------------------
+export SHARED_PATH
+export CSE_RELEASE="${RELEASE}"
+export CSE_RELEASE_DEFAULT="${RELEASE}"
+export CSE_SHARED_PATH="${SHARED_PATH}"
+export CSE_VARIANT="${VARIANT}"
+export DRY_RUN
+export MOCK_PROFILE
+
+# ------------------------------------------------------------------
+# Auto-detect module system (or use override)
+# ------------------------------------------------------------------
+if [[ -n "${MODULE_SYSTEM_OVERRIDE}" ]]; then
+    MODULE_SYSTEM="${MODULE_SYSTEM_OVERRIDE}"
+else
+    if command -v lmod &>/dev/null || command -v modulecmd &>/dev/null \
+       || [[ -n "${LMOD_CMD:-}" ]]; then
+        MODULE_SYSTEM="lmod"
+    elif command -v modulecmd.tcl &>/dev/null \
+         || [[ -f /usr/share/modules/init/bash ]]; then
+        MODULE_SYSTEM="tcl"
+    else
+        MODULE_SYSTEM="lmod"    # assume Lmod; override with --module-system if needed
+    fi
+fi
+export MODULE_SYSTEM
+
+# ------------------------------------------------------------------
+# Header
+# ------------------------------------------------------------------
+echo "========================================================"
+echo " CSE Deploy"
+echo "  variant      : ${VARIANT}"
+echo "  release      : ${RELEASE}"
+echo "  shared-path  : ${SHARED_PATH}"
+echo "  module system: ${MODULE_SYSTEM}"
+if [[ ${DRY_RUN} == 1 ]]; then
+    echo "  mode         : DRY-RUN (no changes will be made)"
+fi
+echo "========================================================"
+echo ""
+
+# ------------------------------------------------------------------
+# Stage runner
+# ------------------------------------------------------------------
+run_stage() {
+    local n="$1" script="$2"
+    if [[ "${FROM_STAGE}" -gt "${n}" ]]; then
+        echo "--- Stage ${n}: skipped (--from-stage ${FROM_STAGE})"
+        return 0
+    fi
+    echo "--- Stage ${n}: ${script}"
+    # shellcheck source=/dev/null
+    source "${REPO_ROOT}/scripts/${script}"
+    echo ""
+}
+
+run_stage 1 stage1_profile.sh
+run_stage 2 stage2_spack.sh
+run_stage 3 stage3_externals.sh
+run_stage 4 stage4_build.sh
+run_stage 5 stage5_modules.sh
+
+echo "========================================================"
+if [[ ${DRY_RUN} == 1 ]]; then
+    echo " Dry-run complete.  No changes were made."
+else
+    echo " Deploy complete."
+    echo " Users can now load the CSE environment with:"
+    if [[ "${VARIANT}" == "v1-minimal-externals" ]]; then
+        echo "   module load cse-init/openmpi"
+    else
+        echo "   module load PrgEnv-gnu"
+        echo "   module load cse-init/cray-mpich"
+    fi
+    echo "   module avail cse"
+fi
+echo "========================================================"

@@ -1,0 +1,7 @@
+# Spack build-cache mirrors for Variant B.
+# Populate with site-specific mirror URLs.
+# Out of scope for v1.0; mirroring and buildcache distribution are v1.1+ features.
+mirrors:
+  # example-local:
+  #   url: file:///shared_path/cse/mirror
+  #   access_pair: [null, null]

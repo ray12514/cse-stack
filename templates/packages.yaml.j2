@@ -1,0 +1,108 @@
+packages:
+  all:
+    target: [{{ cpu_arch }}]
+    providers:
+{% if is_variant_a %}
+      mpi: [openmpi]
+{% else %}
+      mpi:    [cray-mpich]
+      blas:   [cray-libsci]
+      lapack: [cray-libsci]
+      scalapack: [cray-libsci]
+{% endif %}
+    require:
+{% if is_variant_a %}
+      - "%gcc@{{ gcc_version }}"
+{% else %}
+      - "%gcc@{{ prgenv_gcc_version }}"    # TODO: confirm GCC version inside PrgEnv-gnu
+{% endif %}
+    permissions:
+      read:  world
+      write: group
+      group: cse
+
+  # OS-level externals (both variants)
+  openssl:
+    buildable: false
+    externals:
+      - spec: openssl@3.0.7
+        prefix: /usr
+  curl:
+    buildable: false
+    externals:
+      - spec: curl@7.85.0
+        prefix: /usr
+  glibc:
+    buildable: false
+    externals:
+      - spec: glibc@{{ glibc_version }}
+        prefix: /usr
+  perl:
+    buildable: false
+    externals:
+      - spec: perl@5.32.1
+        prefix: /usr
+
+  # Python is registered as an external hint but left buildable so a downstream
+  # spec that requires a newer Python can trigger a rebuild rather than hard-failing.
+  python:
+    externals:
+      - spec: python@3.11.5
+        prefix: /usr
+
+{% if is_variant_a %}
+  # Bootstrapped GCC — registered as external after stage1_profile + stage2_spack
+  # (bootstrap.sh builds GCC from source using the host compiler, then registers it here).
+  gcc:
+    buildable: false
+    externals:
+      - spec: gcc@{{ gcc_version }} languages='c,c++,fortran'
+        prefix: {{ bootstrap_prefix }}
+        extra_attributes:
+          compilers:
+            c:       {{ bootstrap_prefix }}/bin/gcc
+            cxx:     {{ bootstrap_prefix }}/bin/g++
+            fortran: {{ bootstrap_prefix }}/bin/gfortran
+          extra_rpaths:
+            - {{ bootstrap_prefix }}/lib64
+{% else %}
+  # Cray substrate externals — versions filled in from Stage 1 (Cluster Inspector)
+  gcc:                                     # TODO: confirm GCC version from PrgEnv-gnu
+    buildable: false
+    externals:
+      - spec: gcc@{{ prgenv_gcc_version }} languages='c,c++,fortran'
+        prefix: {{ prgenv_gcc_prefix }}
+        modules:
+          - PrgEnv-gnu
+          - gcc/{{ prgenv_gcc_version }}
+        extra_attributes:
+          compilers:
+            c:       {{ prgenv_gcc_prefix }}/bin/gcc
+            cxx:     {{ prgenv_gcc_prefix }}/bin/g++
+            fortran: {{ prgenv_gcc_prefix }}/bin/gfortran
+
+  cray-mpich:                              # TODO: confirm version from Stage 1
+    buildable: false
+    externals:
+      - spec: cray-mpich@{{ cray_mpich_version }} %gcc@{{ prgenv_gcc_version }}
+        modules: [cray-mpich/{{ cray_mpich_version }}]
+        prefix: {{ cray_mpich_prefix }}
+
+  cray-libsci:                             # TODO: confirm version from Stage 1
+    buildable: false
+    externals:
+      - spec: cray-libsci@{{ cray_libsci_version }}
+        modules: [cray-libsci/{{ cray_libsci_version }}]
+        prefix: {{ cray_libsci_prefix }}
+
+{% if has_cray_pals %}
+  # cray-pals provides mpiexec on PBS Cray systems.
+  # On Slurm Cray systems srun is used; remove this block in that case.
+  cray-pals:                               # TODO: confirm presence on target Cray system
+    buildable: false
+    externals:
+      - spec: cray-pals@{{ cray_pals_version }}
+        modules: [cray-pals/{{ cray_pals_version }}]
+        prefix: {{ cray_pals_prefix }}
+{% endif %}
+{% endif %}

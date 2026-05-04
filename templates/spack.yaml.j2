@@ -1,0 +1,57 @@
+spack:
+  include:
+    - ./packages.yaml
+    - ./config.yaml
+    - ./modules.yaml
+
+  view:
+    mpi:
+      root: {{ views_root }}/mpi
+      select:
+        - "+mpi"
+{% if is_variant_a %}
+        - openmpi
+{% else %}
+        - cray-mpich
+{% endif %}
+        - cmake
+        - zlib
+      link: all
+      link_type: symlink
+    serial:
+      root: {{ views_root }}/serial
+      select:
+        - "hdf5~mpi"
+        - "netcdf-c~mpi"
+        - "netcdf-fortran ^netcdf-c~mpi"
+        - "netcdf-cxx4 ^netcdf-c~mpi"
+        - cmake
+        - zlib
+      link: all
+      link_type: symlink
+
+  concretizer:
+    unify: true
+    reuse:  true
+
+  specs:
+{% if is_variant_a %}
+    - openmpi@5.0.5 +legacylaunchers fabrics=auto schedulers=slurm
+{% endif %}
+    - cmake@3.29.6
+    - zlib@1.3.1
+{% if is_variant_a %}
+    - hdf5@1.14.4 +mpi  +fortran +cxx +hl +threadsafe
+    - hdf5@1.14.4 ~mpi  +fortran +cxx +hl +threadsafe
+    - netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.4+mpi
+    - netcdf-c@4.9.2 ~mpi                    ^hdf5@1.14.4~mpi
+{% else %}
+    - hdf5@1.14.4 +mpi  +fortran +cxx +hl +threadsafe ^cray-mpich
+    - hdf5@1.14.4 ~mpi  +fortran +cxx +hl +threadsafe
+    - netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.4+mpi  ^cray-mpich
+    - netcdf-c@4.9.2 ~mpi                    ^hdf5@1.14.4~mpi
+{% endif %}
+    - netcdf-fortran@4.6.1                   ^netcdf-c@4.9.2+mpi
+    - netcdf-fortran@4.6.1                   ^netcdf-c@4.9.2~mpi
+    - netcdf-cxx4@4.3.1                      ^netcdf-c@4.9.2+mpi
+    - netcdf-cxx4@4.3.1                      ^netcdf-c@4.9.2~mpi

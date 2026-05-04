@@ -1,0 +1,17 @@
+config:
+  install_tree:
+    root: $SHARED_PATH/cse/$CSE_RELEASE/v2-cray-integrated/store
+    projections:
+      all: '{architecture}/{compiler.name}-{compiler.version}/{name}-{version}-{hash:7}'
+    padded_length: 256
+
+  build_stage:
+    - $tempdir/$user/spack-stage
+
+  source_cache: $SHARED_PATH/cse/cache/source
+  misc_cache:   $SHARED_PATH/cse/cache/misc
+  build_jobs:   16
+
+  shared_linking:
+    type: rpath
+    bind: true

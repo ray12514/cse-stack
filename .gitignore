@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# Rendered YAML (written at deploy time, not checked in)
+*/env/spack.yaml
+*/env/packages.yaml
+*/env/config.yaml
+*/env/modules.yaml
+
+# Spack build artifacts
+spack-stage/
+spack-bootstrap/
+*.lock
+
+# Profile artifacts (contain host-specific data)
+profiles/*.yaml
+!profiles/mock-cray.yaml
+!profiles/.gitkeep

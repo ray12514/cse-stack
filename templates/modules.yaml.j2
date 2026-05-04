@@ -1,0 +1,117 @@
+modules:
+  prefix_inspections:
+    bin:
+      - PATH
+    lib:
+      - LD_LIBRARY_PATH
+    lib64:
+      - LD_LIBRARY_PATH
+    include:
+      - CPATH
+    lib/pkgconfig:
+      - PKG_CONFIG_PATH
+    lib64/pkgconfig:
+      - PKG_CONFIG_PATH
+    share/man:
+      - MANPATH
+
+  default:
+    enable:
+      - {{ module_system }}
+    use_view: false
+    roots:
+      {{ module_system }}: {{ module_root }}
+    {{ module_system }}:
+      hierarchy: []
+      hash_length: 0
+      hide_implicits: true
+      exclude_implicits: true
+      projections:
+        all: 'cse/{name}'
+{% if is_variant_b %}
+      # Expose the Cray externals as cse/* modules so users have a single
+      # consistent namespace regardless of whether the package was built by
+      # Spack or registered as an external.
+      include:
+        - cray-mpich
+        - cray-libsci
+{% if has_cray_pals %}
+        - cray-pals
+{% endif %}
+{% endif %}
+      all:
+        autoload: direct
+        environment:
+          set:
+            '{name}_ROOT': '{prefix}'
+            '{name}_DIR':  '{prefix}'
+            '{name}_HOME': '{prefix}'
+
+      hdf5:
+        suffixes:
+          '+mpi': 'mpi'
+          '~mpi': 'serial'
+        environment:
+          set:
+            HDF5_ROOT: '{prefix}'
+            HDF5_DIR:  '{prefix}'
+            HDF5_HOME: '{prefix}'
+
+      netcdf-c:
+        suffixes:
+          '+mpi': 'mpi'
+          '~mpi': 'serial'
+        environment:
+          set:
+            NETCDF_ROOT:   '{prefix}'
+            NETCDF_DIR:    '{prefix}'
+            NETCDF_HOME:   '{prefix}'
+            NETCDF_C_ROOT: '{prefix}'
+
+      netcdf-fortran:
+        suffixes:
+          '^netcdf-c +mpi': 'mpi'
+          '^netcdf-c ~mpi': 'serial'
+        environment:
+          set:
+            NETCDF_FORTRAN_ROOT: '{prefix}'
+            NETCDF_FORTRAN_DIR:  '{prefix}'
+
+      netcdf-cxx4:
+        suffixes:
+          '^netcdf-c +mpi': 'mpi'
+          '^netcdf-c ~mpi': 'serial'
+        environment:
+          set:
+            NETCDF_CXX_ROOT: '{prefix}'
+
+{% if is_variant_a %}
+      openmpi:
+        environment:
+          set:
+            MPI_HOME: '{prefix}'
+            MPI_ROOT: '{prefix}'
+            MPI_DIR:  '{prefix}'
+            OMPI_DIR: '{prefix}'
+{% else %}
+      cray-mpich:
+        environment:
+          set:
+            MPI_HOME:              '{prefix}'
+            MPI_ROOT:              '{prefix}'
+            MPICH_DIR:             '{prefix}'
+            CRAY_MPICH_PREFIX_DIR: '{prefix}'
+
+      cray-libsci:
+        environment:
+          set:
+            CRAY_LIBSCI_PREFIX_DIR: '{prefix}'
+            LIBSCI_BASE_DIR:        '{prefix}'
+
+{% if has_cray_pals %}
+      cray-pals:
+        environment:
+          set:
+            CRAY_PALS_PREFIX_DIR: '{prefix}'
+{% endif %}
+{% endif %}
