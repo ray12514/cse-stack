@@ -86,6 +86,9 @@ else
         fi
         # shellcheck source=/dev/null
         . "${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
+        echo "Stage 2: detecting system compilers for bootstrap..."
+        spack compiler find
+        spack compiler list
         spack install --no-checksum "gcc@${GCC_VERSION}" ~bootstrap +binutils
         GCC_HASH=$(spack find --format '{hash:7}' "gcc@${GCC_VERSION}" | head -n1)
         spack view --verbose copy "${BOOTSTRAP_PREFIX}" "/gcc@${GCC_VERSION}/${GCC_HASH}"

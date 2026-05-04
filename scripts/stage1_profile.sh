@@ -7,6 +7,9 @@
 #   DRY_RUN      — if "1", read-only commands (CI) run for real; write commands are skipped
 #   MOCK_PROFILE — if set, use this file as the profile instead of running Cluster Inspector
 set -euo pipefail
+export SPACK_DISABLE_LOCAL_CONFIG=1
+export SPACK_USER_CACHE_PATH="${SHARED_PATH:-/tmp}/cse/cache/bootstrap"
+export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
 
 : "${REPO_ROOT:?stage1_profile.sh must be run via deploy.sh (REPO_ROOT not set)}"
 
