@@ -22,7 +22,9 @@ modules:
     roots:
       {{ module_system }}: {{ module_root }}
     {{ module_system }}:
+{% if module_system == "lmod" %}
       hierarchy: []
+{% endif %}
       hash_length: 0
       hide_implicits: true
       exclude_implicits: true
