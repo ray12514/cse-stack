@@ -31,7 +31,9 @@ from profile import SystemProfile  # noqa: E402
 
 
 def _build_context(profile: SystemProfile, variant: str,
-                   shared_path: str, release: str) -> dict:
+                   shared_path: str, release: str,
+                   gcc_version_override: str = "",
+                   cse_group: str = "") -> dict:
     """Build the Jinja2 template context from a system profile + deploy args."""
     ctx: dict = {
         "variant": variant,
@@ -47,8 +49,10 @@ def _build_context(profile: SystemProfile, variant: str,
         "module_system": profile.module_system(),
         # Scheduler
         "scheduler_type": profile.scheduler_type(),
-        # Variant A
-        "gcc_version": profile.variant_a_gcc_version(),
+        # Variant A — GCC version: runtime override > env var > profile default
+        "gcc_version": (gcc_version_override
+                        or os.environ.get("GCC_VERSION", "")
+                        or profile.variant_a_gcc_version()),
         # Variant B
         "is_cray": profile.is_cray(),
         "prgenv_gcc_version": profile.prgenv_gcc_version(),
@@ -69,8 +73,9 @@ def _build_context(profile: SystemProfile, variant: str,
     ctx["views_root"] = f"{shared_path}/cse/{release}/{variant_slug}/views"
     ctx["bootstrap_prefix"] = (
         f"{shared_path}/cse/{release}/{variant_slug}/bootstrap"
-        f"/gcc-{profile.variant_a_gcc_version()}"
+        f"/gcc-{ctx['gcc_version']}"
     )
+    ctx["cse_group"] = cse_group or os.environ.get("CSE_GROUP", "cse")
     return ctx
 
 
@@ -116,7 +121,9 @@ def render_template(template_path: str, profile_path: Optional[str],
         print(f"ERROR: template not found: {templates_dir / tpl_name}", file=sys.stderr)
         return 1
 
-    ctx = _build_context(profile, variant, shared_path, release)
+    ctx = _build_context(profile, variant, shared_path, release,
+                         gcc_version_override=os.environ.get("GCC_VERSION", ""),
+                         cse_group=os.environ.get("CSE_GROUP", "cse"))
     rendered = template.render(**ctx)
 
     if dry_run:

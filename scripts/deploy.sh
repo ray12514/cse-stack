@@ -10,6 +10,8 @@
 #                       --shared-path <path>  \
 #                       [--dry-run]           \
 #                       [--from-stage N]      \
+#                       [--gcc-version <ver>] \
+#                       [--group <name>]      \
 #                       [--module-system {lmod|tcl}]
 #
 # Options:
@@ -19,6 +21,10 @@
 #   --dry-run         Print every command that would run; render template YAML;
 #                     exit 0 without modifying any state.
 #   --from-stage N    Skip stages 1 through N-1 (assumes their outputs exist).
+#   --gcc-version     GCC version for Variant A (default: 13.2.0).
+#                     Ignored for Variant B; that version comes from PrgEnv-gnu
+#                     via Stage 1 (Cluster Inspector).
+#   --group           Unix group that owns the shared install tree (default: cse).
 #   --module-system   Override auto-detected module system (lmod or tcl).
 #   --mock-profile    Path to a mock Cluster Inspector YAML profile.
 #                     Useful for testing Variant B on a non-Cray host.
@@ -38,18 +44,22 @@ RELEASE=""
 SHARED_PATH=""
 DRY_RUN=0
 FROM_STAGE=1
+GCC_VERSION_OVERRIDE=""
+CSE_GROUP_OVERRIDE=""
 MODULE_SYSTEM_OVERRIDE=""
 MOCK_PROFILE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --variant)        VARIANT="$2";               shift 2 ;;
-        --release)        RELEASE="$2";               shift 2 ;;
-        --shared-path)    SHARED_PATH="$2";           shift 2 ;;
-        --dry-run)        DRY_RUN=1;                  shift   ;;
-        --from-stage)     FROM_STAGE="$2";            shift 2 ;;
+        --variant)        VARIANT="$2";                shift 2 ;;
+        --release)        RELEASE="$2";                shift 2 ;;
+        --shared-path)    SHARED_PATH="$2";            shift 2 ;;
+        --dry-run)        DRY_RUN=1;                   shift   ;;
+        --from-stage)     FROM_STAGE="$2";             shift 2 ;;
+        --gcc-version)    GCC_VERSION_OVERRIDE="$2";   shift 2 ;;
+        --group)          CSE_GROUP_OVERRIDE="$2";     shift 2 ;;
         --module-system)  MODULE_SYSTEM_OVERRIDE="$2"; shift 2 ;;
-        --mock-profile)   MOCK_PROFILE="$2";          shift 2 ;;
+        --mock-profile)   MOCK_PROFILE="$2";           shift 2 ;;
         -h|--help)
             sed -n '3,30p' "${BASH_SOURCE[0]}"
             exit 0
@@ -99,6 +109,11 @@ export CSE_SHARED_PATH="${SHARED_PATH}"
 export CSE_VARIANT="${VARIANT}"
 export DRY_RUN
 export MOCK_PROFILE
+# GCC_VERSION is used by stage2_spack.sh (bootstrap) and the render context.
+# Variant B ignores this; it takes GCC from PrgEnv-gnu via Cluster Inspector.
+export GCC_VERSION="${GCC_VERSION_OVERRIDE:-${GCC_VERSION:-13.2.0}}"
+# CSE_GROUP is the Unix group owning the shared install tree.
+export CSE_GROUP="${CSE_GROUP_OVERRIDE:-${CSE_GROUP:-cse}}"
 
 # ------------------------------------------------------------------
 # Auto-detect module system (or use override)
@@ -126,6 +141,10 @@ echo " CSE Deploy"
 echo "  variant      : ${VARIANT}"
 echo "  release      : ${RELEASE}"
 echo "  shared-path  : ${SHARED_PATH}"
+echo "  group        : ${CSE_GROUP}"
+if [[ "${VARIANT}" == "v1-minimal-externals" ]]; then
+    echo "  gcc version  : ${GCC_VERSION}"
+fi
 echo "  module system: ${MODULE_SYSTEM}"
 if [[ ${DRY_RUN} == 1 ]]; then
     echo "  mode         : DRY-RUN (no changes will be made)"
