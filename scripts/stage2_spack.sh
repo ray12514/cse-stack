@@ -63,7 +63,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run]   git clone --depth 1 --branch ${SPACK_VERSION} https://github.com/spack/spack.git ${BOOTSTRAP_DIR}/spack"
     echo "[dry-run]   . ${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
     echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils"
-    echo "[dry-run]   spack view copy ${BOOTSTRAP_PREFIX} /<hash>"
+    echo "[dry-run]   spack view copy -f ${BOOTSTRAP_PREFIX} /<hash>"
     echo "[dry-run]   write ${VARIANT_DIR}/gcc-bootstrap.yaml (gcc@${GCC_VERSION} external)"
 else
     # Warn if the install root is not owned by the expected group.
@@ -133,7 +133,10 @@ else
         fi
         # Select the installed package by hash only — `/gcc@version/hash` is
         # fragile across Spack releases; `/<hash>` is the canonical form.
-        spack view --verbose copy "${BOOTSTRAP_PREFIX}" "/${GCC_HASH}"
+        # -f: force overwrite of conflicting files (e.g. share/info/dir,
+        # the GNU info directory index that every package provides — see
+        # spack/spack#9029).
+        spack view --verbose copy -f "${BOOTSTRAP_PREFIX}" "/${GCC_HASH}"
         echo "Stage 2: bootstrap GCC installed at ${BOOTSTRAP_PREFIX}"
 
         # Register the freshly-built GCC as the primary compiler from the
