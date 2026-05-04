@@ -18,6 +18,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 try:
     from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateNotFound
@@ -82,8 +83,6 @@ def _build_context(profile: SystemProfile, variant: str,
 def render_template(template_path: str, profile_path: Optional[str],
                     variant: str, shared_path: str, release: str,
                     dry_run: bool = False, output_path: Optional[str] = None) -> int:
-    from typing import Optional as Opt  # local import to avoid top-level clash
-
     repo_root = Path(__file__).parent.parent.parent
     templates_dir = repo_root / "templates"
 
