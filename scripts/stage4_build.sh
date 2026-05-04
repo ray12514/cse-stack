@@ -54,7 +54,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run] Stage 4: would run:"
     echo "[dry-run]   spack env activate -d ${VARIANT_ENV_DIR}"
     echo "[dry-run]   spack concretize --fresh"
-    echo "[dry-run]   spack install --fail-fast"
+    echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --fail-fast"
     if [[ -n "${BUILDCACHE_URI:-}" ]]; then
         echo "[dry-run]   spack buildcache push --unsigned ${BUILDCACHE_URI}"
     fi
@@ -139,7 +139,7 @@ echo "Stage 4: concretizing..."
 spack concretize --fresh
 
 echo "Stage 4: installing (this will take a while on first run)..."
-spack install --fail-fast
+spack install -j "${SPACK_INSTALL_JOBS:-4}" --fail-fast
 
 if [[ -n "${BUILDCACHE_URI:-}" ]]; then
     echo "Stage 4: pushing installed packages to build cache at ${BUILDCACHE_URI}..."

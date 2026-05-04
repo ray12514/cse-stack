@@ -13,7 +13,7 @@ config:
 
   source_cache: {{ SHARED_PATH }}/cse/cache/source
   misc_cache:   {{ SHARED_PATH }}/cse/cache/misc
-  build_jobs:   16
+  build_jobs:   {{ make_jobs | default(16) }}
 
   shared_linking:
     type: rpath

@@ -12,6 +12,8 @@
 #                       [--from-stage N]           \
 #                       [--gcc-version <ver>]      \
 #                       [--mpich-version <ver>]    \
+#                       [--jobs <n>]               \
+#                       [--make-jobs <n>]          \
 #                       [--group <name>]           \
 #                       [--mirror-path <path>]     \
 #                       [--buildcache-uri <uri>]   \
@@ -30,6 +32,11 @@
 #   --mpich-version   Override auto-detected MPICH version for v2-mpich.
 #                     Normally inferred from cray-mpich series via Cluster Inspector
 #                     (cray-mpich 8.x → 3.4.3; 9.x → 4.2.2).
+#   --jobs N          Number of packages to build in parallel (default: 4).
+#                     Conservative on shared login nodes; raise on dedicated builders.
+#                     Wired to `spack install -j N` in stages 2 and 4.
+#   --make-jobs N     Threads per package build (default: nproc/2, clamped to [4,16]).
+#                     Wired to `config:build_jobs` via templates/config.yaml.j2.
 #   --group           Unix group that owns the shared install tree (default: installer's group).
 #   --mirror-path     Path to a local Spack source mirror (file:// or directory path).
 #                     Use scripts/mirror_fetch.sh on an internet-connected host to
@@ -58,6 +65,8 @@ DRY_RUN=0
 FROM_STAGE=1
 GCC_VERSION_OVERRIDE=""
 MPICH_VERSION_OVERRIDE=""
+INSTALL_JOBS_OVERRIDE=""
+MAKE_JOBS_OVERRIDE=""
 CSE_GROUP_OVERRIDE=""
 MIRROR_PATH=""
 BUILDCACHE_URI=""
@@ -73,13 +82,15 @@ while [[ $# -gt 0 ]]; do
         --from-stage)     FROM_STAGE="$2";             shift 2 ;;
         --gcc-version)    GCC_VERSION_OVERRIDE="$2";    shift 2 ;;
         --mpich-version)  MPICH_VERSION_OVERRIDE="$2"; shift 2 ;;
+        --jobs)           INSTALL_JOBS_OVERRIDE="$2";  shift 2 ;;
+        --make-jobs)      MAKE_JOBS_OVERRIDE="$2";     shift 2 ;;
         --group)          CSE_GROUP_OVERRIDE="$2";     shift 2 ;;
         --mirror-path)    MIRROR_PATH="$2";            shift 2 ;;
         --buildcache-uri) BUILDCACHE_URI="$2";         shift 2 ;;
         --module-system)  MODULE_SYSTEM_OVERRIDE="$2"; shift 2 ;;
         --mock-profile)   MOCK_PROFILE="$2";           shift 2 ;;
         -h|--help)
-            sed -n '3,32p' "${BASH_SOURCE[0]}"
+            sed -n '3,49p' "${BASH_SOURCE[0]}"
             exit 0
             ;;
         *)
@@ -146,6 +157,17 @@ export GCC_VERSION="${GCC_VERSION_OVERRIDE:-${GCC_VERSION:-13.3.0}}"
 if [[ -n "${MPICH_VERSION_OVERRIDE}" ]]; then
     export MPICH_VERSION="${MPICH_VERSION_OVERRIDE}"
 fi
+# Parallelism knobs.
+#   SPACK_INSTALL_JOBS — `spack install -j N` (packages built in parallel).
+#   SPACK_MAKE_JOBS    — config:build_jobs in config.yaml (threads per package).
+# Default install jobs to 4 (conservative on shared login nodes); default make
+# jobs to nproc/2 clamped to [4,16] so a single package can saturate cores
+# without overwhelming the box when combined with parallel installs.
+DEFAULT_MAKE_JOBS=$(( $(nproc 2>/dev/null || echo 8) / 2 ))
+DEFAULT_MAKE_JOBS=$(( DEFAULT_MAKE_JOBS < 4 ? 4 : DEFAULT_MAKE_JOBS ))
+DEFAULT_MAKE_JOBS=$(( DEFAULT_MAKE_JOBS > 16 ? 16 : DEFAULT_MAKE_JOBS ))
+export SPACK_INSTALL_JOBS="${INSTALL_JOBS_OVERRIDE:-${SPACK_INSTALL_JOBS:-4}}"
+export SPACK_MAKE_JOBS="${MAKE_JOBS_OVERRIDE:-${SPACK_MAKE_JOBS:-${DEFAULT_MAKE_JOBS}}}"
 # CSE_GROUP is the Unix group owning the shared install tree.
 # Defaults to the installer's own primary group so personal builds work out of
 # the box.  Pass --group <name> to target a shared system group (e.g. cse).
@@ -188,6 +210,8 @@ if [[ "${VARIANT}" == "v2-mpich" ]]; then
     echo "  mpich version: ${MPICH_VERSION:-auto-detect from profile}"
 fi
 echo "  module system: ${MODULE_SYSTEM}"
+echo "  install jobs : ${SPACK_INSTALL_JOBS} (parallel package builds)"
+echo "  make jobs    : ${SPACK_MAKE_JOBS} (threads per package)"
 if [[ -n "${MIRROR_PATH}" ]]; then
     echo "  mirror       : ${MIRROR_PATH}"
 fi
