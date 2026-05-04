@@ -3,8 +3,8 @@
 # Writes the profile to profiles/<hostname>-<timestamp>.yaml and exports PROFILE_FILE.
 #
 # Environment:
-#   REPO_ROOT   — path to the cse-stack repository root (set by deploy.sh)
-#   DRY_RUN     — if "1", print what would happen and exit 0 without writing files
+#   REPO_ROOT    — path to the cse-stack repository root (set by deploy.sh)
+#   DRY_RUN      — if "1", read-only commands (CI) run for real; write commands are skipped
 #   MOCK_PROFILE — if set, use this file as the profile instead of running Cluster Inspector
 set -euo pipefail
 
@@ -13,16 +13,34 @@ set -euo pipefail
 PROFILES_DIR="${REPO_ROOT}/profiles"
 HOSTNAME_SLUG=$(hostname -s 2>/dev/null || echo "unknown")
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-PROFILE_OUT="${PROFILES_DIR}/${HOSTNAME_SLUG}-${TIMESTAMP}.yaml"
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    echo "[dry-run] Stage 1: would run: clusterinspector profile --local --format yaml --include-modules"
-    echo "[dry-run]           output  : ${PROFILE_OUT}"
+    # Mock profile takes precedence — useful for testing Variant B off-Cray.
     if [[ -n "${MOCK_PROFILE:-}" ]]; then
-        echo "[dry-run]           using mock profile: ${MOCK_PROFILE}"
+        echo "[dry-run] Stage 1: using mock profile: ${MOCK_PROFILE}"
         export PROFILE_FILE="${MOCK_PROFILE}"
+        return 0 2>/dev/null || exit 0
+    fi
+
+    # Cluster Inspector is read-only — run it for real so downstream stages
+    # render templates with actual system data rather than stub defaults.
+    if command -v clusterinspector &>/dev/null; then
+        PROFILE_OUT="${PROFILES_DIR}/${HOSTNAME_SLUG}-dryrun-${TIMESTAMP}.yaml"
+        echo "[dry-run] Stage 1: clusterinspector is read-only — running for real"
+        echo "[dry-run]           output: ${PROFILE_OUT}"
+        mkdir -p "${PROFILES_DIR}"
+        clusterinspector profile --local --format yaml --include-modules \
+            > "${PROFILE_OUT}"
+        echo ""
+        echo "--- Cluster Inspector profile (actual system data) ---"
+        cat "${PROFILE_OUT}"
+        echo "------------------------------------------------------"
+        echo ""
+        export PROFILE_FILE="${PROFILE_OUT}"
     else
-        # In dry-run without a mock, use an empty stub so later stages can still render
+        echo "[dry-run] Stage 1: clusterinspector not on PATH — templates will render with stub defaults"
+        echo "[dry-run]           install it with: pip install -e /path/to/clusterinspector"
+        echo "[dry-run]           or pass --mock-profile to supply a pre-captured profile"
         export PROFILE_FILE=""
     fi
     return 0 2>/dev/null || exit 0
@@ -46,6 +64,7 @@ fi
 mkdir -p "${PROFILES_DIR}"
 
 echo "Stage 1: collecting system profile..."
+PROFILE_OUT="${PROFILES_DIR}/${HOSTNAME_SLUG}-${TIMESTAMP}.yaml"
 clusterinspector profile --local --format yaml --include-modules \
     > "${PROFILE_OUT}"
 
