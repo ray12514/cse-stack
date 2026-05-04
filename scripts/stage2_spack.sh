@@ -15,12 +15,14 @@ set -euo pipefail
 SPACK_VERSION="${SPACK_VERSION:-v1.1.1}"
 SPACK_SITE="${SHARED_PATH}/cse/spack-site"
 # Prevent Spack from reading ~/.spack/ config or /etc/spack/ site config,
-# and redirect the user cache out of the home directory.
-# All three vars are required: DISABLE_LOCAL_CONFIG blocks config scopes but
-# not the cache; USER_CACHE_PATH redirects the cache; SYSTEM_CONFIG_PATH
-# blocks /etc/spack/ site-wide config that HPC admins sometimes pre-populate.
+# and redirect both the user cache and user config out of the home directory.
+# DISABLE_LOCAL_CONFIG blocks config scopes; USER_CACHE_PATH redirects the
+# cache; USER_CONFIG_PATH redirects the user-scope config (where `spack
+# compiler add` writes compilers.yaml); SYSTEM_CONFIG_PATH blocks /etc/spack/
+# site-wide config that HPC admins sometimes pre-populate.
 export SPACK_DISABLE_LOCAL_CONFIG=1
 export SPACK_USER_CACHE_PATH="${SHARED_PATH}/cse/cache/bootstrap"
+export SPACK_USER_CONFIG_PATH="${SHARED_PATH}/cse/${CSE_RELEASE}/spack-user-config"
 export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
 VARIANT_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}"
 
@@ -87,22 +89,28 @@ else
         # shellcheck source=/dev/null
         . "${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
 
-        # ---- Bootstrap compiler detection (minimal, env-scoped) ----
-        # Find the highest-versioned GCC in PATH without doing a broad module scan.
-        # Prefers versioned binaries (gcc-13, gcc-12, …) over the plain `gcc` symlink.
+        # ---- Bootstrap compiler detection ----
+        # Find the highest-versioned GCC in PATH by walking PATH directly.
+        # This is more reliable than `compgen -c` (which depends on shell
+        # command-completion state) and prefers versioned binaries
+        # (gcc-13, gcc-12, …) over the plain `gcc` symlink.
         _find_newest_gcc() {
             local best="" best_ver=0
-            local candidate bin_path ver
-            for candidate in $(compgen -c gcc 2>/dev/null | grep -E '^gcc(-[0-9]+)?$' | sort -u); do
-                bin_path=$(command -v "${candidate}" 2>/dev/null) || continue
-                ver=$("${bin_path}" -dumpversion 2>/dev/null | cut -d. -f1) || continue
-                if [[ "${ver}" =~ ^[0-9]+$ ]] && (( ver > best_ver )); then
-                    best_ver=${ver}
-                    best=${bin_path}
-                fi
+            local dir bin ver
+            for dir in $(echo "$PATH" | tr ':' ' '); do
+                for bin in "$dir"/gcc "$dir"/gcc-[0-9]*; do
+                    [[ -x "$bin" ]] || continue
+                    ver=$("$bin" -dumpversion 2>/dev/null | cut -d. -f1)
+                    [[ "$ver" =~ ^[0-9]+$ ]] || continue
+                    (( ver > best_ver )) && { best_ver=$ver; best=$bin; }
+                done
             done
-            echo "${best}"
+            echo "$best"
         }
+
+        # Ensure the redirected user-config dir exists before any
+        # `spack compiler` command tries to write compilers.yaml to it.
+        mkdir -p "${SPACK_USER_CONFIG_PATH}/linux"
 
         BOOTSTRAP_GCC=$(_find_newest_gcc)
         if [[ -z "${BOOTSTRAP_GCC}" ]]; then
@@ -110,8 +118,9 @@ else
             exit 1
         fi
         echo "Stage 2: registering bootstrap compiler: ${BOOTSTRAP_GCC} ($(${BOOTSTRAP_GCC} -dumpversion))"
-        # --scope=env writes to the environment's own compilers.yaml — never touches ~/.spack
-        spack compiler add --scope=env "$(dirname "${BOOTSTRAP_GCC}")"
+        # Writes compilers.yaml under SPACK_USER_CONFIG_PATH (redirected
+        # away from ~/.spack), so no --scope flag is required.
+        spack compiler add "$(dirname "${BOOTSTRAP_GCC}")"
         spack compiler list
         # ---- End bootstrap compiler detection ----
 
@@ -120,12 +129,13 @@ else
         spack view --verbose copy "${BOOTSTRAP_PREFIX}" "/gcc@${GCC_VERSION}/${GCC_HASH}"
         echo "Stage 2: bootstrap GCC installed at ${BOOTSTRAP_PREFIX}"
 
-        # Register the freshly-built GCC as the primary compiler (env-scoped).
-        # Downstream stages (stage 4) will concretize using this version, not the
-        # system GCC that was only needed to compile it.
+        # Register the freshly-built GCC as the primary compiler. Downstream
+        # stages (stage 4) will concretize using this version, not the system
+        # GCC that was only needed to compile it. Writes to the redirected
+        # SPACK_USER_CONFIG_PATH, never to ~/.spack.
         echo "Stage 2: registering gcc@${GCC_VERSION} as primary compiler..."
         spack load "gcc@${GCC_VERSION}"
-        spack compiler add --scope=env "$(spack location -i "gcc@${GCC_VERSION}")/bin"
+        spack compiler add "$(spack location -i "gcc@${GCC_VERSION}")/bin"
         spack compiler list
     fi
 fi
