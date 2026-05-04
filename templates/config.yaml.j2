@@ -1,0 +1,20 @@
+config:
+  install_tree:
+    root: {{ store_root }}
+    projections:
+      all: '{architecture}/{compiler.name}-{compiler.version}/{name}-{version}-{hash:7}'
+    # Pad install paths so binaries can be relocated to longer prefixes when
+    # transferred to another system (e.g. air-gapped targets).  Spack rewrites
+    # the placeholder characters at install time; users never see the padding.
+    padded_length: 256
+
+  build_stage:
+    - $tempdir/$user/spack-stage
+
+  source_cache: {{ SHARED_PATH }}/cse/cache/source
+  misc_cache:   {{ SHARED_PATH }}/cse/cache/misc
+  build_jobs:   16
+
+  shared_linking:
+    type: rpath
+    bind: true

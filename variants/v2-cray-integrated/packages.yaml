@@ -1,0 +1,79 @@
+packages:
+  all:
+    target: [zen3]    # TODO: confirm against actual Cray node CPU (Stage 1)
+    providers:
+      mpi:       [cray-mpich]
+      blas:      [cray-libsci]
+      lapack:    [cray-libsci]
+      scalapack: [cray-libsci]
+    require:
+      - "%gcc@12.3.0"    # TODO: confirm GCC version inside PrgEnv-gnu (Stage 1)
+    permissions:
+      read:  world
+      write: group
+      group: cse
+
+  # OS-level externals (same as Variant A)
+  openssl:
+    buildable: false
+    externals:
+      - spec: openssl@3.0.7
+        prefix: /usr
+  curl:
+    buildable: false
+    externals:
+      - spec: curl@7.85.0
+        prefix: /usr
+  glibc:
+    buildable: false
+    externals:
+      - spec: glibc@2.34
+        prefix: /usr
+  perl:
+    buildable: false
+    externals:
+      - spec: perl@5.32.1
+        prefix: /usr
+  python:
+    externals:
+      - spec: python@3.11.5
+        prefix: /usr
+
+  # Cray substrate — versions filled in by Stage 3 (render from system profile)
+  gcc:    # TODO: confirm GCC version from PrgEnv-gnu on target system (Stage 1)
+    buildable: false
+    externals:
+      - spec: gcc@12.3.0 languages='c,c++,fortran'
+        prefix: /opt/cray/pe/gcc/12.3.0/snos
+        modules:
+          - PrgEnv-gnu
+          - gcc/12.3.0
+        extra_attributes:
+          compilers:
+            c:       /opt/cray/pe/gcc/12.3.0/snos/bin/gcc
+            cxx:     /opt/cray/pe/gcc/12.3.0/snos/bin/g++
+            fortran: /opt/cray/pe/gcc/12.3.0/snos/bin/gfortran
+
+  cray-mpich:    # TODO: confirm version and prefix from Stage 1
+    buildable: false
+    externals:
+      - spec: cray-mpich@8.1.30 %gcc@12.3.0
+        modules: [cray-mpich/8.1.30]
+        prefix: /opt/cray/pe/mpich/8.1.30/ofi/gnu/12.3
+
+  cray-libsci:    # TODO: confirm version and prefix from Stage 1
+    buildable: false
+    externals:
+      - spec: cray-libsci@23.12.5
+        modules: [cray-libsci/23.12.5]
+        prefix: /opt/cray/pe/libsci/23.12.5/gnu/12.3
+
+  # cray-pals provides mpiexec on PBS-based Cray systems.
+  # On Slurm Cray systems srun is used; remove this block in that case.
+  # TODO: confirm presence on target Cray system (Stage 1 will detect this)
+  cray-pals:
+    buildable: false
+    externals:
+      - spec: cray-pals@1.4.0
+        modules: [cray-pals/1.4.0]
+        prefix: /opt/cray/pe/pals/1.4.0
