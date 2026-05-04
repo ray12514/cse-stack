@@ -3,6 +3,10 @@ spack:
     - ./packages.yaml
     - ./config.yaml
     - ./modules.yaml
+    # Written by scripts/stage2_spack.sh after GCC is bootstrapped; the
+    # rendered template (templates/spack.yaml.j2) only emits this entry
+    # when the file already exists at deploy time.
+    - ../gcc-bootstrap.yaml
 
   view:
     mpi:

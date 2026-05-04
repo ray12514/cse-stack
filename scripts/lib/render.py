@@ -88,6 +88,13 @@ def _build_context(profile: SystemProfile, variant: str,
         f"/gcc-{gcc_version}"
     )
     ctx["cse_group"] = cse_group or os.environ.get("CSE_GROUP", "cse")
+    # gcc-bootstrap.yaml is written by stage2 next to the env dir. The
+    # environment's spack.yaml conditionally includes it — render-time check
+    # so we don't emit an `include:` entry that Spack will fail to find.
+    variant_dir = f"{shared_path}/cse/{release}/{variant}"
+    ctx["gcc_bootstrap_yaml_exists"] = os.path.exists(
+        os.path.join(variant_dir, "gcc-bootstrap.yaml")
+    )
     return ctx
 
 

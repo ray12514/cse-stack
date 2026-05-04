@@ -64,6 +64,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run]   . ${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
     echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils"
     echo "[dry-run]   spack view copy ${BOOTSTRAP_PREFIX} /<hash>"
+    echo "[dry-run]   write ${VARIANT_DIR}/gcc-bootstrap.yaml (gcc@${GCC_VERSION} external)"
 else
     # Warn if the install root is not owned by the expected group.
     # This is advisory — a mismatch on a personal workdir is fine.
@@ -146,16 +147,16 @@ else
         spack compiler add "${BOOTSTRAP_PREFIX}/bin"
         spack compiler list
 
-        # Record the freshly-built GCC as an external in the environment's
-        # packages.yaml so downstream stages reuse it (faster, no rebuild).
-        # Idempotent: only appends if the file exists and the entry isn't
-        # already present.
-        PKGS_YAML="${VARIANT_DIR}/packages.yaml"
-        if [[ -f "${PKGS_YAML}" ]] && ! grep -q "gcc@${GCC_VERSION}" "${PKGS_YAML}"; then
-            echo "Stage 2: adding gcc@${GCC_VERSION} external to ${PKGS_YAML}..."
-            cat >> "${PKGS_YAML}" <<EOF
-
-  # Bootstrap GCC built by stage2 — added automatically
+        # Record the freshly-built GCC as an external in a dedicated include
+        # file alongside the environment. spack.yaml's `include:` picks this
+        # up; stage 4 re-renders of packages.yaml/config.yaml/modules.yaml
+        # leave this file untouched. `cat >` (overwrite) is intentional —
+        # makes re-runs idempotent and lets the caller change BOOTSTRAP_PREFIX.
+        GCC_BOOTSTRAP_YAML="${VARIANT_DIR}/gcc-bootstrap.yaml"
+        if ! grep -q "gcc@${GCC_VERSION}" "${GCC_BOOTSTRAP_YAML}" 2>/dev/null; then
+            echo "Stage 2: writing gcc@${GCC_VERSION} external to ${GCC_BOOTSTRAP_YAML}..."
+            cat > "${GCC_BOOTSTRAP_YAML}" <<EOF
+packages:
   gcc:
     externals:
     - spec: gcc@${GCC_VERSION} languages='c,c++,fortran'
