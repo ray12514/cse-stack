@@ -86,13 +86,47 @@ else
         fi
         # shellcheck source=/dev/null
         . "${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
-        echo "Stage 2: detecting system compilers for bootstrap..."
-        spack compiler find
+
+        # ---- Bootstrap compiler detection (minimal, env-scoped) ----
+        # Find the highest-versioned GCC in PATH without doing a broad module scan.
+        # Prefers versioned binaries (gcc-13, gcc-12, …) over the plain `gcc` symlink.
+        _find_newest_gcc() {
+            local best="" best_ver=0
+            local candidate bin_path ver
+            for candidate in $(compgen -c gcc 2>/dev/null | grep -E '^gcc(-[0-9]+)?$' | sort -u); do
+                bin_path=$(command -v "${candidate}" 2>/dev/null) || continue
+                ver=$("${bin_path}" -dumpversion 2>/dev/null | cut -d. -f1) || continue
+                if [[ "${ver}" =~ ^[0-9]+$ ]] && (( ver > best_ver )); then
+                    best_ver=${ver}
+                    best=${bin_path}
+                fi
+            done
+            echo "${best}"
+        }
+
+        BOOTSTRAP_GCC=$(_find_newest_gcc)
+        if [[ -z "${BOOTSTRAP_GCC}" ]]; then
+            echo "ERROR: No GCC found in PATH. Cannot register a bootstrap compiler." >&2
+            exit 1
+        fi
+        echo "Stage 2: registering bootstrap compiler: ${BOOTSTRAP_GCC} ($(${BOOTSTRAP_GCC} -dumpversion))"
+        # --scope=env writes to the environment's own compilers.yaml — never touches ~/.spack
+        spack compiler add --scope=env "$(dirname "${BOOTSTRAP_GCC}")"
         spack compiler list
+        # ---- End bootstrap compiler detection ----
+
         spack install --no-checksum "gcc@${GCC_VERSION}" ~bootstrap +binutils
         GCC_HASH=$(spack find --format '{hash:7}' "gcc@${GCC_VERSION}" | head -n1)
         spack view --verbose copy "${BOOTSTRAP_PREFIX}" "/gcc@${GCC_VERSION}/${GCC_HASH}"
         echo "Stage 2: bootstrap GCC installed at ${BOOTSTRAP_PREFIX}"
+
+        # Register the freshly-built GCC as the primary compiler (env-scoped).
+        # Downstream stages (stage 4) will concretize using this version, not the
+        # system GCC that was only needed to compile it.
+        echo "Stage 2: registering gcc@${GCC_VERSION} as primary compiler..."
+        spack load "gcc@${GCC_VERSION}"
+        spack compiler add --scope=env "$(spack location -i "gcc@${GCC_VERSION}")/bin"
+        spack compiler list
     fi
 fi
 
