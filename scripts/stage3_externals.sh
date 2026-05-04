@@ -6,6 +6,9 @@
 #   PROFILE_FILE                           — path to Cluster Inspector YAML (Stage 1 output)
 #   DRY_RUN                                — "1" for dry-run
 set -euo pipefail
+export SPACK_DISABLE_LOCAL_CONFIG=1
+export SPACK_USER_CACHE_PATH="${SHARED_PATH:-/tmp}/cse/cache/bootstrap"
+export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
 
 : "${SHARED_PATH:?}"
 : "${CSE_RELEASE:?}"

@@ -15,3 +15,6 @@ config:
   shared_linking:
     type: rpath
     bind: true
+
+bootstrap:
+  root: $SHARED_PATH/cse/$CSE_RELEASE/spack-bootstrap
