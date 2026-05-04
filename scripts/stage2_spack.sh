@@ -54,7 +54,7 @@ fi
 # Bootstrap GCC (both variants build their own GCC via a throwaway
 # spack-bootstrap instance so GCC is not entangled with the CSE store)
 # ------------------------------------------------------------------
-GCC_VERSION="${GCC_VERSION:-13.2.0}"
+GCC_VERSION="${GCC_VERSION:-13.3.0}"
 BOOTSTRAP_DIR="${VARIANT_DIR}/spack-bootstrap"
 BOOTSTRAP_PREFIX="${VARIANT_DIR}/bootstrap/gcc-${GCC_VERSION}"
 

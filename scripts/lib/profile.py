@@ -172,7 +172,7 @@ class SystemProfile:
 
     def variant_a_gcc_version(self) -> str:
         # Default; override at deploy time with --gcc-version flag on deploy.sh.
-        return "13.2.0"
+        return "13.3.0"
 
     # ------------------------------------------------------------------
     # Variant B: Cray substrate

@@ -24,7 +24,9 @@
 #   --dry-run         Print every command that would run; render template YAML;
 #                     exit 0 without modifying any state.
 #   --from-stage N    Skip stages 1 through N-1 (assumes their outputs exist).
-#   --gcc-version     Spack GCC version to bootstrap (default: 13.2.0).
+#   --gcc-version     Spack GCC version to bootstrap (default: 13.3.0).
+#                     gcc@13.2.0 is deprecated upstream; 13.3.0 is the current
+#                     supported 13.x release.
 #   --mpich-version   Override auto-detected MPICH version for v2-mpich.
 #                     Normally inferred from cray-mpich series via Cluster Inspector
 #                     (cray-mpich 8.x → 3.4.3; 9.x → 4.2.2).
@@ -77,7 +79,7 @@ while [[ $# -gt 0 ]]; do
         --module-system)  MODULE_SYSTEM_OVERRIDE="$2"; shift 2 ;;
         --mock-profile)   MOCK_PROFILE="$2";           shift 2 ;;
         -h|--help)
-            sed -n '3,30p' "${BASH_SOURCE[0]}"
+            sed -n '3,32p' "${BASH_SOURCE[0]}"
             exit 0
             ;;
         *)
@@ -138,7 +140,7 @@ export MIRROR_PATH
 export BUILDCACHE_URI
 # GCC_VERSION is used by stage2_spack.sh (bootstrap) and the render context.
 # Both variants now bootstrap GCC from Spack.
-export GCC_VERSION="${GCC_VERSION_OVERRIDE:-${GCC_VERSION:-13.2.0}}"
+export GCC_VERSION="${GCC_VERSION_OVERRIDE:-${GCC_VERSION:-13.3.0}}"
 # MPICH_VERSION: explicit override for v2-mpich; when unset render.py auto-detects
 # from cray-mpich series via Cluster Inspector (8.x→3.4.3, 9.x→4.2.2).
 if [[ -n "${MPICH_VERSION_OVERRIDE}" ]]; then

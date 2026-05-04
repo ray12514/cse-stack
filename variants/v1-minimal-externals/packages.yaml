@@ -4,7 +4,7 @@ packages:
     providers:
       mpi: [openmpi]
     require:
-      - "%gcc@13.2.0"    # override at deploy time with --gcc-version
+      - "%gcc@13.3.0"    # override at deploy time with --gcc-version
     permissions:
       read:  world
       write: group
@@ -39,12 +39,12 @@ packages:
   gcc:
     buildable: false
     externals:
-      - spec: gcc@13.2.0 languages='c,c++,fortran'
-        prefix: $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.2.0
+      - spec: gcc@13.3.0 languages='c,c++,fortran'
+        prefix: $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.3.0
         extra_attributes:
           compilers:
-            c:       $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.2.0/bin/gcc
-            cxx:     $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.2.0/bin/g++
-            fortran: $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.2.0/bin/gfortran
+            c:       $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.3.0/bin/gcc
+            cxx:     $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.3.0/bin/g++
+            fortran: $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.3.0/bin/gfortran
           extra_rpaths:
-            - $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.2.0/lib64
+            - $SHARED_PATH/cse/$CSE_RELEASE/v1-minimal/bootstrap/gcc-13.3.0/lib64
