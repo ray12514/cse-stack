@@ -14,6 +14,9 @@ set -euo pipefail
 
 SPACK_VERSION="${SPACK_VERSION:-v1.1.1}"
 SPACK_SITE="${SHARED_PATH}/cse/spack-site"
+# Isolate from personal ~/.spack/ config — prevents stale user-scope entries
+# from overriding the environment's packages.yaml, compilers, etc.
+export SPACK_DISABLE_LOCAL_CONFIG=1
 VARIANT_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}"
 
 _run() {
