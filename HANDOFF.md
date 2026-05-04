@@ -26,7 +26,7 @@ Each stage script is independently runnable. The orchestrator `deploy.sh` compos
 | Stage | Script | Purpose |
 |-------|--------|---------|
 | 1 | `stage1_profile.sh` | Run Cluster Inspector, write `profiles/<hostname>-<timestamp>.yaml` |
-| 2 | `stage2_spack.sh` | Clone Spack (v1.2.x), set SPACK_ROOT; Variant A: bootstrap GCC |
+| 2 | `stage2_spack.sh` | Clone Spack (v1.1.1), set SPACK_ROOT; Variant A: bootstrap GCC |
 | 3 | `stage3_externals.sh` | Render `packages.yaml` from system profile |
 | 4 | `stage4_build.sh` | Render remaining templates; `spack concretize --fresh`; `spack install` |
 | 5 | `stage5_modules.sh` | `spack module refresh`; install `cse-init` modulefile |

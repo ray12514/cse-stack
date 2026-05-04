@@ -11,7 +11,7 @@
 | Prepared for | Internal review with CSE working group |
 | Scope | Spack-only implementation plan for the Computational Software Environment |
 | Initial package set | HDF5 (serial and parallel), NetCDF-C (serial and parallel), NetCDF-Fortran, NetCDF-CXX4, MPI (Open MPI or Cray-MPICH depending on variant) |
-| Target Spack version | 1.2.x (compilers configured in `packages.yaml`) |
+| Target Spack version | 1.1.1 (compilers configured in `packages.yaml`) |
 | Target module system | Lmod or Tcl Modules (auto-detected per host) |
 | Out of scope for v1.0 | Ansible orchestration, CI/CD, container images, multi-site federation, AI/ML baseline, full T2/T3 communication validation |
 
