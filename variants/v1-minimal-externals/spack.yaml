@@ -27,7 +27,7 @@ spack:
       link_type: symlink
 
   concretizer:
-    unify: true
+    unify: when_possible
     reuse:  true
 
   specs:

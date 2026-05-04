@@ -20,7 +20,7 @@ packages:
       - spec: openssl@3.0.7
         prefix: /usr
   curl:
-    buildable: false
+    buildable: true
     externals:
       - spec: curl@7.85.0
         prefix: /usr
@@ -30,7 +30,7 @@ packages:
       - spec: glibc@2.34
         prefix: /usr
   perl:
-    buildable: false
+    buildable: true
     externals:
       - spec: perl@5.32.1
         prefix: /usr
