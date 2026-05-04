@@ -16,6 +16,8 @@ With --dry-run the rendered content is printed to stdout and no file is written.
 
 import argparse
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -29,6 +31,63 @@ except ImportError:
 # Allow importing profile.py from the same lib/ directory
 sys.path.insert(0, str(Path(__file__).parent))
 from profile import SystemProfile  # noqa: E402
+
+
+def _query_cmd(*cmd) -> str:
+    """Run cmd, return stdout stripped, or '' on any error."""
+    try:
+        return subprocess.check_output(
+            list(cmd), stderr=subprocess.DEVNULL, text=True
+        ).strip()
+    except (FileNotFoundError, subprocess.CalledProcessError, OSError):
+        return ""
+
+
+def _detect_openssl() -> tuple:
+    """Return (version, prefix) or ('', '/usr') if not found / is LibreSSL."""
+    out = _query_cmd("openssl", "version")
+    parts = out.split()
+    if parts and parts[0].lower() == "openssl" and len(parts) >= 2:
+        return parts[1], "/usr"
+    # pkg-config fallback — works when the openssl binary is absent from PATH
+    ver = _query_cmd("pkg-config", "--modversion", "openssl")
+    if ver:
+        prefix = _query_cmd("pkg-config", "--variable=prefix", "openssl") or "/usr"
+        return ver, prefix
+    return "", "/usr"
+
+
+def _detect_curl() -> tuple:
+    """Return (version, prefix) or ('', '/usr') if not found."""
+    out = _query_cmd("curl", "--version")
+    # First line: "curl X.Y.Z (platform) ..."
+    first = out.splitlines()[0] if out else ""
+    parts = first.split()
+    if len(parts) >= 2 and parts[0].lower() == "curl":
+        return parts[1], "/usr"
+    ver = _query_cmd("pkg-config", "--modversion", "libcurl")
+    if ver:
+        prefix = _query_cmd("pkg-config", "--variable=prefix", "libcurl") or "/usr"
+        return ver, prefix
+    return "", "/usr"
+
+
+def _detect_perl() -> tuple:
+    """Return (version, prefix) or ('', '/usr') if not found."""
+    ver = _query_cmd("perl", "-e", r'printf "%vd\n", $^V')
+    if ver:
+        return ver, "/usr"
+    return "", "/usr"
+
+
+def _detect_python() -> tuple:
+    """Return (version, prefix) or ('', '/usr') if not found."""
+    for cmd in (["python3", "--version"], ["python", "--version"]):
+        out = _query_cmd(*cmd)
+        parts = out.split()
+        if len(parts) >= 2 and parts[0].lower() == "python":
+            return parts[1], "/usr"
+    return "", "/usr"
 
 
 def _build_context(profile: SystemProfile, variant: str,
@@ -49,12 +108,24 @@ def _build_context(profile: SystemProfile, variant: str,
         make_jobs = int(os.environ.get("SPACK_MAKE_JOBS", "") or "16")
     except ValueError:
         make_jobs = 16
+    _ssl_ver,    _ssl_prefix    = _detect_openssl()
+    _curl_ver,   _curl_prefix   = _detect_curl()
+    _perl_ver,   _perl_prefix   = _detect_perl()
+    _python_ver, _python_prefix = _detect_python()
     ctx: dict = {
         "variant": variant,
         "SHARED_PATH": shared_path,
         "CSE_RELEASE": release,
         "is_openmpi": variant == "v1-openmpi",
         "is_mpich":   variant == "v2-mpich",
+        # OS-level externals: versions detected at render time from the actual
+        # system so Spack never gets a wrong version hint.  Empty string means
+        # the package was not found; templates leave out the externals: block
+        # and set buildable: true so Spack can build its own.
+        "openssl_version": _ssl_ver,   "openssl_prefix": _ssl_prefix,
+        "curl_version":    _curl_ver,  "curl_prefix":    _curl_prefix,
+        "perl_version":    _perl_ver,  "perl_prefix":    _perl_prefix,
+        "python_version":  _python_ver,"python_prefix":  _python_prefix,
         # OS
         "glibc_version": profile.glibc_version(),
         "cpu_arch": (profile.cray_cpu_arch() if profile.is_cray()
