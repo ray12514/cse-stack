@@ -15,6 +15,10 @@ set -euo pipefail
 : "${REPO_ROOT:?stage4_build.sh must be run via deploy.sh}"
 
 VARIANT_ENV_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/env"
+# Isolate from personal ~/.spack/ config — prevents stale user-scope entries
+# (wrong %compiler constraints, old package versions, etc.) from overriding
+# the environment's authoritative packages.yaml.
+export SPACK_DISABLE_LOCAL_CONFIG=1
 
 _render() {
     local tpl="$1" out="$2"
