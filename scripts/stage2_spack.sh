@@ -63,7 +63,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run]   git clone --depth 1 --branch ${SPACK_VERSION} https://github.com/spack/spack.git ${BOOTSTRAP_DIR}/spack"
     echo "[dry-run]   . ${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
     echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils"
-    echo "[dry-run]   spack view copy ${BOOTSTRAP_PREFIX} /gcc@${GCC_VERSION}/<hash>"
+    echo "[dry-run]   spack view copy ${BOOTSTRAP_PREFIX} /<hash>"
 else
     # Warn if the install root is not owned by the expected group.
     # This is advisory — a mismatch on a personal workdir is fine.
@@ -126,17 +126,48 @@ else
 
         spack install -j "${SPACK_INSTALL_JOBS:-4}" --no-checksum "gcc@${GCC_VERSION}" ~bootstrap +binutils
         GCC_HASH=$(spack find --format '{hash:7}' "gcc@${GCC_VERSION}" | head -n1)
-        spack view --verbose copy "${BOOTSTRAP_PREFIX}" "/gcc@${GCC_VERSION}/${GCC_HASH}"
+        if [[ -z "${GCC_HASH}" ]]; then
+            echo "==> Error: gcc@${GCC_VERSION} not found after install." >&2
+            exit 1
+        fi
+        # Select the installed package by hash only — `/gcc@version/hash` is
+        # fragile across Spack releases; `/<hash>` is the canonical form.
+        spack view --verbose copy "${BOOTSTRAP_PREFIX}" "/${GCC_HASH}"
         echo "Stage 2: bootstrap GCC installed at ${BOOTSTRAP_PREFIX}"
 
-        # Register the freshly-built GCC as the primary compiler. Downstream
-        # stages (stage 4) will concretize using this version, not the system
-        # GCC that was only needed to compile it. Writes to the redirected
+        # Register the freshly-built GCC as the primary compiler from the
+        # view path directly. Avoids `spack location -i`, which fails with
+        # "Spec matches no installed packages" when the env/scope context
+        # changes between install and lookup. Downstream stages (stage 4)
+        # will concretize using this version, not the system GCC that was
+        # only needed to compile it. Writes to the redirected
         # SPACK_USER_CONFIG_PATH, never to ~/.spack.
-        echo "Stage 2: registering gcc@${GCC_VERSION} as primary compiler..."
-        spack load "gcc@${GCC_VERSION}"
-        spack compiler add "$(spack location -i "gcc@${GCC_VERSION}")/bin"
+        echo "Stage 2: registering gcc@${GCC_VERSION} as primary compiler from ${BOOTSTRAP_PREFIX}..."
+        spack compiler add "${BOOTSTRAP_PREFIX}/bin"
         spack compiler list
+
+        # Record the freshly-built GCC as an external in the environment's
+        # packages.yaml so downstream stages reuse it (faster, no rebuild).
+        # Idempotent: only appends if the file exists and the entry isn't
+        # already present.
+        PKGS_YAML="${VARIANT_DIR}/packages.yaml"
+        if [[ -f "${PKGS_YAML}" ]] && ! grep -q "gcc@${GCC_VERSION}" "${PKGS_YAML}"; then
+            echo "Stage 2: adding gcc@${GCC_VERSION} external to ${PKGS_YAML}..."
+            cat >> "${PKGS_YAML}" <<EOF
+
+  # Bootstrap GCC built by stage2 — added automatically
+  gcc:
+    externals:
+    - spec: gcc@${GCC_VERSION} languages='c,c++,fortran'
+      prefix: ${BOOTSTRAP_PREFIX}
+      extra_attributes:
+        compilers:
+          c:       ${BOOTSTRAP_PREFIX}/bin/gcc
+          cxx:     ${BOOTSTRAP_PREFIX}/bin/g++
+          fortran: ${BOOTSTRAP_PREFIX}/bin/gfortran
+    buildable: false
+EOF
+        fi
     fi
 fi
 
