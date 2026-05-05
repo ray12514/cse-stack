@@ -78,16 +78,13 @@ else
 
     umask 002
 
-    if grep -q "gcc@${GCC_VERSION}" "${GCC_BOOTSTRAP_YAML}" 2>/dev/null; then
-        echo "Stage 2: bootstrap GCC already registered (${GCC_BOOTSTRAP_YAML})"
-    else
-        mkdir -p "${BOOTSTRAP_DIR}"
-        if [[ ! -d "${BOOTSTRAP_DIR}/spack" ]]; then
-            git clone --depth 1 --branch "${SPACK_VERSION}" \
-                https://github.com/spack/spack.git "${BOOTSTRAP_DIR}/spack"
-        fi
-        # shellcheck source=/dev/null
-        . "${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
+    mkdir -p "${BOOTSTRAP_DIR}"
+    if [[ ! -d "${BOOTSTRAP_DIR}/spack" ]]; then
+        git clone --depth 1 --branch "${SPACK_VERSION}" \
+            https://github.com/spack/spack.git "${BOOTSTRAP_DIR}/spack"
+    fi
+    # shellcheck source=/dev/null
+    . "${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
 
         # Detect OS/arch now that spack is on PATH.
         OS_SPACK=$(spack arch --operating-system 2>/dev/null || echo "rhel8")
@@ -186,9 +183,10 @@ EOF
         # up; stage 4 re-renders of packages.yaml/config.yaml/modules.yaml
         # leave this file untouched. `cat >` (overwrite) is intentional —
         # makes re-runs idempotent and lets the caller change GCC_PREFIX.
-        if ! grep -q "gcc@${GCC_VERSION}" "${GCC_BOOTSTRAP_YAML}" 2>/dev/null; then
-            echo "Stage 2: writing gcc@${GCC_VERSION} external to ${GCC_BOOTSTRAP_YAML}..."
-            cat > "${GCC_BOOTSTRAP_YAML}" <<EOF
+        # Always overwrite — a previous failed run may have written the wrong
+        # prefix. The correct GCC_PREFIX is validated above (bin/gcc check).
+        echo "Stage 2: writing gcc@${GCC_VERSION} external to ${GCC_BOOTSTRAP_YAML}..."
+        cat > "${GCC_BOOTSTRAP_YAML}" <<EOF
 packages:
   gcc:
     externals:
@@ -201,8 +199,6 @@ packages:
           fortran: ${GCC_PREFIX}/bin/gfortran
     buildable: false
 EOF
-        fi
-    fi
 fi
 
 # ------------------------------------------------------------------
