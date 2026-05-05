@@ -150,12 +150,15 @@ BSEOF
             echo "Stage 2: bootstrapping GCC ${GCC_VERSION} (this may take a while)..."
             spack install -j "${SPACK_INSTALL_JOBS:-4}" --no-checksum "gcc@${GCC_VERSION}" ~bootstrap +binutils
         fi
-        # +binutils uniquely identifies our build; avoids picking up a dependency prefix.
-        GCC_PREFIX=$(spack find --format '{prefix}' "gcc@${GCC_VERSION}+binutils" 2>/dev/null | head -n1)
-        if [[ -z "${GCC_PREFIX}" || ! -x "${GCC_PREFIX}/bin/gcc" ]]; then
-            echo "==> Error: cannot locate gcc@${GCC_VERSION} install prefix (no bin/gcc found)."
+        # Locate GCC via filesystem — spack find scopes to the active env and
+        # returns nothing for packages installed outside it.
+        GCC_BIN=$(find "${BOOTSTRAP_DIR}/spack/opt" -name "gcc" \
+                       -path "*/gcc-${GCC_VERSION}*/bin/gcc" 2>/dev/null | head -1)
+        if [[ -z "${GCC_BIN}" || ! -x "${GCC_BIN}" ]]; then
+            echo "==> Error: cannot locate gcc-${GCC_VERSION} binary under ${BOOTSTRAP_DIR}/spack/opt"
             exit 1
         fi
+        GCC_PREFIX=$(dirname "$(dirname "${GCC_BIN}")")
         echo "Stage 2: gcc@${GCC_VERSION} at ${GCC_PREFIX}"
         GCC_COMPILERS_YAML="${VARIANT_DIR}/gcc-compilers.yaml"
         echo "Stage 2: writing compiler config to ${GCC_COMPILERS_YAML}..."
