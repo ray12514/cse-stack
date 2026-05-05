@@ -17,6 +17,7 @@ With --dry-run the rendered content is printed to stdout and no file is written.
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 from profile import SystemProfile  # noqa: E402
 
 
+# Standard system installation prefixes probed in order.
+# We check these directly rather than relying on PATH so that a conda or
+# module environment active during deploy doesn't shadow the real system
+# packages that Spack will link against.
+_SYSTEM_PREFIXES = ("/usr", "/usr/local")
+
+
 def _query_cmd(*cmd) -> str:
     """Run cmd, return stdout stripped, or '' on any error."""
     try:
@@ -44,50 +52,67 @@ def _query_cmd(*cmd) -> str:
 
 
 def _detect_openssl() -> tuple:
-    """Return (version, prefix) or ('', '/usr') if not found / is LibreSSL."""
-    out = _query_cmd("openssl", "version")
-    parts = out.split()
-    if parts and parts[0].lower() == "openssl" and len(parts) >= 2:
-        return parts[1], "/usr"
-    # pkg-config fallback — works when the openssl binary is absent from PATH
-    ver = _query_cmd("pkg-config", "--modversion", "openssl")
-    if ver:
-        prefix = _query_cmd("pkg-config", "--variable=prefix", "openssl") or "/usr"
-        return ver, prefix
-    return "", "/usr"
+    """Return (version, prefix) by probing system paths, or ('', '')."""
+    for prefix in _SYSTEM_PREFIXES:
+        binary = Path(prefix, "bin", "openssl")
+        if binary.exists():
+            out = _query_cmd(str(binary), "version")
+            parts = out.split()
+            if parts and parts[0].lower() == "openssl" and len(parts) >= 2:
+                return parts[1], prefix
+    # pkg-config via absolute system binary as fallback
+    for prefix in _SYSTEM_PREFIXES:
+        pkgcfg = Path(prefix, "bin", "pkg-config")
+        if pkgcfg.exists():
+            ver = _query_cmd(str(pkgcfg), "--modversion", "openssl")
+            if ver:
+                p = _query_cmd(str(pkgcfg), "--variable=prefix", "openssl") or prefix
+                return ver, p
+    return "", ""
 
 
 def _detect_curl() -> tuple:
-    """Return (version, prefix) or ('', '/usr') if not found."""
-    out = _query_cmd("curl", "--version")
-    # First line: "curl X.Y.Z (platform) ..."
-    first = out.splitlines()[0] if out else ""
-    parts = first.split()
-    if len(parts) >= 2 and parts[0].lower() == "curl":
-        return parts[1], "/usr"
-    ver = _query_cmd("pkg-config", "--modversion", "libcurl")
-    if ver:
-        prefix = _query_cmd("pkg-config", "--variable=prefix", "libcurl") or "/usr"
-        return ver, prefix
-    return "", "/usr"
+    """Return (version, prefix) by probing system paths, or ('', '')."""
+    for prefix in _SYSTEM_PREFIXES:
+        binary = Path(prefix, "bin", "curl")
+        if binary.exists():
+            out = _query_cmd(str(binary), "--version")
+            first = out.splitlines()[0] if out else ""
+            parts = first.split()
+            if len(parts) >= 2 and parts[0].lower() == "curl":
+                return parts[1], prefix
+    for prefix in _SYSTEM_PREFIXES:
+        pkgcfg = Path(prefix, "bin", "pkg-config")
+        if pkgcfg.exists():
+            ver = _query_cmd(str(pkgcfg), "--modversion", "libcurl")
+            if ver:
+                p = _query_cmd(str(pkgcfg), "--variable=prefix", "libcurl") or prefix
+                return ver, p
+    return "", ""
 
 
 def _detect_perl() -> tuple:
-    """Return (version, prefix) or ('', '/usr') if not found."""
-    ver = _query_cmd("perl", "-e", r'printf "%vd\n", $^V')
-    if ver:
-        return ver, "/usr"
-    return "", "/usr"
+    """Return (version, prefix) by probing system paths, or ('', '')."""
+    for prefix in _SYSTEM_PREFIXES:
+        binary = Path(prefix, "bin", "perl")
+        if binary.exists():
+            ver = _query_cmd(str(binary), "-e", r'printf "%vd\n", $^V')
+            if ver:
+                return ver, prefix
+    return "", ""
 
 
 def _detect_python() -> tuple:
-    """Return (version, prefix) or ('', '/usr') if not found."""
-    for cmd in (["python3", "--version"], ["python", "--version"]):
-        out = _query_cmd(*cmd)
-        parts = out.split()
-        if len(parts) >= 2 and parts[0].lower() == "python":
-            return parts[1], "/usr"
-    return "", "/usr"
+    """Return (version, prefix) by probing system paths, or ('', '')."""
+    for name in ("python3", "python"):
+        for prefix in _SYSTEM_PREFIXES:
+            binary = Path(prefix, "bin", name)
+            if binary.exists():
+                out = _query_cmd(str(binary), "--version")
+                parts = out.split()
+                if len(parts) >= 2 and parts[0].lower() == "python":
+                    return parts[1], prefix
+    return "", ""
 
 
 def _build_context(profile: SystemProfile, variant: str,
@@ -128,8 +153,9 @@ def _build_context(profile: SystemProfile, variant: str,
         "python_version":  _python_ver,"python_prefix":  _python_prefix,
         # OS
         "glibc_version": profile.glibc_version(),
-        "cpu_arch": (profile.cray_cpu_arch() if profile.is_cray()
-                     else profile.cpu_arch()),
+        # Default to generic x86_64 so the same build runs on any node.
+        # Override with SPACK_TARGET env var if a specific microarch is needed.
+        "cpu_arch": os.environ.get("SPACK_TARGET", "x86_64"),
         # Module system
         "module_system": profile.module_system(),
         # Scheduler
