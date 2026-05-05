@@ -192,6 +192,9 @@ def _build_context(profile: SystemProfile, variant: str,
     ctx["gcc_bootstrap_yaml_exists"] = os.path.exists(
         os.path.join(variant_dir, "gcc-bootstrap.yaml")
     )
+    ctx["gcc_compilers_yaml_exists"] = os.path.exists(
+        os.path.join(variant_dir, "gcc-compilers.yaml")
+    )
     return ctx
 
 
