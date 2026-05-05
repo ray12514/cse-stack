@@ -14,15 +14,14 @@ set -euo pipefail
 
 SPACK_VERSION="${SPACK_VERSION:-v1.1.1}"
 SPACK_SITE="${SHARED_PATH}/cse/spack-site"
-# Prevent Spack from reading ~/.spack/ config or /etc/spack/ site config,
-# and redirect both the user cache and user config out of the home directory.
-# DISABLE_LOCAL_CONFIG blocks config scopes; USER_CACHE_PATH redirects the
-# cache; USER_CONFIG_PATH redirects the user-scope config (where `spack
-# compiler add` writes compilers.yaml); SYSTEM_CONFIG_PATH blocks /etc/spack/
-# site-wide config that HPC admins sometimes pre-populate.
+# Prevent Spack from reading ~/.spack/ config or /etc/spack/ site config.
+# Compiler entries are written directly as YAML files and included by
+# spack.yaml, so we no longer need SPACK_USER_CONFIG_PATH.
+# DISABLE_LOCAL_CONFIG blocks the user-scope config (~/.spack);
+# SYSTEM_CONFIG_PATH blocks /etc/spack/ site-wide config that HPC admins
+# sometimes pre-populate.
 export SPACK_DISABLE_LOCAL_CONFIG=1
 export SPACK_USER_CACHE_PATH="${SHARED_PATH}/cse/cache/bootstrap"
-export SPACK_USER_CONFIG_PATH="${SHARED_PATH}/cse/${CSE_RELEASE}/spack-user-config"
 export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
 VARIANT_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}"
 
@@ -64,7 +63,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run]   . ${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
     echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils"
     echo "[dry-run]   GCC_PREFIX=\$(spack location -i /<hash>)"
-    echo "[dry-run]   spack compiler add \${GCC_PREFIX}/bin"
+    echo "[dry-run]   write \${VARIANT_DIR}/gcc-compilers.yaml (gcc@${GCC_VERSION} compiler at \${GCC_PREFIX})"
     echo "[dry-run]   write ${GCC_BOOTSTRAP_YAML} (gcc@${GCC_VERSION} external at \${GCC_PREFIX})"
 else
     # Warn if the install root is not owned by the expected group.
@@ -90,6 +89,10 @@ else
         # shellcheck source=/dev/null
         . "${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
 
+        # Detect OS/arch now that spack is on PATH.
+        OS_SPACK=$(spack arch --operating-system 2>/dev/null || echo "rhel8")
+        TARGET_SPACK=$(spack arch --target 2>/dev/null || echo "x86_64")
+
         # ---- Bootstrap compiler detection ----
         # Find the highest-versioned GCC in PATH by walking PATH directly.
         # This is more reliable than `compgen -c` (which depends on shell
@@ -109,19 +112,37 @@ else
             echo "$best"
         }
 
-        # Ensure the redirected user-config dir exists before any
-        # `spack compiler` command tries to write compilers.yaml to it.
-        mkdir -p "${SPACK_USER_CONFIG_PATH}/linux"
-
         BOOTSTRAP_GCC=$(_find_newest_gcc)
         if [[ -z "${BOOTSTRAP_GCC}" ]]; then
             echo "ERROR: No GCC found in PATH. Cannot register a bootstrap compiler." >&2
             exit 1
         fi
-        echo "Stage 2: registering bootstrap compiler: ${BOOTSTRAP_GCC} ($(${BOOTSTRAP_GCC} -dumpversion))"
-        # Writes compilers.yaml under SPACK_USER_CONFIG_PATH (redirected
-        # away from ~/.spack), so no --scope flag is required.
-        spack compiler add "$(dirname "${BOOTSTRAP_GCC}")"
+        _BGCC_VER="$(${BOOTSTRAP_GCC} -dumpversion)"
+        _BGCC_NAME="$(basename "${BOOTSTRAP_GCC}")"
+        _BGCC_SUFFIX="${_BGCC_NAME#gcc}"          # e.g. "-13" or ""
+        _BGCC_BIN="$(dirname "${BOOTSTRAP_GCC}")"
+        _BGPP="${_BGCC_BIN}/g++${_BGCC_SUFFIX}";  [[ -x "${_BGPP}" ]] || _BGPP="${_BGCC_BIN}/g++"
+        _BGFC="${_BGCC_BIN}/gfortran${_BGCC_SUFFIX}"; [[ -x "${_BGFC}" ]] || _BGFC="${_BGCC_BIN}/gfortran"
+        echo "Stage 2: registering bootstrap compiler: ${BOOTSTRAP_GCC} (${_BGCC_VER})"
+        # Write directly to the bootstrap spack's site scope — read regardless
+        # of SPACK_DISABLE_LOCAL_CONFIG, no spack compiler add needed.
+        mkdir -p "${BOOTSTRAP_DIR}/spack/etc/spack"
+        cat > "${BOOTSTRAP_DIR}/spack/etc/spack/compilers.yaml" << BSEOF
+compilers:
+- compiler:
+    spec: gcc@${_BGCC_VER}
+    paths:
+      cc:  ${BOOTSTRAP_GCC}
+      cxx: ${_BGPP}
+      f77: ${_BGFC}
+      fc:  ${_BGFC}
+    flags: {}
+    operating_system: ${OS_SPACK}
+    target: ${TARGET_SPACK}
+    modules: []
+    environment: {}
+    extra_rpaths: []
+BSEOF
         spack compiler list
         # ---- End bootstrap compiler detection ----
 
@@ -138,8 +159,26 @@ else
             GCC_PREFIX=$(spack location -i "/${GCC_HASH}")
         fi
         echo "Stage 2: gcc@${GCC_VERSION} installed at ${GCC_PREFIX}"
-        spack compiler add "${GCC_PREFIX}/bin"
-        spack compiler list
+        GCC_COMPILERS_YAML="${VARIANT_DIR}/gcc-compilers.yaml"
+        echo "Stage 2: writing compiler config to ${GCC_COMPILERS_YAML}..."
+        cat > "${GCC_COMPILERS_YAML}" << EOF
+compilers:
+- compiler:
+    spec: gcc@${GCC_VERSION}
+    paths:
+      cc:  ${GCC_PREFIX}/bin/gcc
+      cxx: ${GCC_PREFIX}/bin/g++
+      f77: ${GCC_PREFIX}/bin/gfortran
+      fc:  ${GCC_PREFIX}/bin/gfortran
+    flags: {}
+    operating_system: ${OS_SPACK}
+    target: ${TARGET_SPACK}
+    modules: []
+    environment: {}
+    extra_rpaths:
+    - ${GCC_PREFIX}/lib64
+EOF
+        spack compiler list  # verify it's visible
 
         # Record the freshly-built GCC as an external in a dedicated include
         # file alongside the environment. spack.yaml's `include:` picks this

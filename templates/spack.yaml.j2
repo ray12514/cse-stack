@@ -3,6 +3,11 @@ spack:
     - ./packages.yaml
     - ./config.yaml
     - ./modules.yaml
+{% if gcc_compilers_yaml_exists %}
+    # Written by scripts/stage2_spack.sh — compiler entries for the
+    # bootstrapped GCC, read by stage 4 concretization and build.
+    - ../gcc-compilers.yaml
+{% endif %}
 {% if gcc_bootstrap_yaml_exists %}
     # Written by scripts/stage2_spack.sh — survives re-renders of the
     # other includes because it lives next to (not inside) the env dir.
