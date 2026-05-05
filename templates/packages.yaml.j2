@@ -15,10 +15,11 @@ packages:
       group: {{ cse_group }}
 
   # OS-level externals — versions detected at render time from the live system.
-  # buildable: false only for openssl (security library; always present on Linux).
-  # All others stay buildable: true; the external entry is a version hint only.
+  # openssl is buildable: true so Spack can build 3.x when the system version
+  # doesn't satisfy a dependency (e.g. OpenMPI 5 → PMIx 4 requires openssl@3.x).
+  # Packages satisfied by the system version still use the external.
   openssl:
-    buildable: {{ "false" if openssl_version else "true" }}
+    buildable: true
 {% if openssl_version %}
     externals:
       - spec: openssl@{{ openssl_version }}
