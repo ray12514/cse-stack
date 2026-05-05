@@ -59,7 +59,7 @@ if [[ ! -f "${VARIANT_ENV_DIR}/spack.lock" ]]; then
 fi
 
 if [[ -z "${SPACK_ROOT:-}" ]]; then
-    SPACK_ROOT="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/spack-bootstrap/spack"
+    SPACK_ROOT="${SHARED_PATH}/cse/spack-site"
 fi
 
 if [[ ! -f "${SPACK_ROOT}/share/spack/setup-env.sh" ]]; then
