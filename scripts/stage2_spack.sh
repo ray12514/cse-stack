@@ -62,7 +62,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run]   git clone --depth 1 --branch ${SPACK_VERSION} https://github.com/spack/spack.git ${BOOTSTRAP_DIR}/spack"
     echo "[dry-run]   . ${BOOTSTRAP_DIR}/spack/share/spack/setup-env.sh"
     echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils"
-    echo "[dry-run]   GCC_PREFIX=\$(spack location -i /<hash>)"
+    echo "[dry-run]   GCC_PREFIX=\$(spack find --format '{prefix}' gcc@${GCC_VERSION}+binutils)"
     echo "[dry-run]   write \${VARIANT_DIR}/gcc-compilers.yaml (gcc@${GCC_VERSION} compiler at \${GCC_PREFIX})"
     echo "[dry-run]   write ${GCC_BOOTSTRAP_YAML} (gcc@${GCC_VERSION} external at \${GCC_PREFIX})"
 else
@@ -147,18 +147,19 @@ BSEOF
         # ---- End bootstrap compiler detection ----
 
         # Skip build if GCC already in the Spack store.
-        if spack find "gcc@${GCC_VERSION}" &>/dev/null; then
+        if spack find "gcc@${GCC_VERSION}+binutils" &>/dev/null; then
             echo "Stage 2: gcc@${GCC_VERSION} already installed — skipping build."
-            GCC_HASH=$(spack find --format '{hash:7}' "gcc@${GCC_VERSION}" | head -n1)
-            GCC_PREFIX=$(spack location -i "/${GCC_HASH}")
         else
             echo "Stage 2: bootstrapping GCC ${GCC_VERSION} (this may take a while)..."
             spack install -j "${SPACK_INSTALL_JOBS:-4}" --no-checksum "gcc@${GCC_VERSION}" ~bootstrap +binutils
-            GCC_HASH=$(spack find --format '{hash:7}' "gcc@${GCC_VERSION}" | head -n1)
-            [[ -z "${GCC_HASH}" ]] && { echo "==> Error: gcc@${GCC_VERSION} not found after install."; exit 1; }
-            GCC_PREFIX=$(spack location -i "/${GCC_HASH}")
         fi
-        echo "Stage 2: gcc@${GCC_VERSION} installed at ${GCC_PREFIX}"
+        # +binutils uniquely identifies our build; avoids picking up a dependency prefix.
+        GCC_PREFIX=$(spack find --format '{prefix}' "gcc@${GCC_VERSION}+binutils" 2>/dev/null | head -n1)
+        if [[ -z "${GCC_PREFIX}" || ! -x "${GCC_PREFIX}/bin/gcc" ]]; then
+            echo "==> Error: cannot locate gcc@${GCC_VERSION} install prefix (no bin/gcc found)."
+            exit 1
+        fi
+        echo "Stage 2: gcc@${GCC_VERSION} at ${GCC_PREFIX}"
         GCC_COMPILERS_YAML="${VARIANT_DIR}/gcc-compilers.yaml"
         echo "Stage 2: writing compiler config to ${GCC_COMPILERS_YAML}..."
         cat > "${GCC_COMPILERS_YAML}" << EOF
