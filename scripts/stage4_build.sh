@@ -125,9 +125,9 @@ if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
     fi
 fi
 
-# Activate Spack — both variants use the bootstrap spack instance
+# Activate Spack — use the shared spack instance
 if [[ -z "${SPACK_ROOT:-}" ]]; then
-    SPACK_ROOT="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/spack-bootstrap/spack"
+    SPACK_ROOT="${SHARED_PATH}/cse/spack-site"
 fi
 # shellcheck source=/dev/null
 . "${SPACK_ROOT}/share/spack/setup-env.sh"

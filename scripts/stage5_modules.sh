@@ -49,7 +49,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
 fi
 
 if [[ -z "${SPACK_ROOT:-}" ]]; then
-    SPACK_ROOT="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/spack-bootstrap/spack"
+    SPACK_ROOT="${SHARED_PATH}/cse/spack-site"
 fi
 # shellcheck source=/dev/null
 . "${SPACK_ROOT}/share/spack/setup-env.sh"

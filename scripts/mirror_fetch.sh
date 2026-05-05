@@ -54,9 +54,9 @@ if [[ ! -f "${VARIANT_ENV_DIR}/spack.lock" ]]; then
     exit 1
 fi
 
-# Locate Spack — both variants use the bootstrap spack instance
+# Locate Spack — use the shared spack instance
 if [[ -z "${SPACK_ROOT:-}" ]]; then
-    SPACK_ROOT="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/spack-bootstrap/spack"
+    SPACK_ROOT="${SHARED_PATH}/cse/spack-site"
 fi
 
 if [[ ! -f "${SPACK_ROOT}/share/spack/setup-env.sh" ]]; then
