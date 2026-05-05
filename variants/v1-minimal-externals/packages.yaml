@@ -11,7 +11,7 @@ packages:
       group: cse
 
   openssl:
-    buildable: false
+    buildable: true
     externals:
       - spec: openssl@3.0.7
         prefix: /usr
