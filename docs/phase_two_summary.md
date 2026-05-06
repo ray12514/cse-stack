@@ -10,7 +10,7 @@ The CSE is built and managed using Spack, the package manager already used in th
 
 ```
 module load cse-init/<mpi>
-module load cse/netcdf-fortran-mpi
+module load cse/netcdf-fortran/4.6.1-mpi
 ```
 
 After those two commands, the user has the compilers, the MPI launcher, and the NetCDF libraries available, with all the environment variables expected by standard build tools already set.

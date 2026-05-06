@@ -15,6 +15,16 @@ spack:
 {% endif %}
 
   view:
+    cse_modules:
+      root: {{ views_root }}/modules
+      projections:
+        all: "{name}/{version}"
+        "+mpi": "{name}/{version}-mpi"
+        "~mpi": "{name}/{version}-serial"
+        "^netcdf-c +mpi": "{name}/{version}-mpi"
+        "^netcdf-c ~mpi": "{name}/{version}-serial"
+      link: all
+      link_type: symlink
 {% if view_mpi_select %}
     mpi:
       root: {{ views_root }}/mpi

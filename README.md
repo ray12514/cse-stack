@@ -57,20 +57,22 @@ Users load one front-door module, then load the package they need:
 
 ```bash
 module load cse-init/openmpi
-module load cse/netcdf-fortran-mpi
+module load cse/netcdf-fortran/4.6.1-mpi
 ```
 
 `cse-init/<mpi>` exposes the CSE compiler baseline and the selected module
 tree. Spack-generated package modules own dependency loading. With
-`autoload: direct`, loading `cse/netcdf-fortran-mpi` should recursively load
+`autoload: direct`, loading `cse/netcdf-fortran/4.6.1-mpi` should recursively load
 the matching NetCDF-C, HDF5, MPI, and required direct runtime/link
 dependencies. Hidden implicit dependency modules stay loadable but do not
-clutter `module avail`.
+clutter `module avail`. Package modules are generated relative to the
+`cse_modules` Spack view so modulefiles expose clean view paths instead of raw
+hashed install-store prefixes.
 
 `cse-init` sets `CSE_GCC_ROOT`, `CSE_CC`, `CSE_CXX`, and `CSE_FC`, and prepends
 the CSE GCC `bin` directory to `PATH`. It does not set global `CC`, `CXX`, or
 `FC`; MPI builds should use `mpicc`, `mpicxx`, and `mpifort` from
-`cse/openmpi` or `cse/mpich`.
+`cse/openmpi/<version>` or `cse/mpich/<version>`.
 
 ## Personal Test Install
 

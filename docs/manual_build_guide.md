@@ -65,7 +65,7 @@ module use /tmp/cse-test/cse/modulefiles
 module load cse-init/openmpi
 which gcc
 echo "$CSE_GCC_ROOT"
-module load cse/netcdf-fortran-mpi
+module load cse/netcdf-fortran/4.6.1-mpi
 module list
 ```
 
@@ -76,8 +76,8 @@ their direct dependency modules. This is driven by Spack `autoload: direct`.
 
 - `cse-init` exposes the compiler baseline but does not set global `CC`, `CXX`,
   or `FC`.
-- MPI builds should use the MPI wrapper compilers from `cse/openmpi` or
-  `cse/mpich`.
+- MPI builds should use the MPI wrapper compilers from `cse/openmpi/<version>`
+  or `cse/mpich/<version>`.
 - On Cray/PBS systems, `cray-pals` is relevant to launcher behavior; on Slurm
   systems use `srun`.
 - Advanced users can chain their own Spack instance to the CSE install tree via
