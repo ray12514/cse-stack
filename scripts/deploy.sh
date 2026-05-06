@@ -22,6 +22,7 @@
 #                       [--mirror-path <path>]     \
 #                       [--buildcache-uri <uri>]   \
 #                       [--spack-seed <path>]      \
+#                       [--python-wheelhouse <path>] \
 #                       [--bootstrap-bundle <path>] \
 #                       [--lockfile <path>]        \
 #                       [--module-system {lmod|tcl}]
@@ -61,6 +62,8 @@
 #                     Use scripts/buildcache_push.sh for a standalone push.
 #   --spack-seed      Path to a versioned Spack tar bundle or directory copy.
 #                     Required for air-gapped deploys; optional for restricted.
+#   --python-wheelhouse Path to wheels for deploy-time Python requirements.
+#                     Required for restricted and air-gapped deploys.
 #   --bootstrap-bundle Path to a prepared Spack bootstrap bundle. Required for
 #                     restricted and air-gapped deploys.
 #   --lockfile        Path to an authoritative Spack lockfile to reuse on the
@@ -97,6 +100,7 @@ CSE_GROUP_OVERRIDE=""
 MIRROR_PATH="${MIRROR_PATH:-}"
 BUILDCACHE_URI="${BUILDCACHE_URI:-}"
 SPACK_SEED="${SPACK_SEED:-}"
+PYTHON_WHEELHOUSE="${CSE_PYTHON_WHEELHOUSE:-}"
 BOOTSTRAP_BUNDLE="${BOOTSTRAP_BUNDLE:-}"
 AUTHORITATIVE_LOCKFILE="${AUTHORITATIVE_LOCKFILE:-}"
 REQUEST_MANIFEST="${CSE_REQUEST_MANIFEST:-}"
@@ -133,6 +137,7 @@ while [[ $# -gt 0 ]]; do
         --mirror-path)    require_arg_value "$1" "${2:-}"; MIRROR_PATH="$2";            shift 2 ;;
         --buildcache-uri) require_arg_value "$1" "${2:-}"; BUILDCACHE_URI="$2";         shift 2 ;;
         --spack-seed)     require_arg_value "$1" "${2:-}"; SPACK_SEED="$2";             shift 2 ;;
+        --python-wheelhouse) require_arg_value "$1" "${2:-}"; PYTHON_WHEELHOUSE="$2";    shift 2 ;;
         --bootstrap-bundle) require_arg_value "$1" "${2:-}"; BOOTSTRAP_BUNDLE="$2";     shift 2 ;;
         --lockfile)       require_arg_value "$1" "${2:-}"; AUTHORITATIVE_LOCKFILE="$2"; shift 2 ;;
         --request-manifest) require_arg_value "$1" "${2:-}"; REQUEST_MANIFEST="$2";     shift 2 ;;
@@ -141,7 +146,7 @@ while [[ $# -gt 0 ]]; do
         --mock-profile)   require_arg_value "$1" "${2:-}"; MOCK_PROFILE="$2";           shift 2 ;;
         --spack-version)  require_arg_value "$1" "${2:-}"; SPACK_VERSION_OVERRIDE="$2"; shift 2 ;;
         -h|--help)
-            sed -n '3,49p' "${BASH_SOURCE[0]}"
+            sed -n '3,74p' "${BASH_SOURCE[0]}"
             exit 0
             ;;
         *)
@@ -181,6 +186,10 @@ if [[ "${NETWORK_MODE}" != "online" && "${NETWORK_MODE}" != "restricted" && "${N
     errors=1
 fi
 if [[ "${NETWORK_MODE}" == "restricted" || "${NETWORK_MODE}" == "airgapped" ]]; then
+    if [[ -z "${PYTHON_WHEELHOUSE}" ]]; then
+        echo "ERROR: --network-mode ${NETWORK_MODE} requires --python-wheelhouse" >&2
+        errors=1
+    fi
     if [[ -z "${MIRROR_PATH}" ]]; then
         echo "ERROR: --network-mode ${NETWORK_MODE} requires --mirror-path" >&2
         errors=1
@@ -228,6 +237,7 @@ export MIRROR_PATH
 # new binaries after.  Accepts file://, s3://, or https:// URIs.
 export BUILDCACHE_URI
 export SPACK_SEED
+export CSE_PYTHON_WHEELHOUSE="${PYTHON_WHEELHOUSE}"
 export BOOTSTRAP_BUNDLE
 export AUTHORITATIVE_LOCKFILE
 export CSE_REQUEST_MANIFEST="${REQUEST_MANIFEST}"
@@ -266,6 +276,12 @@ export CSE_GROUP="${CSE_GROUP_OVERRIDE:-${CSE_GROUP:-$(id -gn)}}"
 # (wrong compiler constraints, old versions, etc.) silently override the
 # environment's authoritative packages.yaml.
 export SPACK_DISABLE_LOCAL_CONFIG=1
+
+# Bootstrap deploy-time Python dependencies into a CSE-owned virtualenv before
+# running any repo Python that imports Jinja2 or PyYAML.
+# shellcheck source=/dev/null
+. "${REPO_ROOT}/scripts/lib/python_env.sh"
+cse_python_bootstrap
 
 # ------------------------------------------------------------------
 # Auto-detect module system (or use override)
@@ -316,6 +332,9 @@ fi
 if [[ -n "${SPACK_SEED}" ]]; then
     echo "  spack seed   : ${SPACK_SEED}"
 fi
+if [[ -n "${CSE_PYTHON_WHEELHOUSE}" ]]; then
+    echo "  python wheels: ${CSE_PYTHON_WHEELHOUSE}"
+fi
 if [[ -n "${BOOTSTRAP_BUNDLE}" ]]; then
     echo "  bootstrap    : ${BOOTSTRAP_BUNDLE}"
 fi
@@ -340,6 +359,10 @@ if [[ -n "${SPACK_SEED}" && ! -e "${SPACK_SEED}" ]]; then
     echo "ERROR: Spack seed not found: ${SPACK_SEED}" >&2
     exit 1
 fi
+if [[ -n "${CSE_PYTHON_WHEELHOUSE}" && ! -d "${CSE_PYTHON_WHEELHOUSE}" ]]; then
+    echo "ERROR: Python wheelhouse not found: ${CSE_PYTHON_WHEELHOUSE}" >&2
+    exit 1
+fi
 if [[ -n "${BOOTSTRAP_BUNDLE}" && ! -e "${BOOTSTRAP_BUNDLE}" ]]; then
     echo "ERROR: bootstrap bundle not found: ${BOOTSTRAP_BUNDLE}" >&2
     exit 1
@@ -359,7 +382,7 @@ if [[ "${DRY_RUN}" != "1" && -n "${MIRROR_PATH}" && "${MIRROR_PATH}" != *://* &&
     exit 1
 fi
 
-python3 - "${REQUEST_MANIFEST}" "${ARTIFACT_MANIFEST}" "${VARIANT}" "${RELEASE}" "${NETWORK_MODE}" "${CSE_PACKAGE_SET:-${PACKAGE_SET_OVERRIDE:-full}}" "${SPACK_TARGET_OVERRIDE:-${SPACK_TARGET:-x86_64}}" "${SPACK_VERSION}" "${GCC_VERSION}" <<'PY'
+"${CSE_PYTHON}" - "${REQUEST_MANIFEST}" "${ARTIFACT_MANIFEST}" "${VARIANT}" "${RELEASE}" "${NETWORK_MODE}" "${CSE_PACKAGE_SET:-${PACKAGE_SET_OVERRIDE:-full}}" "${SPACK_TARGET_OVERRIDE:-${SPACK_TARGET:-x86_64}}" "${SPACK_VERSION}" "${GCC_VERSION}" <<'PY'
 import json
 import pathlib
 import sys
@@ -402,7 +425,7 @@ validate("request manifest", load(request_manifest))
 validate("artifact manifest", load(artifact_manifest))
 PY
 
-python3 "${REPO_ROOT}/scripts/lib/package_sets.py" \
+"${CSE_PYTHON}" "${REPO_ROOT}/scripts/lib/package_sets.py" \
     --repo-root "${REPO_ROOT}" \
     --package-set "${CSE_PACKAGE_SET}" \
     --variant "${VARIANT}" \

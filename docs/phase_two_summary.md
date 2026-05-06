@@ -13,7 +13,7 @@ module load cse-init/<mpi>
 module load cse/netcdf-fortran/4.6.1-mpi
 ```
 
-After those two commands, the user has the compilers, the MPI launcher, and the NetCDF libraries available, with all the environment variables expected by standard build tools already set.
+After those two commands, the user has the CSE compiler baseline, the MPI launcher, and the NetCDF libraries available through compiler wrappers, pkg-config, CMake prefix paths, and standard include/library paths.
 
 ## Implementation Approach
 
@@ -29,11 +29,11 @@ Each CSE release is captured as a Spack environment with a lockfile that pins ev
 
 ## Two Implementation Variants
 
-The plan proposes two variants. Both deliver the same user-facing modules and the same package set. They differ in how much of the system Spack treats as a given.
+The plan proposes two variants. Both deliver the same user-facing modules and the same package set. They differ in the MPI provider used by the stack.
 
-**Variant A: Minimal externals.** Spack treats only the operating system as a given (OpenSSL, glibc, Perl, Python, curl). It builds its own compiler and its own MPI implementation (Open MPI), then builds the rest of the stack on top of that compiler and MPI. The advantage is portability: the same approach works on any Linux system, including future systems that do not have a vendor-supplied programming environment. The cost is build time, since the compiler is built from source as part of every release.
+**Variant A: Open MPI.** Spack treats only the operating system as a given (OpenSSL, glibc, Perl, Python, curl). It builds its own compiler and Open MPI implementation, then builds the rest of the stack on top of that compiler and MPI. The advantage is portability: the same approach works on any Linux system, including future systems that do not have a vendor-supplied programming environment. The cost is build time, since the compiler is built from source as part of every release.
 
-**Variant B: Cray-integrated.** On Cray systems, Spack additionally treats the Cray programming environment (the GCC inside PrgEnv-gnu, cray-mpich, and cray-libsci) as a given. It does not rebuild any of those. The advantage is that the resulting binaries link against vendor-validated MPI and BLAS/LAPACK libraries, which is the supported configuration for high-performance interconnects on these systems. The cost is that this variant is Cray-specific and does not apply to systems without a vendor programming environment.
+**Variant B: MPICH with OFI.** Spack builds MPICH with OFI support and may consume detected Cray libfabric and launcher components as externals. The advantage is a generic MPICH path that can still use site fabric components where they exist. A future runtime splice to external `cray-mpich` remains deferred work rather than the current build path.
 
 A first-draft recommendation is to operate both variants in parallel: Variant A as the default on commodity Linux systems, Variant B as the default on Cray systems. Each variant is a separate release with its own modules, but the user-facing module names are identical, so a user who moves between systems does not have to relearn anything.
 

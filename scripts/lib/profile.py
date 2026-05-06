@@ -17,7 +17,11 @@ from typing import Any, Dict, List, Optional
 try:
     import yaml
 except ImportError:
-    print("ERROR: PyYAML is required. Install it with: pip install pyyaml", file=sys.stderr)
+    print(
+        "ERROR: PyYAML is required. Run through scripts/deploy.sh so the CSE "
+        "deploy virtualenv is bootstrapped.",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 

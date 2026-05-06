@@ -6,6 +6,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_DIR="${REPO_ROOT}/scripts"
 # shellcheck source=/dev/null
 . "${SCRIPT_DIR}/lib/network_common.sh"
+# shellcheck source=/dev/null
+. "${SCRIPT_DIR}/lib/python_env.sh"
 
 REQUEST_DIR=""
 OUTPUT_DIR=""
@@ -40,7 +42,10 @@ if [[ ! -f "${REQUEST_MANIFEST}" || ! -f "${PROFILE_PATH}" ]]; then
     exit 1
 fi
 
-mapfile -t REQUEST_FIELDS < <(python3 - "${REQUEST_MANIFEST}" <<'PY'
+REQUEST_FIELDS=()
+while IFS= read -r line; do
+    REQUEST_FIELDS+=("${line}")
+done < <(python3 - "${REQUEST_MANIFEST}" <<'PY'
 import json
 import sys
 
@@ -79,6 +84,9 @@ mkdir -p "${OUTPUT_DIR}"
 ARTIFACT_DIR="${OUTPUT_DIR}/artifacts"
 mkdir -p "${ARTIFACT_DIR}"
 
+export SHARED_PATH
+cse_python_bootstrap
+
 DEPLOY_ARGS=(
     "${SCRIPT_DIR}/deploy.sh"
     --variant "${VARIANT}"
@@ -113,6 +121,11 @@ SOURCE_MIRROR_TAR="${ARTIFACT_DIR}/source-mirror.tar.gz"
 BOOTSTRAP_TAR="${ARTIFACT_DIR}/bootstrap-bundle.tar.gz"
 LOCKFILE_COPY="${ARTIFACT_DIR}/spack.lock"
 SPACK_SEED_TAR="${ARTIFACT_DIR}/spack-seed-${SPACK_VERSION#v}.tar.gz"
+PYTHON_WHEELHOUSE_DIR="${ARTIFACT_DIR}/python-wheelhouse"
+PYTHON_WHEELHOUSE_TAR="${ARTIFACT_DIR}/python-wheelhouse.tar.gz"
+
+cse_python_download_wheelhouse "${PYTHON_WHEELHOUSE_DIR}"
+tar -czf "${PYTHON_WHEELHOUSE_TAR}" -C "${ARTIFACT_DIR}" "$(basename "${PYTHON_WHEELHOUSE_DIR}")"
 
 cp "${LOCKFILE_PATH}" "${LOCKFILE_COPY}"
 
@@ -146,7 +159,7 @@ if [[ "${NETWORK_MODE}" == "airgapped" ]]; then
     tar -czf "${SPACK_SEED_TAR}" -C "$(dirname "${SPACK_SITE}")" "$(basename "${SPACK_SITE}")"
 fi
 
-python3 - "${OUTPUT_DIR}/manifest.json" "${REQUEST_MANIFEST}" "${ARTIFACT_DIR}" "${NETWORK_MODE}" "${VARIANT}" "${RELEASE}" "${PACKAGE_SET}" "${TARGET}" "${GCC_VERSION}" "${SPACK_VERSION}" "${LOCKFILE_COPY}" "${SOURCE_MIRROR_TAR}" "${BOOTSTRAP_TAR}" "${SPACK_SEED_TAR}" "${BUILDCACHE_TAR}" <<'PY'
+"${CSE_PYTHON}" - "${OUTPUT_DIR}/manifest.json" "${REQUEST_MANIFEST}" "${ARTIFACT_DIR}" "${NETWORK_MODE}" "${VARIANT}" "${RELEASE}" "${PACKAGE_SET}" "${TARGET}" "${GCC_VERSION}" "${SPACK_VERSION}" "${LOCKFILE_COPY}" "${SOURCE_MIRROR_TAR}" "${BOOTSTRAP_TAR}" "${SPACK_SEED_TAR}" "${BUILDCACHE_TAR}" "${PYTHON_WHEELHOUSE_TAR}" <<'PY'
 import json
 import pathlib
 import sys
@@ -168,7 +181,8 @@ import hashlib
     bootstrap_tar,
     spack_seed_tar,
     buildcache_tar,
-) = sys.argv[1:16]
+    python_wheelhouse_tar,
+) = sys.argv[1:17]
 
 artifact_dir = pathlib.Path(artifact_dir)
 request_data = json.loads(pathlib.Path(request_manifest).read_text())
@@ -204,6 +218,7 @@ manifest = {
         "lockfile": {"path": rel(lockfile_path), "sha256": checksum(lockfile_path)},
         "source_mirror": {"path": rel(source_mirror_tar), "sha256": checksum(source_mirror_tar)},
         "bootstrap_bundle": {"path": rel(bootstrap_tar), "sha256": checksum(bootstrap_tar)},
+        "python_wheelhouse": {"path": rel(python_wheelhouse_tar), "sha256": checksum(python_wheelhouse_tar)},
     },
 }
 if pathlib.Path(spack_seed_tar).exists():
@@ -221,6 +236,7 @@ echo "  manifest : ${OUTPUT_DIR}/manifest.json"
 echo "  lockfile : ${LOCKFILE_COPY}"
 echo "  mirror   : ${SOURCE_MIRROR_TAR}"
 echo "  bootstrap: ${BOOTSTRAP_TAR}"
+echo "  python   : ${PYTHON_WHEELHOUSE_TAR}"
 if [[ "${NETWORK_MODE}" == "airgapped" ]]; then
     echo "  spack    : ${SPACK_SEED_TAR}"
 fi

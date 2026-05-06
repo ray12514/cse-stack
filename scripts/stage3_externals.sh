@@ -31,11 +31,11 @@ fi
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run] Stage 3: rendering packages.yaml.j2 → ${OUTPUT}"
-    python3 "${REPO_ROOT}/scripts/lib/render.py" "${RENDER_ARGS[@]}" --dry-run
+    "${CSE_PYTHON:-python3}" "${REPO_ROOT}/scripts/lib/render.py" "${RENDER_ARGS[@]}" --dry-run
 else
     umask 002
     mkdir -p "${VARIANT_ENV_DIR}"
     echo "Stage 3: rendering packages.yaml..."
-    python3 "${REPO_ROOT}/scripts/lib/render.py" "${RENDER_ARGS[@]}" --output "${OUTPUT}"
+    "${CSE_PYTHON:-python3}" "${REPO_ROOT}/scripts/lib/render.py" "${RENDER_ARGS[@]}" --output "${OUTPUT}"
     echo "Stage 3: packages.yaml written to ${OUTPUT}"
 fi

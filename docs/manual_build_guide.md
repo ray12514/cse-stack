@@ -3,6 +3,13 @@
 This guide mirrors what `scripts/deploy.sh` does. Prefer `deploy.sh` unless you
 are debugging a specific stage.
 
+## Host Prerequisites
+
+The deploy path expects `python3`, basic shell tools, compilers, and
+`clusterinspector` on `PATH`. The repo's Python libraries (`Jinja2` and
+`PyYAML`) are installed into `${SHARED_PATH}/cse/cache/python-venv` by
+`deploy.sh`; set `CSE_PYTHON_VENV` to override that location.
+
 ## Personal Test Build
 
 ```bash
@@ -53,8 +60,10 @@ Use the wrapper scripts for prepared deploys:
 ./scripts/network_deploy.sh --manifest /tmp/cse-artifacts/manifest.json --shared-path /shared/cse
 ```
 
-`restricted` requires a bootstrap bundle, source mirror, and authoritative
-lockfile. `airgapped` additionally requires a versioned Spack seed bundle.
+`restricted` requires a Python wheelhouse, bootstrap bundle, source mirror, and
+authoritative lockfile. `airgapped` additionally requires a versioned Spack
+seed bundle. The fulfillment wrapper creates the Python wheelhouse artifact
+from `requirements-deploy.txt`.
 
 ## Module Verification
 
@@ -70,12 +79,16 @@ module list
 ```
 
 The loaded module list should include NetCDF-Fortran, NetCDF-C, HDF5, MPI, and
-their direct dependency modules. This is driven by Spack `autoload: direct`.
+no full low-level MPI dependency graph. This is driven by curated public module
+loads in `modules.yaml`.
 
 ## Notes
 
 - `cse-init` exposes the compiler baseline but does not set global `CC`, `CXX`,
   or `FC`.
+- `CSE_GCC_ROOT`, `CSE_CC`, `CSE_CXX`, and `CSE_FC` point through the clean
+  compiler view path under `views/compiler/gcc/<version>`, not the hashed Spack
+  store path.
 - MPI builds should use the MPI wrapper compilers from `cse/openmpi/<version>`
   or `cse/mpich/<version>`.
 - On Cray/PBS systems, `cray-pals` is relevant to launcher behavior; on Slurm

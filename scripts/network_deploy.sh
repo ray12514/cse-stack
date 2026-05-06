@@ -41,14 +41,17 @@ fi
 
 MANIFEST_DIR="$(cd "$(dirname "${MANIFEST_PATH}")" && pwd)"
 
-mapfile -t MANIFEST_FIELDS < <(python3 - "${MANIFEST_PATH}" <<'PY'
+MANIFEST_FIELDS=()
+while IFS= read -r line; do
+    MANIFEST_FIELDS+=("${line}")
+done < <(python3 - "${MANIFEST_PATH}" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1]) as fh:
     data = json.load(fh)
 
-artifact_keys = ["lockfile", "source_mirror", "bootstrap_bundle", "spack_seed", "buildcache"]
+artifact_keys = ["lockfile", "source_mirror", "bootstrap_bundle", "python_wheelhouse", "spack_seed", "buildcache"]
 for key in [
     "network_mode",
     "variant",
@@ -79,10 +82,12 @@ SOURCE_MIRROR_REL="${MANIFEST_FIELDS[9]}"
 SOURCE_MIRROR_SHA="${MANIFEST_FIELDS[10]}"
 BOOTSTRAP_REL="${MANIFEST_FIELDS[11]}"
 BOOTSTRAP_SHA="${MANIFEST_FIELDS[12]}"
-SPACK_SEED_REL="${MANIFEST_FIELDS[13]}"
-SPACK_SEED_SHA="${MANIFEST_FIELDS[14]}"
-BUILDCACHE_REL="${MANIFEST_FIELDS[15]}"
-BUILDCACHE_SHA="${MANIFEST_FIELDS[16]}"
+PYTHON_WHEELHOUSE_REL="${MANIFEST_FIELDS[13]}"
+PYTHON_WHEELHOUSE_SHA="${MANIFEST_FIELDS[14]}"
+SPACK_SEED_REL="${MANIFEST_FIELDS[15]}"
+SPACK_SEED_SHA="${MANIFEST_FIELDS[16]}"
+BUILDCACHE_REL="${MANIFEST_FIELDS[17]}"
+BUILDCACHE_SHA="${MANIFEST_FIELDS[18]}"
 
 resolve_artifact() {
     local relative_path="$1"
@@ -116,10 +121,11 @@ verify_checksum() {
 LOCKFILE_PATH="$(resolve_artifact "${LOCKFILE_REL}")"
 SOURCE_MIRROR_ARCHIVE="$(resolve_artifact "${SOURCE_MIRROR_REL}")"
 BOOTSTRAP_BUNDLE_PATH="$(resolve_artifact "${BOOTSTRAP_REL}")"
+PYTHON_WHEELHOUSE_ARCHIVE="$(resolve_artifact "${PYTHON_WHEELHOUSE_REL}")"
 SPACK_SEED_PATH="$(resolve_artifact "${SPACK_SEED_REL}")"
 BUILDCACHE_ARCHIVE="$(resolve_artifact "${BUILDCACHE_REL}")"
 
-for required_path in "${LOCKFILE_PATH}" "${SOURCE_MIRROR_ARCHIVE}" "${BOOTSTRAP_BUNDLE_PATH}"; do
+for required_path in "${LOCKFILE_PATH}" "${SOURCE_MIRROR_ARCHIVE}" "${BOOTSTRAP_BUNDLE_PATH}" "${PYTHON_WHEELHOUSE_ARCHIVE}"; do
     if [[ ! -f "${required_path}" ]]; then
         echo "ERROR: required artifact missing: ${required_path}" >&2
         exit 1
@@ -133,21 +139,29 @@ fi
 verify_checksum "${LOCKFILE_PATH}" "${LOCKFILE_SHA}"
 verify_checksum "${SOURCE_MIRROR_ARCHIVE}" "${SOURCE_MIRROR_SHA}"
 verify_checksum "${BOOTSTRAP_BUNDLE_PATH}" "${BOOTSTRAP_SHA}"
+verify_checksum "${PYTHON_WHEELHOUSE_ARCHIVE}" "${PYTHON_WHEELHOUSE_SHA}"
 verify_checksum "${SPACK_SEED_PATH}" "${SPACK_SEED_SHA}"
 verify_checksum "${BUILDCACHE_ARCHIVE}" "${BUILDCACHE_SHA}"
 
 ARTIFACT_STAGE_DIR="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/network-artifacts"
 SOURCE_MIRROR_DIR="${ARTIFACT_STAGE_DIR}/source-mirror"
+PYTHON_WHEELHOUSE_DIR="${ARTIFACT_STAGE_DIR}/python-wheelhouse"
 BUILDCACHE_DIR="${ARTIFACT_STAGE_DIR}/buildcache"
 
 if [[ "${DRY_RUN}" == "1" ]]; then
     echo "[dry-run] network_deploy: would extract ${SOURCE_MIRROR_ARCHIVE} to ${SOURCE_MIRROR_DIR}"
+    echo "[dry-run] network_deploy: would extract ${PYTHON_WHEELHOUSE_ARCHIVE} to ${PYTHON_WHEELHOUSE_DIR}"
     if [[ -n "${BUILDCACHE_ARCHIVE}" ]]; then
         echo "[dry-run] network_deploy: would extract ${BUILDCACHE_ARCHIVE} to ${BUILDCACHE_DIR}"
     fi
+    _PYTHON_WHEELHOUSE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/cse-python-wheelhouse.XXXXXX")"
+    trap 'rm -rf "${_PYTHON_WHEELHOUSE_TMP}"' EXIT
+    PYTHON_WHEELHOUSE_DIR="${_PYTHON_WHEELHOUSE_TMP}/python-wheelhouse"
+    cse_extract_archive "${PYTHON_WHEELHOUSE_ARCHIVE}" "${PYTHON_WHEELHOUSE_DIR}"
 else
     mkdir -p "${ARTIFACT_STAGE_DIR}"
     cse_extract_archive "${SOURCE_MIRROR_ARCHIVE}" "${SOURCE_MIRROR_DIR}"
+    cse_extract_archive "${PYTHON_WHEELHOUSE_ARCHIVE}" "${PYTHON_WHEELHOUSE_DIR}"
     if [[ -n "${BUILDCACHE_ARCHIVE}" ]]; then
         cse_extract_archive "${BUILDCACHE_ARCHIVE}" "${BUILDCACHE_DIR}"
     fi
@@ -164,6 +178,7 @@ DEPLOY_ARGS=(
     --gcc-version "${GCC_VERSION}"
     --spack-version "${SPACK_VERSION}"
     --mirror-path "${SOURCE_MIRROR_DIR}"
+    --python-wheelhouse "${PYTHON_WHEELHOUSE_DIR}"
     --bootstrap-bundle "${BOOTSTRAP_BUNDLE_PATH}"
     --lockfile "${LOCKFILE_PATH}"
     --artifact-manifest "${MANIFEST_PATH}"

@@ -14,6 +14,10 @@ modules:
       - PKG_CONFIG_PATH
     share/man:
       - MANPATH
+    share/pkgconfig:
+      - PKG_CONFIG_PATH
+    .:
+      - CMAKE_PREFIX_PATH
 
   default:
     enable:
@@ -26,68 +30,63 @@ modules:
       hierarchy: []
 {% endif %}
       hash_length: 0
-      hide_implicits: true
       projections:
         all: 'cse/{name}/{version}'
       all:
-        autoload: direct
-        environment:
-          set:
-            '{name}_ROOT': '{prefix}'
-            '{name}_DIR':  '{prefix}'
-            '{name}_HOME': '{prefix}'
+        autoload: none
 
       hdf5:
         suffixes:
           '+mpi': 'mpi'
           '~mpi': 'serial'
-        environment:
-          set:
-            HDF5_ROOT: '{prefix}'
-            HDF5_DIR:  '{prefix}'
-            HDF5_HOME: '{prefix}'
+
+      hdf5 +mpi:
+        load:
+          - '{{ mpi_module }}'
 
       netcdf-c:
         suffixes:
           '+mpi': 'mpi'
           '~mpi': 'serial'
-        environment:
-          set:
-            NETCDF_ROOT:   '{prefix}'
-            NETCDF_DIR:    '{prefix}'
-            NETCDF_HOME:   '{prefix}'
-            NETCDF_C_ROOT: '{prefix}'
+
+      netcdf-c +mpi:
+        load:
+          - '{{ hdf5_mpi_module }}'
+
+      netcdf-c ~mpi:
+        load:
+          - '{{ hdf5_serial_module }}'
 
       netcdf-fortran:
         suffixes:
           '^netcdf-c +mpi': 'mpi'
           '^netcdf-c ~mpi': 'serial'
-        environment:
-          set:
-            NETCDF_FORTRAN_ROOT: '{prefix}'
-            NETCDF_FORTRAN_DIR:  '{prefix}'
+
+      netcdf-fortran ^netcdf-c +mpi:
+        load:
+          - '{{ netcdf_c_mpi_module }}'
+
+      netcdf-fortran ^netcdf-c ~mpi:
+        load:
+          - '{{ netcdf_c_serial_module }}'
 
       netcdf-cxx4:
         suffixes:
           '^netcdf-c +mpi': 'mpi'
           '^netcdf-c ~mpi': 'serial'
-        environment:
-          set:
-            NETCDF_CXX_ROOT: '{prefix}'
+
+      netcdf-cxx4 ^netcdf-c +mpi:
+        load:
+          - '{{ netcdf_c_mpi_module }}'
+
+      netcdf-cxx4 ^netcdf-c ~mpi:
+        load:
+          - '{{ netcdf_c_serial_module }}'
 
 {% if is_openmpi %}
       openmpi:
-        environment:
-          set:
-            MPI_HOME: '{prefix}'
-            MPI_ROOT: '{prefix}'
-            MPI_DIR:  '{prefix}'
-            OMPI_DIR: '{prefix}'
+        autoload: none
 {% else %}
       mpich:
-        environment:
-          set:
-            MPI_HOME:  '{prefix}'
-            MPI_ROOT:  '{prefix}'
-            MPICH_DIR: '{prefix}'
+        autoload: none
 {% endif %}

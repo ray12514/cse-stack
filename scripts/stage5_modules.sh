@@ -17,6 +17,7 @@ set -euo pipefail
 : "${MODULE_SYSTEM:?}"    # lmod or tcl
 
 VARIANT_ENV_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/env"
+VARIANT_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}"
 SITE_MODULE_PATH="${SITE_MODULE_PATH:-${SHARED_PATH}/cse/modulefiles}"
 export SPACK_DISABLE_LOCAL_CONFIG=1
 export SPACK_USER_CACHE_PATH="${SHARED_PATH}/cse/cache/spack"
@@ -34,7 +35,7 @@ render_stage5_template() {
     if [[ -n "${PROFILE_FILE:-}" && -f "${PROFILE_FILE}" ]]; then
         args+=(--profile "${PROFILE_FILE}")
     fi
-    python3 "${REPO_ROOT}/scripts/lib/render.py" "${args[@]}"
+    "${CSE_PYTHON:-python3}" "${REPO_ROOT}/scripts/lib/render.py" "${args[@]}"
 }
 
 detect_generated_module_root() {
@@ -58,6 +59,34 @@ detect_generated_module_root() {
     fi
 
     return 1
+}
+
+publish_compiler_view_from_bootstrap() {
+    local bootstrap_yaml="${VARIANT_DIR}/gcc-bootstrap.yaml"
+    local gcc_prefix="" gcc_version="" clean_root="" clean_prefix=""
+
+    if [[ ! -f "${bootstrap_yaml}" ]]; then
+        echo "ERROR: missing ${bootstrap_yaml}; Stage 2 must publish the compiler baseline first." >&2
+        exit 1
+    fi
+
+    gcc_prefix="$(awk '/^[[:space:]]*prefix:/ {print $2; exit}' "${bootstrap_yaml}")"
+    gcc_version="$(sed -n -E 's/^[[:space:]]*-[[:space:]]*spec:[[:space:]]*gcc@([^[:space:]]+).*/\1/p' "${bootstrap_yaml}" | head -1)"
+    if [[ -z "${gcc_prefix}" || -z "${gcc_version}" ]]; then
+        echo "ERROR: could not read GCC prefix/version from ${bootstrap_yaml}" >&2
+        exit 1
+    fi
+
+    clean_root="${VARIANT_DIR}/views/compiler/gcc"
+    clean_prefix="${clean_root}/${gcc_version}"
+    mkdir -p "${clean_root}"
+    if [[ -e "${clean_prefix}" && ! -L "${clean_prefix}" ]]; then
+        echo "ERROR: compiler view path exists and is not a symlink: ${clean_prefix}" >&2
+        exit 1
+    fi
+    ln -sfn "${gcc_prefix}" "${clean_prefix}"
+    chgrp -h "${CSE_GROUP:-$(id -gn)}" "${clean_prefix}" 2>/dev/null || true
+    echo "Stage 5: compiler view ${clean_prefix} -> ${gcc_prefix}"
 }
 
 # Determine which cse-init file to install
@@ -84,7 +113,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run]   spack env view regenerate"
     echo "[dry-run]   spack module ${SPACK_MODULE_CMD} refresh --delete-tree -y"
     echo "[dry-run]   mkdir -p $(dirname "${INIT_DST}")"
-    echo "[dry-run]   python3 ${REPO_ROOT}/scripts/lib/render.py --template ${INIT_TEMPLATE} --output ${INIT_DST} --variant ${CSE_VARIANT} --shared-path ${SHARED_PATH} --release ${CSE_RELEASE}"
+    echo "[dry-run]   ${CSE_PYTHON:-python3} ${REPO_ROOT}/scripts/lib/render.py --template ${INIT_TEMPLATE} --output ${INIT_DST} --variant ${CSE_VARIANT} --shared-path ${SHARED_PATH} --release ${CSE_RELEASE}"
     exit 0
 fi
 
@@ -97,6 +126,7 @@ fi
 echo "Stage 5: refreshing module and view configuration..."
 render_stage5_template "modules.yaml.j2" "${VARIANT_ENV_DIR}/modules.yaml"
 render_stage5_template "spack.yaml.j2" "${VARIANT_ENV_DIR}/spack.yaml"
+publish_compiler_view_from_bootstrap
 
 echo "Stage 5: activating environment and refreshing modulefiles..."
 spack env activate -d "${VARIANT_ENV_DIR}"
@@ -117,7 +147,7 @@ mkdir -p "$(dirname "${INIT_DST}")"
 rm -f "${SITE_MODULE_PATH}/cse-init/${INIT_NAME}" \
       "${SITE_MODULE_PATH}/cse-init/${INIT_NAME}.tcl" \
       "${SITE_MODULE_PATH}/cse-init/${INIT_NAME}.lua"
-python3 "${REPO_ROOT}/scripts/lib/render.py" \
+"${CSE_PYTHON:-python3}" "${REPO_ROOT}/scripts/lib/render.py" \
     --template "${INIT_TEMPLATE}" \
     --output "${INIT_DST}" \
     --variant "${CSE_VARIANT}" \

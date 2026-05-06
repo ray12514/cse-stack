@@ -38,9 +38,9 @@ _render() {
     fi
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo "[dry-run] Stage 4: rendering ${tpl} → ${out}"
-        python3 "${REPO_ROOT}/scripts/lib/render.py" "${args[@]}" --dry-run
+        "${CSE_PYTHON:-python3}" "${REPO_ROOT}/scripts/lib/render.py" "${args[@]}" --dry-run
     else
-        python3 "${REPO_ROOT}/scripts/lib/render.py" "${args[@]}" --output "${out}"
+        "${CSE_PYTHON:-python3}" "${REPO_ROOT}/scripts/lib/render.py" "${args[@]}" --output "${out}"
     fi
 }
 
