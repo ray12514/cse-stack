@@ -30,11 +30,11 @@ else
 fi
 
 if [[ "${MODULE_SYSTEM}" == "lmod" ]]; then
-    INIT_SRC="${REPO_ROOT}/modules/cse-init/${INIT_NAME}.lua"
+    INIT_TEMPLATE="${REPO_ROOT}/templates/cse-init.lua.j2"
     INIT_DST="${SITE_MODULE_PATH}/cse-init/${INIT_NAME}.lua"
     SPACK_MODULE_CMD="lmod"
 else
-    INIT_SRC="${REPO_ROOT}/modules/cse-init/${INIT_NAME}.tcl"
+    INIT_TEMPLATE="${REPO_ROOT}/templates/cse-init.tcl.j2"
     INIT_DST="${SITE_MODULE_PATH}/cse-init/${INIT_NAME}"
     SPACK_MODULE_CMD="tcl"
 fi
@@ -44,7 +44,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run]   spack env activate -d ${VARIANT_ENV_DIR}"
     echo "[dry-run]   spack module ${SPACK_MODULE_CMD} refresh --delete-tree -y"
     echo "[dry-run]   mkdir -p $(dirname "${INIT_DST}")"
-    echo "[dry-run]   cp ${INIT_SRC} ${INIT_DST}"
+    echo "[dry-run]   python3 ${REPO_ROOT}/scripts/lib/render.py --template ${INIT_TEMPLATE} --output ${INIT_DST} --variant ${CSE_VARIANT} --shared-path ${SHARED_PATH} --release ${CSE_RELEASE}"
     exit 0
 fi
 
@@ -58,10 +58,25 @@ echo "Stage 5: activating environment and refreshing modulefiles..."
 spack env activate -d "${VARIANT_ENV_DIR}"
 spack module "${SPACK_MODULE_CMD}" refresh --delete-tree -y
 
-echo "Stage 5: installing cse-init/${INIT_NAME} to ${INIT_DST}..."
+MODULE_ROOT_BASE="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/modules"
+if [[ "${MODULE_SYSTEM}" == "lmod" && -d "${MODULE_ROOT_BASE}/Core" ]]; then
+    export CSE_INIT_MODULE_ROOT="${MODULE_ROOT_BASE}/Core"
+else
+    export CSE_INIT_MODULE_ROOT="${MODULE_ROOT_BASE}"
+fi
+
+echo "Stage 5: rendering cse-init/${INIT_NAME} to ${INIT_DST}..."
 umask 022
 mkdir -p "$(dirname "${INIT_DST}")"
-cp "${INIT_SRC}" "${INIT_DST}"
+rm -f "${SITE_MODULE_PATH}/cse-init/${INIT_NAME}" \
+      "${SITE_MODULE_PATH}/cse-init/${INIT_NAME}.tcl" \
+      "${SITE_MODULE_PATH}/cse-init/${INIT_NAME}.lua"
+python3 "${REPO_ROOT}/scripts/lib/render.py" \
+    --template "${INIT_TEMPLATE}" \
+    --output "${INIT_DST}" \
+    --variant "${CSE_VARIANT}" \
+    --shared-path "${SHARED_PATH}" \
+    --release "${CSE_RELEASE}"
 chgrp "${CSE_GROUP:-$(id -gn)}" "${INIT_DST}" 2>/dev/null || true
 
 echo "Stage 5: done."
