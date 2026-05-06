@@ -105,32 +105,41 @@ MODULE_SYSTEM_OVERRIDE=""
 MOCK_PROFILE=""
 SPACK_VERSION_OVERRIDE=""
 
+require_arg_value() {
+    local opt="$1"
+    local next="${2:-}"
+    if [[ -z "${next}" || "${next}" == --* ]]; then
+        echo "ERROR: ${opt} requires a value" >&2
+        exit 1
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --variant)        VARIANT="$2";                shift 2 ;;
-        --release)        RELEASE="$2";                shift 2 ;;
-        --shared-path)    SHARED_PATH="$2";            shift 2 ;;
-        --network-mode)   NETWORK_MODE="$2";           shift 2 ;;
+        --variant)        require_arg_value "$1" "${2:-}"; VARIANT="$2";                shift 2 ;;
+        --release)        require_arg_value "$1" "${2:-}"; RELEASE="$2";                shift 2 ;;
+        --shared-path)    require_arg_value "$1" "${2:-}"; SHARED_PATH="$2";            shift 2 ;;
+        --network-mode)   require_arg_value "$1" "${2:-}"; NETWORK_MODE="$2";           shift 2 ;;
         --dry-run)        DRY_RUN=1;                   shift   ;;
-        --from-stage)     FROM_STAGE="$2";             shift 2 ;;
-        --gcc-version)    GCC_VERSION_OVERRIDE="$2";    shift 2 ;;
-        --mpich-version)  MPICH_VERSION_OVERRIDE="$2"; shift 2 ;;
-        --jobs)           INSTALL_JOBS_OVERRIDE="$2";  shift 2 ;;
-        --make-jobs)      MAKE_JOBS_OVERRIDE="$2";     shift 2 ;;
-        --package-set)    PACKAGE_SET_OVERRIDE="$2";   shift 2 ;;
-        --target)         SPACK_TARGET_OVERRIDE="$2";   shift 2 ;;
+        --from-stage)     require_arg_value "$1" "${2:-}"; FROM_STAGE="$2";             shift 2 ;;
+        --gcc-version)    require_arg_value "$1" "${2:-}"; GCC_VERSION_OVERRIDE="$2";   shift 2 ;;
+        --mpich-version)  require_arg_value "$1" "${2:-}"; MPICH_VERSION_OVERRIDE="$2"; shift 2 ;;
+        --jobs)           require_arg_value "$1" "${2:-}"; INSTALL_JOBS_OVERRIDE="$2";  shift 2 ;;
+        --make-jobs)      require_arg_value "$1" "${2:-}"; MAKE_JOBS_OVERRIDE="$2";     shift 2 ;;
+        --package-set)    require_arg_value "$1" "${2:-}"; PACKAGE_SET_OVERRIDE="$2";   shift 2 ;;
+        --target)         require_arg_value "$1" "${2:-}"; SPACK_TARGET_OVERRIDE="$2";  shift 2 ;;
         --cache-only)     SPACK_CACHE_ONLY=1;          shift   ;;
-        --group)          CSE_GROUP_OVERRIDE="$2";     shift 2 ;;
-        --mirror-path)    MIRROR_PATH="$2";            shift 2 ;;
-        --buildcache-uri) BUILDCACHE_URI="$2";         shift 2 ;;
-        --spack-seed)     SPACK_SEED="$2";             shift 2 ;;
-        --bootstrap-bundle) BOOTSTRAP_BUNDLE="$2";     shift 2 ;;
-        --lockfile)       AUTHORITATIVE_LOCKFILE="$2"; shift 2 ;;
-        --request-manifest) REQUEST_MANIFEST="$2";     shift 2 ;;
-        --artifact-manifest) ARTIFACT_MANIFEST="$2";   shift 2 ;;
-        --module-system)  MODULE_SYSTEM_OVERRIDE="$2"; shift 2 ;;
-        --mock-profile)   MOCK_PROFILE="$2";           shift 2 ;;
-        --spack-version)  SPACK_VERSION_OVERRIDE="$2"; shift 2 ;;
+        --group)          require_arg_value "$1" "${2:-}"; CSE_GROUP_OVERRIDE="$2";     shift 2 ;;
+        --mirror-path)    require_arg_value "$1" "${2:-}"; MIRROR_PATH="$2";            shift 2 ;;
+        --buildcache-uri) require_arg_value "$1" "${2:-}"; BUILDCACHE_URI="$2";         shift 2 ;;
+        --spack-seed)     require_arg_value "$1" "${2:-}"; SPACK_SEED="$2";             shift 2 ;;
+        --bootstrap-bundle) require_arg_value "$1" "${2:-}"; BOOTSTRAP_BUNDLE="$2";     shift 2 ;;
+        --lockfile)       require_arg_value "$1" "${2:-}"; AUTHORITATIVE_LOCKFILE="$2"; shift 2 ;;
+        --request-manifest) require_arg_value "$1" "${2:-}"; REQUEST_MANIFEST="$2";     shift 2 ;;
+        --artifact-manifest) require_arg_value "$1" "${2:-}"; ARTIFACT_MANIFEST="$2";   shift 2 ;;
+        --module-system)  require_arg_value "$1" "${2:-}"; MODULE_SYSTEM_OVERRIDE="$2"; shift 2 ;;
+        --mock-profile)   require_arg_value "$1" "${2:-}"; MOCK_PROFILE="$2";           shift 2 ;;
+        --spack-version)  require_arg_value "$1" "${2:-}"; SPACK_VERSION_OVERRIDE="$2"; shift 2 ;;
         -h|--help)
             sed -n '3,49p' "${BASH_SOURCE[0]}"
             exit 0
