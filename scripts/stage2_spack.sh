@@ -61,6 +61,17 @@ _stage2_install_spack_seed() {
     cse_extract_archive "${seed_path}" "${SPACK_SITE}"
 }
 
+_find_installed_gcc_bin() {
+    local prefix=""
+    prefix="$(spack location -i "gcc@${GCC_VERSION}" 2>/dev/null || true)"
+    if [[ -n "${prefix}" && -x "${prefix}/bin/gcc" ]]; then
+        printf '%s\n' "${prefix}/bin/gcc"
+        return 0
+    fi
+
+    find "${SPACK_SITE}/opt" -path "*/gcc-${GCC_VERSION}*/bin/gcc" 2>/dev/null | head -1
+}
+
 # Prevent Spack from reading ~/.spack/ or /etc/spack/ — we write all config
 # directly as YAML files so this environment is fully reproducible.
 export SPACK_DISABLE_LOCAL_CONFIG=1
@@ -243,9 +254,7 @@ SYSEOF
         echo "Stage 2: using system gcc@${GCC_VERSION} as the CSE compiler baseline."
     else
         # ---- Install gcc@GCC_VERSION into SPACK_SITE ----
-        # Check via filesystem to avoid the `spack find` environment-scope pitfall.
-        GCC_BIN=$(find "${SPACK_SITE}/opt" -name "gcc" \
-                       -path "*/${SPACK_TARGET}/*/gcc-${GCC_VERSION}*/bin/gcc" 2>/dev/null | head -1)
+        GCC_BIN="$(_find_installed_gcc_bin)"
         if [[ -n "${GCC_BIN}" && -x "${GCC_BIN}" ]]; then
             echo "Stage 2: gcc@${GCC_VERSION} already installed — skipping build."
         else
@@ -258,12 +267,11 @@ SYSEOF
                 fi
             fi
             spack "${_INSTALL_ARGS[@]}" "gcc@${GCC_VERSION}" ~bootstrap +binutils "target=${SPACK_TARGET}"
-            GCC_BIN=$(find "${SPACK_SITE}/opt" -name "gcc" \
-                           -path "*/${SPACK_TARGET}/*/gcc-${GCC_VERSION}*/bin/gcc" 2>/dev/null | head -1)
+            GCC_BIN="$(_find_installed_gcc_bin)"
         fi
 
         if [[ -z "${GCC_BIN}" || ! -x "${GCC_BIN}" ]]; then
-            echo "ERROR: cannot locate gcc-${GCC_VERSION} binary under ${SPACK_SITE}/opt" >&2
+            echo "ERROR: cannot locate gcc-${GCC_VERSION} under ${SPACK_SITE}/opt/spack after install" >&2
             exit 1
         fi
 
