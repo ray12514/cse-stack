@@ -11,10 +11,15 @@ __pycache__/
 
 # Spack build artifacts
 spack-stage/
-spack-bootstrap/
 *.lock
+.docker-spack/
 
 # Profile artifacts (contain host-specific data)
 profiles/*.yaml
 !profiles/mock-cray.yaml
 !profiles/.gitkeep
+
+# Prepared network deploy artifacts
+request.json
+manifest.json
+artifacts/
