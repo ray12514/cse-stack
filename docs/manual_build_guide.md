@@ -34,6 +34,15 @@ For a rendering-only check:
    lockfile when supplied, and installs.
 5. Stage 5 refreshes Spack modules and renders `cse-init`.
 
+## Package Sets And OpenSSL
+
+`deploy.sh --package-set <name>` is the supported way to switch between the
+preferred MPI/PMIx stack and the legacy OpenSSL-compatible stack.
+
+OpenSSL is always a site external and is never built by Spack. If the site
+OpenSSL is too old for the selected package set, deploy fails before
+concretization and tells you which legacy package set to use.
+
 ## Restricted And Air-Gapped Flow
 
 Use the wrapper scripts for prepared deploys:

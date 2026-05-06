@@ -36,7 +36,9 @@ USE_SYSTEM_GCC="${CSE_USE_SYSTEM_GCC:-0}"
 BOOTSTRAP_ROOT="${SHARED_PATH}/cse/cache/bootstrap"
 
 _normalize_spack_version() {
-    printf '%s\n' "${1#v}"
+    local normalized="${1#v}"
+    normalized="${normalized%% *}"
+    printf '%s\n' "${normalized}"
 }
 
 _stage2_install_bootstrap_bundle() {

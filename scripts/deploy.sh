@@ -391,6 +391,12 @@ validate("request manifest", load(request_manifest))
 validate("artifact manifest", load(artifact_manifest))
 PY
 
+python3 "${REPO_ROOT}/scripts/lib/package_sets.py" \
+    --repo-root "${REPO_ROOT}" \
+    --package-set "${CSE_PACKAGE_SET}" \
+    --variant "${VARIANT}" \
+    --mpich-version "${MPICH_VERSION:-}"
+
 # ------------------------------------------------------------------
 # Stage runner
 # ------------------------------------------------------------------

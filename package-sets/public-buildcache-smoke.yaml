@@ -1,0 +1,17 @@
+description: Minimal single-package set used for public buildcache smoke tests.
+openssl: {}
+variants:
+  v1-openmpi:
+    mpi_provider: openmpi
+    specs:
+      - "pkgconf@2.5.1"
+    views:
+      serial:
+        - "pkgconf"
+  v2-mpich:
+    mpi_provider: mpich
+    specs:
+      - "pkgconf@2.5.1"
+    views:
+      serial:
+        - "pkgconf"

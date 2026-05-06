@@ -2,11 +2,7 @@ packages:
   all:
     target: [{{ cpu_arch }}]
     providers:
-{% if is_openmpi %}
-      mpi: [openmpi]
-{% else %}
-      mpi: [mpich]
-{% endif %}
+      mpi: [{{ mpi_provider }}]
     require:
       - "%gcc@{{ gcc_version }}"
     permissions:
@@ -14,12 +10,10 @@ packages:
       write: group
       group: {{ cse_group }}
 
-  # OS-level externals — versions detected at render time from the live system.
-  # openssl is buildable: true so Spack can build 3.x when the system version
-  # doesn't satisfy a dependency (e.g. OpenMPI 5 → PMIx 4 requires openssl@3.x).
-  # Packages satisfied by the system version still use the external.
+  # OS-level OpenSSL is always site-managed. Deploy preflight validates that
+  # the detected version satisfies the selected package set before concretize.
   openssl:
-    buildable: true
+    buildable: false
 {% if openssl_version %}
     externals:
       - spec: openssl@{{ openssl_version }}
