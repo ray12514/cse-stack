@@ -22,6 +22,28 @@ export SPACK_DISABLE_LOCAL_CONFIG=1
 export SPACK_USER_CACHE_PATH="${SHARED_PATH}/cse/cache/spack"
 export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
 
+detect_generated_module_root() {
+    local base="$1"
+    local cse_dir=""
+
+    if [[ -d "${base}/cse" ]]; then
+        printf '%s\n' "${base}"
+        return 0
+    fi
+    if [[ -d "${base}/Core/cse" ]]; then
+        printf '%s\n' "${base}/Core"
+        return 0
+    fi
+
+    cse_dir="$(find "${base}" -type d -name cse 2>/dev/null | sort | head -1 || true)"
+    if [[ -n "${cse_dir}" ]]; then
+        dirname "${cse_dir}"
+        return 0
+    fi
+
+    return 1
+}
+
 # Determine which cse-init file to install
 if [[ "${CSE_VARIANT}" == "v1-openmpi" ]]; then
     INIT_NAME="openmpi"
@@ -59,13 +81,12 @@ spack env activate -d "${VARIANT_ENV_DIR}"
 spack module "${SPACK_MODULE_CMD}" refresh --delete-tree -y
 
 MODULE_ROOT_BASE="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/modules"
-if [[ "${MODULE_SYSTEM}" == "lmod" && -d "${MODULE_ROOT_BASE}/Core/cse" ]]; then
-    export CSE_INIT_MODULE_ROOT="${MODULE_ROOT_BASE}/Core"
-elif [[ -d "${MODULE_ROOT_BASE}/cse" ]]; then
-    export CSE_INIT_MODULE_ROOT="${MODULE_ROOT_BASE}"
-else
-    export CSE_INIT_MODULE_ROOT="${MODULE_ROOT_BASE}"
+if ! CSE_INIT_MODULE_ROOT="$(detect_generated_module_root "${MODULE_ROOT_BASE}")"; then
+    echo "ERROR: could not find generated cse module namespace under ${MODULE_ROOT_BASE}" >&2
+    exit 1
 fi
+export CSE_INIT_MODULE_ROOT
+echo "Stage 5: detected generated module root ${CSE_INIT_MODULE_ROOT}"
 
 echo "Stage 5: rendering cse-init/${INIT_NAME} to ${INIT_DST}..."
 umask 022
