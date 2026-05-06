@@ -248,7 +248,7 @@ The reduced CSE-functional package set is still available as
 `hdf5-mpi-smoke` when you want to validate the HDF5+MPI layout itself:
 
 ```text
-hdf5@1.14.4+mpi+hl~fortran~cxx ^openmpi@5.0.5 fabrics=ucx,ofi schedulers=slurm
+hdf5@1.14.4+mpi+hl~fortran~cxx ^openmpi@5.0.5 fabrics=ucx,ofi
 ```
 
 By default `--cache-only` uses the public Spack buildcache URI configured in

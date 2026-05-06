@@ -25,3 +25,7 @@ state is documented in `README.md`, `docs/implementation_plan.md`, and
 - Phase 2: optional Cray `cray-mpich` runtime splice via `CSE_MPICH_SPLICE=1`.
 - Decide whether PnetCDF should become a top-level `cse/parallel-netcdf` module.
 - Add Ansible orchestration after the bash proof-of-concept is stable.
+- Flesh out a first-class custom package-set workflow. The current repo-local
+  `--package-set <name>` mechanism works for tracked files under
+  `package-sets/`, but follow-up work should define and document a supported
+  bring-your-own package-set path such as `--package-set-file`.
