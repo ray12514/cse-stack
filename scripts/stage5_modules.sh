@@ -22,6 +22,21 @@ export SPACK_DISABLE_LOCAL_CONFIG=1
 export SPACK_USER_CACHE_PATH="${SHARED_PATH}/cse/cache/spack"
 export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
 
+render_stage5_template() {
+    local tpl="$1" out="$2"
+    local args=(
+        --template "${REPO_ROOT}/templates/${tpl}"
+        --output "${out}"
+        --variant "${CSE_VARIANT}"
+        --shared-path "${SHARED_PATH}"
+        --release "${CSE_RELEASE}"
+    )
+    if [[ -n "${PROFILE_FILE:-}" && -f "${PROFILE_FILE}" ]]; then
+        args+=(--profile "${PROFILE_FILE}")
+    fi
+    python3 "${REPO_ROOT}/scripts/lib/render.py" "${args[@]}"
+}
+
 detect_generated_module_root() {
     local base="$1"
     local cse_dir=""
@@ -63,7 +78,9 @@ fi
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run] Stage 5: would run:"
+    echo "[dry-run]   render modules.yaml and spack.yaml"
     echo "[dry-run]   spack env activate -d ${VARIANT_ENV_DIR}"
+    echo "[dry-run]   spack env view regenerate"
     echo "[dry-run]   spack module ${SPACK_MODULE_CMD} refresh --delete-tree -y"
     echo "[dry-run]   mkdir -p $(dirname "${INIT_DST}")"
     echo "[dry-run]   python3 ${REPO_ROOT}/scripts/lib/render.py --template ${INIT_TEMPLATE} --output ${INIT_DST} --variant ${CSE_VARIANT} --shared-path ${SHARED_PATH} --release ${CSE_RELEASE}"
@@ -76,8 +93,13 @@ fi
 # shellcheck source=/dev/null
 . "${SPACK_ROOT}/share/spack/setup-env.sh"
 
+echo "Stage 5: refreshing module and view configuration..."
+render_stage5_template "modules.yaml.j2" "${VARIANT_ENV_DIR}/modules.yaml"
+render_stage5_template "spack.yaml.j2" "${VARIANT_ENV_DIR}/spack.yaml"
+
 echo "Stage 5: activating environment and refreshing modulefiles..."
 spack env activate -d "${VARIANT_ENV_DIR}"
+spack env view regenerate
 spack module "${SPACK_MODULE_CMD}" refresh --delete-tree -y
 
 MODULE_ROOT_BASE="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/modules"

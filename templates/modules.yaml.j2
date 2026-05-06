@@ -18,7 +18,8 @@ modules:
   default:
     enable:
       - {{ module_system }}
-    use_view: false
+    use_view: cse_modules
+    arch_folder: false
     roots:
       {{ module_system }}: {{ module_root }}
     {{ module_system }}:
@@ -28,7 +29,7 @@ modules:
       hash_length: 0
       hide_implicits: true
       projections:
-        all: 'cse/{name}'
+        all: 'cse/{name}/{version}'
       all:
         autoload: direct
         environment:

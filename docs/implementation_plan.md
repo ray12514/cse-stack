@@ -56,12 +56,14 @@ The module design follows Spack's documented production pattern:
   while keeping them available for autoload.
 - `exclude_implicits` is intentionally not used because excluded modules cannot
   be autoloaded.
+- `use_view: cse_modules` makes generated package modulefiles point at clean
+  Spack view prefixes instead of raw hashed install-store prefixes.
 
 Expected user flow:
 
 ```bash
 module load cse-init/openmpi
-module load cse/netcdf-fortran-mpi
+module load cse/netcdf-fortran/4.6.1-mpi
 ```
 
 The second command should load NetCDF-Fortran plus the matching NetCDF-C, HDF5,
@@ -78,7 +80,8 @@ MPI, and required direct dependency modules.
 
 It prepends GCC `bin` to `PATH`, but does not set global `CC`, `CXX`, or `FC`.
 Serial user builds may opt in with `export CC=$CSE_CC`; MPI user builds should
-load `cse/openmpi` or `cse/mpich` and use MPI wrapper compilers.
+load `cse/openmpi/<version>` or `cse/mpich/<version>` and use MPI wrapper
+compilers.
 
 ## Personal And Shared Installs
 
@@ -112,5 +115,5 @@ Use optimized targets only as explicit site-specific layers:
   `network_deploy.sh` with representative artifacts.
 - Inspect rendered YAML for one compiler handoff source.
 - Inspect generated modulefiles for autoload/depends-on statements.
-- In a clean module shell, verify loading `cse/netcdf-fortran-mpi` loads
+- In a clean module shell, verify loading `cse/netcdf-fortran/4.6.1-mpi` loads
   NetCDF-C, HDF5, MPI, and direct dependencies.
