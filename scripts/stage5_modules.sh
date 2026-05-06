@@ -59,8 +59,10 @@ spack env activate -d "${VARIANT_ENV_DIR}"
 spack module "${SPACK_MODULE_CMD}" refresh --delete-tree -y
 
 MODULE_ROOT_BASE="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/modules"
-if [[ "${MODULE_SYSTEM}" == "lmod" && -d "${MODULE_ROOT_BASE}/Core" ]]; then
+if [[ "${MODULE_SYSTEM}" == "lmod" && -d "${MODULE_ROOT_BASE}/Core/cse" ]]; then
     export CSE_INIT_MODULE_ROOT="${MODULE_ROOT_BASE}/Core"
+elif [[ -d "${MODULE_ROOT_BASE}/cse" ]]; then
+    export CSE_INIT_MODULE_ROOT="${MODULE_ROOT_BASE}"
 else
     export CSE_INIT_MODULE_ROOT="${MODULE_ROOT_BASE}"
 fi
