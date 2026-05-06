@@ -110,14 +110,6 @@ Use optimized targets only as explicit site-specific layers:
 - Dry-run both variants.
 - Dry-run `network_prepare_request.sh`, `network_fulfill_request.sh`, and
   `network_deploy.sh` with representative artifacts.
-- Run `./scripts/docker_smoke_test.sh` for Linux syntax/render validation.
-- Run `./scripts/docker_cse_buildcache_test.sh --dry-run` for a reduced
-  deploy-backed HDF5/MPI environment.
-- Run `./scripts/docker_cse_buildcache_test.sh --cache-only` to prove the
-  reduced environment can be restored from a buildcache without source builds.
-  The default Docker package set should target a package with a high public
-  cache hit probability, while the reduced HDF5+MPI set remains available for
-  CSE functional validation.
 - Inspect rendered YAML for one compiler handoff source.
 - Inspect generated modulefiles for autoload/depends-on statements.
 - In a clean module shell, verify loading `cse/netcdf-fortran-mpi` loads
