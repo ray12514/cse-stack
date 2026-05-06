@@ -16,6 +16,7 @@ With --dry-run the rendered content is printed to stdout and no file is written.
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -86,6 +87,24 @@ def _detect_python() -> tuple:
     return "", ""
 
 
+def _detect_gcc_bootstrap_prefix(variant_dir: str) -> str:
+    override = os.environ.get("CSE_GCC_PREFIX", "").strip()
+    if override:
+        return override
+
+    bootstrap_yaml = Path(variant_dir, "gcc-bootstrap.yaml")
+    if not bootstrap_yaml.exists():
+        return ""
+
+    try:
+        text = bootstrap_yaml.read_text()
+    except OSError:
+        return ""
+
+    match = re.search(r"^\s*prefix:\s*(\S+)\s*$", text, flags=re.MULTILINE)
+    return match.group(1) if match else ""
+
+
 def _build_context(profile: SystemProfile, variant: str,
                    shared_path: str, release: str,
                    gcc_version_override: str = "",
@@ -124,7 +143,7 @@ def _build_context(profile: SystemProfile, variant: str,
         # Override with SPACK_TARGET env var if a specific microarch is needed.
         "cpu_arch": os.environ.get("SPACK_TARGET", "x86_64"),
         # Module system
-        "module_system": profile.module_system(),
+        "module_system": os.environ.get("MODULE_SYSTEM", profile.module_system()),
         # Scheduler
         "scheduler_type": profile.scheduler_type(),
         # GCC — both variants bootstrap from Spack
@@ -156,6 +175,7 @@ def _build_context(profile: SystemProfile, variant: str,
     # environment's spack.yaml conditionally includes it — render-time check
     # so we don't emit an `include:` entry that Spack will fail to find.
     variant_dir = f"{shared_path}/cse/{release}/{variant}"
+    ctx["variant_dir"] = variant_dir
     ctx["gcc_bootstrap_yaml_exists"] = os.path.exists(
         os.path.join(variant_dir, "gcc-bootstrap.yaml")
     )
@@ -172,6 +192,18 @@ def _build_context(profile: SystemProfile, variant: str,
     ctx["spack_specs"] = package_set_data.get("specs", [])
     ctx["view_mpi_select"] = package_set_data.get("views", {}).get("mpi", [])
     ctx["view_serial_select"] = package_set_data.get("views", {}).get("serial", [])
+    ctx["init_module_root"] = (
+        os.environ.get("CSE_INIT_MODULE_ROOT", "").strip()
+        or (
+            f"{ctx['module_root']}/Core"
+            if ctx["module_system"] == "lmod"
+            else ctx["module_root"]
+        )
+    )
+    ctx["cse_gcc_root"] = _detect_gcc_bootstrap_prefix(variant_dir) or ctx["bootstrap_prefix"]
+    ctx["cse_cc"] = f"{ctx['cse_gcc_root']}/bin/gcc"
+    ctx["cse_cxx"] = f"{ctx['cse_gcc_root']}/bin/g++"
+    ctx["cse_fc"] = f"{ctx['cse_gcc_root']}/bin/gfortran"
     return ctx
 
 
