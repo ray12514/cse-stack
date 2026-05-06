@@ -1,0 +1,58 @@
+description: Full CSE package set for sites whose external OpenSSL is older than 3.x.
+openssl:
+  min_version: "1.1.1"
+variants:
+  v1-openmpi:
+    mpi_provider: openmpi
+    specs:
+      - "openmpi@4.1.6 fabrics=auto schedulers=slurm ^pmix@3.2.3"
+      - "cmake@3.29.6"
+      - "zlib@1.3.1"
+      - "hdf5@1.14.4 +mpi  +fortran +cxx +hl +threadsafe"
+      - "hdf5@1.14.4 ~mpi  +fortran +cxx +hl +threadsafe"
+      - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.4+mpi"
+      - "netcdf-c@4.9.2 ~mpi                    ^hdf5@1.14.4~mpi"
+      - "netcdf-fortran@4.6.1                   ^netcdf-c@4.9.2+mpi"
+      - "netcdf-fortran@4.6.1                   ^netcdf-c@4.9.2~mpi"
+      - "netcdf-cxx4@4.3.1                      ^netcdf-c@4.9.2+mpi"
+      - "netcdf-cxx4@4.3.1                      ^netcdf-c@4.9.2~mpi"
+    views:
+      mpi:
+        - "+mpi"
+        - "openmpi"
+        - "cmake"
+        - "zlib"
+      serial:
+        - "hdf5~mpi"
+        - "netcdf-c~mpi"
+        - "netcdf-fortran ^netcdf-c~mpi"
+        - "netcdf-cxx4 ^netcdf-c~mpi"
+        - "cmake"
+        - "zlib"
+  v2-mpich:
+    mpi_provider: mpich
+    specs:
+      - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix ^pmix@3.2.3"
+      - "cmake@3.29.6"
+      - "zlib@1.3.1"
+      - "hdf5@1.14.4 +mpi  +fortran +cxx +hl +threadsafe ^mpich"
+      - "hdf5@1.14.4 ~mpi  +fortran +cxx +hl +threadsafe"
+      - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.4+mpi  ^mpich"
+      - "netcdf-c@4.9.2 ~mpi                    ^hdf5@1.14.4~mpi"
+      - "netcdf-fortran@4.6.1                   ^netcdf-c@4.9.2+mpi"
+      - "netcdf-fortran@4.6.1                   ^netcdf-c@4.9.2~mpi"
+      - "netcdf-cxx4@4.3.1                      ^netcdf-c@4.9.2+mpi"
+      - "netcdf-cxx4@4.3.1                      ^netcdf-c@4.9.2~mpi"
+    views:
+      mpi:
+        - "+mpi"
+        - "mpich"
+        - "cmake"
+        - "zlib"
+      serial:
+        - "hdf5~mpi"
+        - "netcdf-c~mpi"
+        - "netcdf-fortran ^netcdf-c~mpi"
+        - "netcdf-cxx4 ^netcdf-c~mpi"
+        - "cmake"
+        - "zlib"

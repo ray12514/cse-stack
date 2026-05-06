@@ -17,6 +17,10 @@ Restricted and air-gapped flows use transfer bundles plus an authoritative
 lockfile so the target does not silently drift by re-concretizing against a
 different helper environment.
 
+OpenSSL is intentionally enforced as a site external. Package sets define the
+supported MPI/PMIx policies, including legacy-compatible alternatives for sites
+whose external OpenSSL is older than 3.x.
+
 ## Architecture
 
 - One Spack instance lives at `${SHARED_PATH}/cse/spack-site`.

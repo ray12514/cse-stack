@@ -14,6 +14,24 @@ The current proof-of-concept supports two variants:
 Both variants bootstrap `gcc@13.3.0` with Spack and use that compiler for the
 stack. `gcc@13.2.0` is deprecated upstream and is no longer the default.
 
+## OpenSSL Policy
+
+OpenSSL is always treated as a site external and is never built by Spack in
+this stack. That keeps the deploy aligned with the site-managed trust and patch
+policy.
+
+The consequence is explicit: if the site OpenSSL is too old for the selected
+MPI/PMIx package set, deploy fails before concretization with a recommended
+alternate package set.
+
+Current supported package-set names include:
+
+- `full`: preferred default stack, expects external OpenSSL 3.x
+- `full-legacy-openssl`: legacy-compatible full stack for older site OpenSSL
+- `hdf5-mpi-smoke`: reduced MPI smoke stack, also expects external OpenSSL 3.x
+- `hdf5-mpi-smoke-legacy-openssl`: reduced MPI smoke stack for older site OpenSSL
+- `public-buildcache-smoke`: minimal single-package smoke set
+
 ## Network Modes
 
 The deploy path supports three explicit network policies:
@@ -72,6 +90,17 @@ pass `--group <name>`.
 The default Spack target is `x86_64` for portability across login, build, and
 compute nodes. Use `--target x86_64_v3` only after confirming every target node
 supports that ISA level.
+
+If a site uses an older external OpenSSL, select the legacy-compatible package
+set explicitly:
+
+```bash
+./scripts/deploy.sh \
+  --variant v1-openmpi \
+  --release test \
+  --shared-path /tmp/cse-test \
+  --package-set full-legacy-openssl
+```
 
 ## Prepared Deploy Workflow
 

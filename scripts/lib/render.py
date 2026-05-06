@@ -16,8 +16,6 @@ With --dry-run the rendered content is printed to stdout and no file is written.
 
 import argparse
 import os
-import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -32,17 +30,13 @@ except ImportError:
 # Allow importing profile.py from the same lib/ directory
 sys.path.insert(0, str(Path(__file__).parent))
 from profile import SystemProfile  # noqa: E402
+from package_sets import detect_system_openssl, load_package_set  # noqa: E402
 
 
-# Standard system installation prefixes probed in order.
-# We check these directly rather than relying on PATH so that a conda or
-# module environment active during deploy doesn't shadow the real system
-# packages that Spack will link against.
 _SYSTEM_PREFIXES = ("/usr", "/usr/local")
 
 
 def _query_cmd(*cmd) -> str:
-    """Run cmd, return stdout stripped, or '' on any error."""
     try:
         return subprocess.check_output(
             list(cmd), stderr=subprocess.DEVNULL, text=True
@@ -51,28 +45,7 @@ def _query_cmd(*cmd) -> str:
         return ""
 
 
-def _detect_openssl() -> tuple:
-    """Return (version, prefix) by probing system paths, or ('', '')."""
-    for prefix in _SYSTEM_PREFIXES:
-        binary = Path(prefix, "bin", "openssl")
-        if binary.exists():
-            out = _query_cmd(str(binary), "version")
-            parts = out.split()
-            if parts and parts[0].lower() == "openssl" and len(parts) >= 2:
-                return parts[1], prefix
-    # pkg-config via absolute system binary as fallback
-    for prefix in _SYSTEM_PREFIXES:
-        pkgcfg = Path(prefix, "bin", "pkg-config")
-        if pkgcfg.exists():
-            ver = _query_cmd(str(pkgcfg), "--modversion", "openssl")
-            if ver:
-                p = _query_cmd(str(pkgcfg), "--variable=prefix", "openssl") or prefix
-                return ver, p
-    return "", ""
-
-
 def _detect_curl() -> tuple:
-    """Return (version, prefix) by probing system paths, or ('', '')."""
     for prefix in _SYSTEM_PREFIXES:
         binary = Path(prefix, "bin", "curl")
         if binary.exists():
@@ -86,13 +59,12 @@ def _detect_curl() -> tuple:
         if pkgcfg.exists():
             ver = _query_cmd(str(pkgcfg), "--modversion", "libcurl")
             if ver:
-                p = _query_cmd(str(pkgcfg), "--variable=prefix", "libcurl") or prefix
-                return ver, p
+                pfx = _query_cmd(str(pkgcfg), "--variable=prefix", "libcurl") or prefix
+                return ver, pfx
     return "", ""
 
 
 def _detect_perl() -> tuple:
-    """Return (version, prefix) by probing system paths, or ('', '')."""
     for prefix in _SYSTEM_PREFIXES:
         binary = Path(prefix, "bin", "perl")
         if binary.exists():
@@ -103,7 +75,6 @@ def _detect_perl() -> tuple:
 
 
 def _detect_python() -> tuple:
-    """Return (version, prefix) by probing system paths, or ('', '')."""
     for name in ("python3", "python"):
         for prefix in _SYSTEM_PREFIXES:
             binary = Path(prefix, "bin", name)
@@ -133,9 +104,9 @@ def _build_context(profile: SystemProfile, variant: str,
         make_jobs = int(os.environ.get("SPACK_MAKE_JOBS", "") or "16")
     except ValueError:
         make_jobs = 16
-    _ssl_ver,    _ssl_prefix    = _detect_openssl()
-    _curl_ver,   _curl_prefix   = _detect_curl()
-    _perl_ver,   _perl_prefix   = _detect_perl()
+    _ssl_ver, _ssl_prefix = detect_system_openssl()
+    _curl_ver, _curl_prefix = _detect_curl()
+    _perl_ver, _perl_prefix = _detect_perl()
     _python_ver, _python_prefix = _detect_python()
     ctx: dict = {
         "variant": variant,
@@ -143,14 +114,10 @@ def _build_context(profile: SystemProfile, variant: str,
         "CSE_RELEASE": release,
         "is_openmpi": variant == "v1-openmpi",
         "is_mpich":   variant == "v2-mpich",
-        # OS-level externals: versions detected at render time from the actual
-        # system so Spack never gets a wrong version hint.  Empty string means
-        # the package was not found; templates leave out the externals: block
-        # and set buildable: true so Spack can build its own.
         "openssl_version": _ssl_ver,   "openssl_prefix": _ssl_prefix,
         "curl_version":    _curl_ver,  "curl_prefix":    _curl_prefix,
         "perl_version":    _perl_ver,  "perl_prefix":    _perl_prefix,
-        "python_version":  _python_ver,"python_prefix":  _python_prefix,
+        "python_version":  _python_ver, "python_prefix": _python_prefix,
         # OS
         "glibc_version": profile.glibc_version(),
         # Default to generic x86_64 so the same build runs on any node.
@@ -195,6 +162,16 @@ def _build_context(profile: SystemProfile, variant: str,
     ctx["gcc_compilers_yaml_exists"] = os.path.exists(
         os.path.join(variant_dir, "gcc-compilers.yaml")
     )
+    package_set = os.environ.get("CSE_PACKAGE_SET", "full")
+    ctx["package_set"] = package_set
+    package_set_data = load_package_set(Path(__file__).parent.parent.parent, package_set, variant, ctx)
+    ctx["package_set_data"] = package_set_data
+    ctx["mpi_provider"] = package_set_data.get(
+        "mpi_provider", "openmpi" if variant == "v1-openmpi" else "mpich"
+    )
+    ctx["spack_specs"] = package_set_data.get("specs", [])
+    ctx["view_mpi_select"] = package_set_data.get("views", {}).get("mpi", [])
+    ctx["view_serial_select"] = package_set_data.get("views", {}).get("serial", [])
     return ctx
 
 
@@ -238,9 +215,13 @@ def render_template(template_path: str, profile_path: Optional[str],
         print(f"ERROR: template not found: {templates_dir / tpl_name}", file=sys.stderr)
         return 1
 
-    ctx = _build_context(profile, variant, shared_path, release,
-                         gcc_version_override=os.environ.get("GCC_VERSION", ""),
-                         cse_group=os.environ.get("CSE_GROUP", "cse"))
+    try:
+        ctx = _build_context(profile, variant, shared_path, release,
+                             gcc_version_override=os.environ.get("GCC_VERSION", ""),
+                             cse_group=os.environ.get("CSE_GROUP", "cse"))
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
     rendered = template.render(**ctx)
 
     if dry_run:
