@@ -424,6 +424,7 @@ if [[ ${DRY_RUN} == 1 ]]; then
 else
     echo " Deploy complete."
     echo " Users can now load the CSE environment with:"
+    echo "   module use ${SITE_MODULE_PATH}"
     if [[ "${VARIANT}" == "v1-openmpi" ]]; then
         echo "   module load cse-init/openmpi"
     else

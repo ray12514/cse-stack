@@ -35,7 +35,7 @@ if [[ "${MODULE_SYSTEM}" == "lmod" ]]; then
     SPACK_MODULE_CMD="lmod"
 else
     INIT_SRC="${REPO_ROOT}/modules/cse-init/${INIT_NAME}.tcl"
-    INIT_DST="${SITE_MODULE_PATH}/cse-init/${INIT_NAME}.tcl"
+    INIT_DST="${SITE_MODULE_PATH}/cse-init/${INIT_NAME}"
     SPACK_MODULE_CMD="tcl"
 fi
 
@@ -67,6 +67,7 @@ chgrp "${CSE_GROUP:-$(id -gn)}" "${INIT_DST}" 2>/dev/null || true
 echo "Stage 5: done."
 echo ""
 echo "Users can now load the CSE environment with:"
+echo "  module use ${SITE_MODULE_PATH}"
 if [[ "${CSE_VARIANT}" == "v1-openmpi" ]]; then
     echo "  module load cse-init/openmpi"
 else
