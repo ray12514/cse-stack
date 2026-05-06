@@ -15,6 +15,8 @@ set -euo pipefail
 : "${REPO_ROOT:?stage4_build.sh must be run via deploy.sh}"
 
 VARIANT_ENV_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/env"
+VARIANT_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}"
+GCC_BOOTSTRAP_YAML="${VARIANT_DIR}/gcc-bootstrap.yaml"
 NETWORK_MODE="${CSE_NETWORK_MODE:-online}"
 LOCKFILE_PATH="${AUTHORITATIVE_LOCKFILE:-}"
 # Full Spack isolation: no ~/.spack/ config, no /etc/spack/ site config,
@@ -119,6 +121,12 @@ EOF
 echo "Stage 4: rendering config.yaml, modules.yaml, spack.yaml..."
 _render "config.yaml.j2"  "${VARIANT_ENV_DIR}/config.yaml"
 _render "modules.yaml.j2" "${VARIANT_ENV_DIR}/modules.yaml"
+
+if [[ ! -f "${GCC_BOOTSTRAP_YAML}" ]]; then
+    echo "ERROR: missing ${GCC_BOOTSTRAP_YAML}." >&2
+    echo "       Stage 2 must complete successfully before Stage 4 can concretize." >&2
+    exit 1
+fi
 
 if [[ "${NETWORK_MODE}" != "online" && -z "${MIRROR_PATH:-}" ]]; then
     echo "ERROR: network mode ${NETWORK_MODE} requires a local source mirror." >&2

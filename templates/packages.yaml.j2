@@ -45,22 +45,6 @@ packages:
       - spec: python@{{ python_version }}
         prefix: {{ python_prefix }}
 {% endif %}
-
-  # Bootstrapped GCC — registered as external after stage2_spack.sh builds it.
-  # Both variants bootstrap GCC from Spack (no vendor compiler dependency).
-  gcc:
-    buildable: false
-    externals:
-      - spec: gcc@{{ gcc_version }} languages='c,c++,fortran'
-        prefix: {{ bootstrap_prefix }}
-        extra_attributes:
-          compilers:
-            c:       {{ bootstrap_prefix }}/bin/gcc
-            cxx:     {{ bootstrap_prefix }}/bin/g++
-            fortran: {{ bootstrap_prefix }}/bin/gfortran
-          extra_rpaths:
-            - {{ bootstrap_prefix }}/lib64
-
 {% if is_mpich and has_libfabric %}
   # libfabric — system OFI provider (Cray Slingshot HSN).
   # Detected from modules.loaded by Cluster Inspector; enables MPICH to use
