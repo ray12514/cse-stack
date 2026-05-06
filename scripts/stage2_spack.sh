@@ -1,37 +1,69 @@
 #!/usr/bin/env bash
-# Stage 2: Initialise Spack and bootstrap GCC.
+# Stage 2: Clone/initialise Spack and bootstrap GCC.
 #
-# Uses a single shared Spack instance to build a bootstrapped GCC, then
-# configures Spack to use that GCC for all subsequent builds.
+# Design: ONE spack instance (SPACK_SITE).  GCC is built and stored there.
+# No separate bootstrap clone — the old two-spack pattern is gone.
 #
 # Environment:
 #   SHARED_PATH, CSE_RELEASE, CSE_VARIANT  — set by deploy.sh / activate.sh
-#   CSE_GROUP                              — owning group for install tree (default: cse)
+#   CSE_GROUP                              — owning group (default: current group)
 #   DRY_RUN                                — "1" for dry-run
 #   SPACK_VERSION                          — git tag to clone (default: v1.1.1)
 #   GCC_VERSION                            — GCC version to build (default: 13.3.0)
-#   SPACK_INSTALL_JOBS                    — parallel jobs for spack install (default: 4)
+#   SPACK_INSTALL_JOBS                     — parallel jobs for spack install
+#   SPACK_TARGET                           — Spack build target preference (default: x86_64)
+#   SPACK_CACHE_ONLY                       — "1" to install only from build cache
+#   SPACK_NO_CHECK_SIGNATURE               — "1" to skip binary signature checks
+#   CSE_USE_SYSTEM_GCC                     — "1" to skip GCC bootstrap and register
+#                                            the detected system GCC as the CSE compiler
 set -euo pipefail
 
 : "${SHARED_PATH:?}"
 : "${CSE_RELEASE:?}"
 : "${CSE_VARIANT:?}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "${SCRIPT_DIR}/lib/network_common.sh"
+
+NETWORK_MODE="${CSE_NETWORK_MODE:-online}"
 SPACK_VERSION="${SPACK_VERSION:-v1.1.1}"
-SPACK_SITE="${SHARED_PATH}/cse/spack-site"
 GCC_VERSION="${GCC_VERSION:-13.3.0}"
-
-# Prevent Spack from reading ~/.spack/ config or /etc/spack/ site config.
-# Compiler entries are written directly as YAML files and included by
-# spack.yaml, so we no longer need SPACK_USER_CONFIG_PATH.
-# DISABLE_LOCAL_CONFIG blocks the user-scope config (~/.spack);
-# SYSTEM_CONFIG_PATH blocks /etc/spack/ site-wide config that HPC admins
-# sometimes pre-populate.
-export SPACK_DISABLE_LOCAL_CONFIG=1
-export SPACK_USER_CACHE_PATH="${SHARED_PATH}/cse/cache/bootstrap"
-export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
-
+SPACK_TARGET="${SPACK_TARGET:-x86_64}"
+SPACK_SITE="${SHARED_PATH}/cse/spack-site"
 VARIANT_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}"
+USE_SYSTEM_GCC="${CSE_USE_SYSTEM_GCC:-0}"
+BOOTSTRAP_ROOT="${SHARED_PATH}/cse/cache/bootstrap"
+
+_normalize_spack_version() {
+    printf '%s\n' "${1#v}"
+}
+
+_stage2_install_bootstrap_bundle() {
+    local bundle_path="$1"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo "[dry-run] Stage 2: would seed bootstrap root ${BOOTSTRAP_ROOT} from ${bundle_path}"
+        return 0
+    fi
+    echo "Stage 2: seeding bootstrap root from ${bundle_path}..."
+    cse_extract_archive "${bundle_path}" "${BOOTSTRAP_ROOT}"
+}
+
+_stage2_install_spack_seed() {
+    local seed_path="$1"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo "[dry-run] Stage 2: would install Spack seed ${seed_path} into ${SPACK_SITE}"
+        return 0
+    fi
+    echo "Stage 2: installing Spack seed from ${seed_path} into ${SPACK_SITE}..."
+    cse_extract_archive "${seed_path}" "${SPACK_SITE}"
+}
+
+# Prevent Spack from reading ~/.spack/ or /etc/spack/ — we write all config
+# directly as YAML files so this environment is fully reproducible.
+export SPACK_DISABLE_LOCAL_CONFIG=1
+export SPACK_USER_CACHE_PATH="${BOOTSTRAP_ROOT}"
+export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
 
 _run() {
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
@@ -42,35 +74,77 @@ _run() {
 }
 
 # ------------------------------------------------------------------
-# Clone Spack into the shared site directory (idempotent)
+# 1. Clone Spack into the shared site directory (idempotent)
 # ------------------------------------------------------------------
+if [[ -n "${BOOTSTRAP_BUNDLE:-}" ]]; then
+    _stage2_install_bootstrap_bundle "${BOOTSTRAP_BUNDLE}"
+fi
+
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    echo "[dry-run] Stage 2: would clone spack ${SPACK_VERSION} into ${SPACK_SITE}"
+    if [[ -n "${SPACK_SEED:-}" ]]; then
+        echo "[dry-run] Stage 2: would install Spack ${SPACK_VERSION} from seed ${SPACK_SEED}"
+    else
+        echo "[dry-run] Stage 2: would clone spack ${SPACK_VERSION} into ${SPACK_SITE}"
+    fi
 else
-    if [[ ! -d "${SPACK_SITE}/.git" ]]; then
-        echo "Stage 2: cloning Spack ${SPACK_VERSION} into ${SPACK_SITE}..."
-        mkdir -p "$(dirname "${SPACK_SITE}")"
-        git clone --depth 1 --branch "${SPACK_VERSION}" \
-            https://github.com/spack/spack.git "${SPACK_SITE}"
+    if [[ ! -f "${SPACK_SITE}/share/spack/setup-env.sh" ]]; then
+        if [[ -n "${SPACK_SEED:-}" ]]; then
+            _stage2_install_spack_seed "${SPACK_SEED}"
+        elif [[ "${NETWORK_MODE}" == "airgapped" ]]; then
+            echo "ERROR: air-gapped mode requires a local Spack seed." >&2
+            exit 1
+        else
+            echo "Stage 2: cloning Spack ${SPACK_VERSION} into ${SPACK_SITE}..."
+            mkdir -p "$(dirname "${SPACK_SITE}")"
+            git clone --depth 1 --branch "${SPACK_VERSION}" \
+                https://github.com/spack/spack.git "${SPACK_SITE}"
+        fi
     else
         echo "Stage 2: Spack already present at ${SPACK_SITE}"
     fi
 fi
 
+if [[ "${DRY_RUN:-0}" != "1" ]]; then
+    if [[ ! -x "${SPACK_SITE}/bin/spack" ]]; then
+        echo "ERROR: Spack executable not found under ${SPACK_SITE}" >&2
+        exit 1
+    fi
+    INSTALLED_SPACK_VERSION="$("${SPACK_SITE}/bin/spack" --version)"
+    if [[ "$(_normalize_spack_version "${INSTALLED_SPACK_VERSION}")" != "$(_normalize_spack_version "${SPACK_VERSION}")" ]]; then
+        echo "ERROR: Spack at ${SPACK_SITE} is version ${INSTALLED_SPACK_VERSION}," >&2
+        echo "       expected ${SPACK_VERSION}." >&2
+        exit 1
+    fi
+fi
+
 # ------------------------------------------------------------------
-# Bootstrap GCC using the shared Spack instance
+# 2. Bootstrap GCC into SPACK_SITE (single spack instance)
 # ------------------------------------------------------------------
+GCC_BOOTSTRAP_YAML="${VARIANT_DIR}/gcc-bootstrap.yaml"
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    echo "[dry-run] Stage 2: would bootstrap GCC ${GCC_VERSION} via ${SPACK_SITE}"
-    echo "[dry-run]   . ${SPACK_SITE}/share/spack/setup-env.sh"
-    echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils"
-    echo "[dry-run]   GCC_PREFIX=\$(find ${SPACK_SITE}/opt -path \"*/gcc-${GCC_VERSION}*/bin/gcc\")"
-    echo "[dry-run]   write \${VARIANT_DIR}/gcc-compilers.yaml (gcc@${GCC_VERSION} compiler at \${GCC_PREFIX})"
-    echo "[dry-run]   write \${VARIANT_DIR}/gcc-bootstrap.yaml (gcc@${GCC_VERSION} external at \${GCC_PREFIX})"
+    echo "[dry-run] Stage 2: would source ${SPACK_SITE}/share/spack/setup-env.sh"
+    if [[ -n "${BUILDCACHE_URI:-}" ]]; then
+        echo "[dry-run] Stage 2: would configure build cache ${BUILDCACHE_URI}"
+    fi
+    echo "[dry-run] Stage 2: would register system GCC in ${SPACK_SITE}/etc/spack/compilers.yaml"
+    if [[ "${USE_SYSTEM_GCC}" == "1" ]]; then
+        echo "[dry-run] Stage 2: would skip GCC bootstrap and use the detected system compiler as CSE GCC"
+    else
+        if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
+            if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then
+                echo "[dry-run] Stage 2: would run: spack install --cache-only --no-check-signature --deprecated -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
+            else
+                echo "[dry-run] Stage 2: would run: spack install --cache-only --deprecated -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
+            fi
+        else
+            echo "[dry-run] Stage 2: would run: spack install --deprecated -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
+        fi
+    fi
+    echo "[dry-run] Stage 2: would write ${GCC_BOOTSTRAP_YAML}"
+    echo "[dry-run] Stage 2: would remove temporary ${SPACK_SITE}/etc/spack/compilers.yaml"
 else
-    # Warn if the install root is not owned by the expected group.
-    # This is advisory — a mismatch on a personal workdir is fine.
+    # Advisory group ownership check
     _EXPECTED_GROUP="${CSE_GROUP:-$(id -gn)}"
     _ACTUAL_GROUP="$(stat -c '%G' "${SHARED_PATH}/cse" 2>/dev/null || echo '')"
     if [[ -n "${_ACTUAL_GROUP}" && "${_ACTUAL_GROUP}" != "${_EXPECTED_GROUP}" ]]; then
@@ -81,21 +155,34 @@ else
 
     umask 002
 
-    # Source the shared Spack instance
+    # Source the ONE spack instance
     # shellcheck source=/dev/null
     . "${SPACK_SITE}/share/spack/setup-env.sh"
 
-    # Detect OS/arch now that spack is on PATH.
+    if [[ -n "${BUILDCACHE_URI:-}" ]]; then
+        mkdir -p "${SPACK_SITE}/etc/spack"
+        cat > "${SPACK_SITE}/etc/spack/mirrors.yaml" <<EOF
+mirrors:
+  cse-buildcache: ${BUILDCACHE_URI}
+EOF
+        if [[ "${SPACK_CACHE_ONLY:-0}" == "1" && "${SPACK_NO_CHECK_SIGNATURE:-0}" != "1" ]]; then
+            if command -v timeout >/dev/null 2>&1; then
+                timeout 60 spack buildcache keys --install --trust --force || true
+            else
+                spack buildcache keys --install --trust --force || true
+            fi
+        fi
+    fi
+
+    # Detect OS (e.g. rhel8) — used in compiler YAML entries
     OS_SPACK=$(spack arch --operating-system 2>/dev/null || echo "rhel8")
+    # Always use the architecture family (x86_64), NOT spack arch --target which
+    # returns microarchitectures like "zen3" or "zen" that break compiler lookup.
+    ARCH_SPACK="x86_64"
 
-    # Note: target should always be x86_64 (not microarch from spack arch --target)
-    TARGET_SPACK="x86_64"
-
-    # ---- Bootstrap compiler detection ----
-    # Find the highest-versioned GCC in PATH by walking PATH directly.
-    # This is more reliable than `compgen -c` (which depends on shell
-    # command-completion state) and prefers versioned binaries
-    # (gcc-13, gcc-12, …) over the plain `gcc` symlink.
+    # ---- Find highest-versioned system GCC in PATH ----
+    # Walk PATH directly; prefer versioned binaries (gcc-13, gcc-12, …)
+    # over the plain gcc symlink so we pick the newest available.
     _find_newest_gcc() {
         local best="" best_ver=0
         local dir bin ver
@@ -110,112 +197,82 @@ else
         echo "$best"
     }
 
-    BOOTSTRAP_GCC=$(_find_newest_gcc)
-    if [[ -z "${BOOTSTRAP_GCC}" ]]; then
+    SYS_GCC=$(_find_newest_gcc)
+    if [[ -z "${SYS_GCC}" ]]; then
         echo "ERROR: No GCC found in PATH. Cannot register a bootstrap compiler." >&2
         exit 1
     fi
-    _BGCC_VER="$(${BOOTSTRAP_GCC} -dumpversion)"
-    _BGCC_NAME="$(basename "${BOOTSTRAP_GCC}")"
-    _BGCC_SUFFIX="${_BGCC_NAME#gcc}"          # e.g. "-13" or ""
-    _BGCC_BIN="$(dirname "${BOOTSTRAP_GCC}")"
-    _BGPP="${_BGCC_BIN}/g++${_BGCC_SUFFIX}";  [[ -x "${_BGPP}" ]] || _BGPP="${_BGCC_BIN}/g++"
-    _BGFC="${_BGCC_BIN}/gfortran${_BGCC_SUFFIX}"; [[ -x "${_BGFC}" ]] || _BGFC="${_BGCC_BIN}/gfortran"
-    echo "Stage 2: registering bootstrap compiler: ${BOOTSTRAP_GCC} (${_BGCC_VER})"
+    _SGCC_VER="$(${SYS_GCC} -dumpversion)"
+    _SGCC_NAME="$(basename "${SYS_GCC}")"
+    _SGCC_SUFFIX="${_SGCC_NAME#gcc}"           # e.g. "-8" or ""
+    _SGCC_BIN="$(dirname "${SYS_GCC}")"
+    _SGPP="${_SGCC_BIN}/g++${_SGCC_SUFFIX}";   [[ -x "${_SGPP}" ]] || _SGPP="${_SGCC_BIN}/g++"
+    _SGFC="${_SGCC_BIN}/gfortran${_SGCC_SUFFIX}"; [[ -x "${_SGFC}" ]] || _SGFC="${_SGCC_BIN}/gfortran"
+    echo "Stage 2: using system compiler: ${SYS_GCC} (${_SGCC_VER}) to build gcc@${GCC_VERSION}"
 
-    # Write system GCC to the shared spack's site scope
+    # Register system GCC in SPACK_SITE so spack can use it to build gcc@GCC_VERSION.
+    # Writing to etc/spack/ inside the spack tree is always read regardless of
+    # SPACK_DISABLE_LOCAL_CONFIG — no `spack compiler add` invocation needed.
     mkdir -p "${SPACK_SITE}/etc/spack"
-    cat > "${SPACK_SITE}/etc/spack/compilers.yaml" << BSEOF
+    cat > "${SPACK_SITE}/etc/spack/compilers.yaml" <<SYSEOF
 compilers:
 - compiler:
-    spec: gcc@${_BGCC_VER}
+    spec: gcc@${_SGCC_VER}
     paths:
-      cc:  ${BOOTSTRAP_GCC}
-      cxx: ${_BGPP}
-      f77: ${_BGFC}
-      fc:  ${_BGFC}
+      cc:  ${SYS_GCC}
+      cxx: ${_SGPP}
+      f77: ${_SGFC}
+      fc:  ${_SGFC}
     flags: {}
     operating_system: ${OS_SPACK}
-    target: ${TARGET_SPACK}
+    target: ${ARCH_SPACK}
     modules: []
     environment: {}
     extra_rpaths: []
-BSEOF
+SYSEOF
+
+    echo "Stage 2: registered system gcc@${_SGCC_VER} as bootstrap compiler"
     spack compiler list
 
-    # ---- End bootstrap compiler detection ----
-
-    # Skip build if GCC already in the Spack store.
-    if spack find "gcc@${GCC_VERSION}+binutils" &>/dev/null; then
-        echo "Stage 2: gcc@${GCC_VERSION} already installed — skipping build."
+    if [[ "${USE_SYSTEM_GCC}" == "1" ]]; then
+        GCC_BIN="${SYS_GCC}"
+        GCC_PREFIX="$(dirname "$(dirname "${GCC_BIN}")")"
+        GCC_VERSION="${_SGCC_VER}"
+        echo "Stage 2: using system gcc@${GCC_VERSION} as the CSE compiler baseline."
     else
-        echo "Stage 2: bootstrapping GCC ${GCC_VERSION} (this may take a while)..."
-        spack install -j "${SPACK_INSTALL_JOBS:-4}" --no-checksum "gcc@${GCC_VERSION}" ~bootstrap +binutils
+        # ---- Install gcc@GCC_VERSION into SPACK_SITE ----
+        # Check via filesystem to avoid the `spack find` environment-scope pitfall.
+        GCC_BIN=$(find "${SPACK_SITE}/opt" -name "gcc" \
+                       -path "*/${SPACK_TARGET}/*/gcc-${GCC_VERSION}*/bin/gcc" 2>/dev/null | head -1)
+        if [[ -n "${GCC_BIN}" && -x "${GCC_BIN}" ]]; then
+            echo "Stage 2: gcc@${GCC_VERSION} already installed — skipping build."
+        else
+            echo "Stage 2: building gcc@${GCC_VERSION} (this may take a while)..."
+            _INSTALL_ARGS=(install --deprecated -j "${SPACK_INSTALL_JOBS:-4}" --no-checksum)
+            if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
+                _INSTALL_ARGS+=(--cache-only)
+                if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then
+                    _INSTALL_ARGS+=(--no-check-signature)
+                fi
+            fi
+            spack "${_INSTALL_ARGS[@]}" "gcc@${GCC_VERSION}" ~bootstrap +binutils "target=${SPACK_TARGET}"
+            GCC_BIN=$(find "${SPACK_SITE}/opt" -name "gcc" \
+                           -path "*/${SPACK_TARGET}/*/gcc-${GCC_VERSION}*/bin/gcc" 2>/dev/null | head -1)
+        fi
+
+        if [[ -z "${GCC_BIN}" || ! -x "${GCC_BIN}" ]]; then
+            echo "ERROR: cannot locate gcc-${GCC_VERSION} binary under ${SPACK_SITE}/opt" >&2
+            exit 1
+        fi
+
+        GCC_PREFIX=$(dirname "$(dirname "${GCC_BIN}")")
+        echo "Stage 2: gcc@${GCC_VERSION} prefix: ${GCC_PREFIX}"
     fi
 
-    # Locate GCC via filesystem find (not spack find, which scopes to active env)
-    GCC_BIN=$(find "${SPACK_SITE}/opt" -name "gcc" \
-                   -path "*/gcc-${GCC_VERSION}*/bin/gcc" 2>/dev/null | head -1)
-    if [[ -z "${GCC_BIN}" || ! -x "${GCC_BIN}" ]]; then
-        echo "ERROR: cannot locate gcc-${GCC_VERSION} binary under ${SPACK_SITE}/opt" >&2
-        exit 1
-    fi
-    GCC_PREFIX=$(dirname "$(dirname "${GCC_BIN}")")
-    echo "Stage 2: gcc@${GCC_VERSION} found at ${GCC_PREFIX}"
-
-    # Now that GCC is built, overwrite compilers.yaml to use ONLY the new GCC
-    # (remove the system gcc to prevent accidentally using it in later builds)
-    echo "Stage 2: updating compiler config to use gcc@${GCC_VERSION}..."
-    mkdir -p "${SPACK_SITE}/etc/spack"
-    cat > "${SPACK_SITE}/etc/spack/compilers.yaml" << EOF
-compilers:
-- compiler:
-    spec: gcc@${GCC_VERSION}
-    paths:
-      cc:  ${GCC_PREFIX}/bin/gcc
-      cxx: ${GCC_PREFIX}/bin/g++
-      f77: ${GCC_PREFIX}/bin/gfortran
-      fc:  ${GCC_PREFIX}/bin/gfortran
-    flags: {}
-    operating_system: ${OS_SPACK}
-    target: ${TARGET_SPACK}
-    modules: []
-    environment: {}
-    extra_rpaths:
-    - ${GCC_PREFIX}/lib64
-EOF
-    spack compiler list  # verify it's visible
-
-    # Write variant-local GCC compiler config for inclusion in spack.yaml
-    GCC_COMPILERS_YAML="${VARIANT_DIR}/gcc-compilers.yaml"
+    # ---- Write gcc-bootstrap.yaml (packages external, included by spack.yaml) ----
     mkdir -p "${VARIANT_DIR}"
-    echo "Stage 2: writing variant compiler config to ${GCC_COMPILERS_YAML}..."
-    cat > "${GCC_COMPILERS_YAML}" << EOF
-compilers:
-- compiler:
-    spec: gcc@${GCC_VERSION}
-    paths:
-      cc:  ${GCC_PREFIX}/bin/gcc
-      cxx: ${GCC_PREFIX}/bin/g++
-      f77: ${GCC_PREFIX}/bin/gfortran
-      fc:  ${GCC_PREFIX}/bin/gfortran
-    flags: {}
-    operating_system: ${OS_SPACK}
-    target: ${TARGET_SPACK}
-    modules: []
-    environment: {}
-    extra_rpaths:
-    - ${GCC_PREFIX}/lib64
-EOF
-
-    # Record the bootstrapped GCC as an external in a dedicated include file
-    # alongside the environment. spack.yaml's `include:` picks this up;
-    # stage 4 re-renders of packages.yaml/config.yaml/modules.yaml
-    # leave this file untouched. `cat >` (overwrite) is intentional —
-    # makes re-runs idempotent and lets the caller change GCC_PREFIX.
-    GCC_BOOTSTRAP_YAML="${VARIANT_DIR}/gcc-bootstrap.yaml"
-    echo "Stage 2: writing gcc@${GCC_VERSION} external to ${GCC_BOOTSTRAP_YAML}..."
-    cat > "${GCC_BOOTSTRAP_YAML}" << EOF
+    echo "Stage 2: writing ${GCC_BOOTSTRAP_YAML}..."
+    cat > "${GCC_BOOTSTRAP_YAML}" <<EOF
 packages:
   gcc:
     externals:
@@ -228,10 +285,16 @@ packages:
           fortran: ${GCC_PREFIX}/bin/gfortran
     buildable: false
 EOF
+
+    # The site compilers.yaml is only a temporary bootstrap aid. Stage 4 uses
+    # gcc-bootstrap.yaml so compiler registration has one source of truth.
+    rm -f "${SPACK_SITE}/etc/spack/compilers.yaml"
+
+    echo "Stage 2: GCC bootstrap complete."
 fi
 
 # ------------------------------------------------------------------
-# Export SPACK_ROOT for subsequent stages (use the shared spack)
+# 3. Export SPACK_ROOT for subsequent stages
 # ------------------------------------------------------------------
 export SPACK_ROOT="${SPACK_SITE}"
 

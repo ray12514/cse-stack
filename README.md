@@ -1,260 +1,238 @@
 # cse-stack
 
-Configuration, scripts, and module templates for deploying the Computational Software Environment (CSE) on HPC systems using [Spack](https://spack.io).
+`cse-stack` is a Spack-driven scaffold for building the Computational Software
+Environment (CSE): a small, reproducible HPC software stack exposed through a
+stable `cse/*` module namespace.
 
-The CSE provides a curated set of scientific libraries (HDF5, NetCDF-C, NetCDF-Fortran, NetCDF-CXX4, MPI) through a stable `cse/<package>` module namespace. Two deployment variants are supported.
+The current proof-of-concept supports two variants:
 
----
+| Variant | MPI | Target |
+|---|---|---|
+| `v1-openmpi` | Spack-built OpenMPI | Generic Linux test systems and non-Cray clusters |
+| `v2-mpich` | Spack-built MPICH with OFI | Generic Linux plus Cray/Slingshot when libfabric is detected |
 
-## Two Variants
+Both variants bootstrap `gcc@13.3.0` with Spack and use that compiler for the
+stack. `gcc@13.2.0` is deprecated upstream and is no longer the default.
 
-| Variant | Target System | MPI | Compiler |
-|---------|---------------|-----|----------|
-| **v1-openmpi** | Any Linux | Spack-built OpenMPI@5.0.5 | Spack-built GCC@13.2.0 |
-| **v2-mpich** | Any Linux; optimised for Cray/Slingshot | Spack-built MPICH@3.4.3 or @4.2.2 | Spack-built GCC@13.2.0 |
+## Network Modes
 
-Both variants build GCC and MPI entirely from Spack — no dependency on vendor compilers or vendor MPI at build time. This produces identical software versions across every deployment site, with only the Spack hash differing by OS and microarchitecture.
+The deploy path supports three explicit network policies:
 
-On Cray systems, `v2-mpich` detects libfabric and (on PBS) cray-pals from the system modules and registers them as externals so MPICH uses the Slingshot high-speed network automatically.
+- `online`: permissive connected build and fetch behavior.
+- `restricted`: Spack itself may still come from GitHub or a local seed, but
+  Stage 2 must receive a prepared bootstrap bundle and Stage 4 must use a
+  local source mirror plus an authoritative lockfile.
+- `airgapped`: no outbound network assumptions. Stage 2 installs Spack from a
+  local seed bundle and bootstrap bundle, and Stage 4 installs from a local
+  source mirror and authoritative lockfile.
 
-Both variants expose identical `cse/<package>` module names so users who move between systems need to relearn nothing.
+The artifact classes are:
 
----
+- Spack seed bundle: required for `airgapped`, optional for `restricted`.
+- Bootstrap bundle: required for `restricted` and `airgapped`.
+- Source mirror: required for `restricted` and `airgapped`.
+- Optional buildcache: usable in all modes.
 
-## Prerequisites
+## User Model
 
-These must be satisfied on the target host **before** running `deploy.sh`.
-
-1. **Python 3.6+** with `jinja2` and `pyyaml`:
-   ```bash
-   pip install jinja2 pyyaml
-   ```
-
-2. **Git** and a C/C++/Fortran compiler (needed by Spack to bootstrap):
-   ```bash
-   # RHEL/Rocky
-   dnf install git gcc g++ gfortran
-   # Debian/Ubuntu
-   apt-get install git build-essential gfortran
-   ```
-
-3. **Cluster Inspector** (used by Stage 1 to capture the system profile):
-   ```bash
-   pip install -e /path/to/clusterinspector
-   clusterinspector profile --local   # smoke test
-   ```
-
-### One-Time Host Setup
-
-Before the first `deploy.sh` run, create the shared root with correct group ownership:
-
-```bash
-mkdir -p "${SHARED_PATH}/cse/${CSE_RELEASE}"
-chgrp -R "${CSE_GROUP}" "${SHARED_PATH}/cse"
-chmod -R g+rwxs "${SHARED_PATH}/cse"
-chmod o+rx "${SHARED_PATH}/cse"
-```
-
-The setgid bit ensures that files created later (by Spack or by hand) inherit the correct group regardless of the creator's primary group. Pass `--group <name>` to `deploy.sh` if your shared filesystem group differs from your primary group; it defaults to `$(id -gn)`.
-
----
-
-## Quick Start: Dry-Run
-
-Validate the scaffold without modifying any system state:
-
-```bash
-# Clone and enter the repo
-git clone https://github.com/ray12514/cse-stack.git
-cd cse-stack
-
-# Variant A (any Linux)
-./scripts/deploy.sh \
-    --variant v1-openmpi \
-    --release 2026_04 \
-    --shared-path /tmp/cse-test \
-    --dry-run
-
-# Variant B (Cray) — use the bundled mock profile if not on a real Cray
-./scripts/deploy.sh \
-    --variant v2-mpich \
-    --release 2026_04 \
-    --shared-path /tmp/cse-test \
-    --mock-profile profiles/mock-cray.yaml \
-    --dry-run
-```
-
-Dry-run prints every command that would run, renders the YAML templates to stdout, and exits 0 without writing anything.
-
----
-
-## Full Deploy
-
-```bash
-# Deploy v1-openmpi
-./scripts/deploy.sh \
-    --variant v1-openmpi \
-    --release 2026_04 \
-    --shared-path /your/shared/path
-
-# Deploy v2-mpich (MPICH version auto-detected from system; override if needed)
-./scripts/deploy.sh \
-    --variant v2-mpich \
-    --release 2026_04 \
-    --shared-path /your/shared/path
-
-# Deploy with a source mirror (air-gapped or restricted networks)
-./scripts/deploy.sh \
-    --variant v1-openmpi \
-    --release 2026_04 \
-    --shared-path /your/shared/path \
-    --mirror-path /path/to/mirror
-
-# Deploy with a binary build cache (fast re-deploy)
-./scripts/deploy.sh \
-    --variant v1-openmpi \
-    --release 2026_04 \
-    --shared-path /your/shared/path \
-    --buildcache-uri file:///path/to/cache
-```
-
-### `deploy.sh` Options
-
-| Option | Required | Description |
-|--------|----------|-------------|
-| `--variant` | Yes | `v1-openmpi` or `v2-mpich` |
-| `--release` | Yes | Release tag, e.g. `2026_04` |
-| `--shared-path` | Yes | Path to the shared CSE filesystem root |
-| `--dry-run` | No | Print plan and rendered YAML; do not modify system |
-| `--from-stage N` | No | Skip stages 1 through N-1 (assumes outputs exist) |
-| `--module-system` | No | Override auto-detected module system (`lmod` or `tcl`) |
-| `--mock-profile` | No | Path to a mock Cluster Inspector YAML for testing |
-| `--group` | No | Shared filesystem group (default: `$(id -gn)`) |
-| `--gcc-version` | No | GCC version to bootstrap (default: `13.2.0`) |
-| `--mpich-version` | No | MPICH version for v2-mpich (default: auto-detected from profile) |
-| `--mirror-path` | No | Local path to a Spack source mirror |
-| `--buildcache-uri` | No | URI for a Spack binary build cache (push after install, pull before) |
-
-### Staged Scripts
-
-Each stage is independently runnable. `deploy.sh` composes them.
-
-| Script | Purpose |
-|--------|---------|
-| `stage1_profile.sh` | Run Cluster Inspector, write `profiles/<hostname>-<timestamp>.yaml` |
-| `stage2_spack.sh` | Clone Spack (v1.1.1); bootstrap GCC into `<variant>/bootstrap/` |
-| `stage3_externals.sh` | Render `packages.yaml` from the system profile |
-| `stage4_build.sh` | Render remaining YAML templates; `spack concretize + install`; push build cache |
-| `stage5_modules.sh` | `spack module refresh`; install `cse-init` activation module |
-
----
-
-## User-Facing Module Commands
-
-After a successful deploy:
-
-### v1-openmpi
+Users load one front-door module, then load the package they need:
 
 ```bash
 module load cse-init/openmpi
-module avail cse
-# cse/cmake  cse/hdf5-mpi  cse/hdf5-serial  cse/netcdf-c-mpi  ...
-module load cse/openmpi cse/netcdf-fortran-mpi
-mpif90 -I$NETCDF_FORTRAN_DIR/include -L$NETCDF_FORTRAN_DIR/lib \
-       -lnetcdff my_program.f90 -o my_program
-srun -n 4 ./my_program
+module load cse/netcdf-fortran-mpi
 ```
 
-### v2-mpich (any Linux or Cray)
+`cse-init/<mpi>` exposes the CSE compiler baseline and the selected module
+tree. Spack-generated package modules own dependency loading. With
+`autoload: direct`, loading `cse/netcdf-fortran-mpi` should recursively load
+the matching NetCDF-C, HDF5, MPI, and required direct runtime/link
+dependencies. Hidden implicit dependency modules stay loadable but do not
+clutter `module avail`.
+
+`cse-init` sets `CSE_GCC_ROOT`, `CSE_CC`, `CSE_CXX`, and `CSE_FC`, and prepends
+the CSE GCC `bin` directory to `PATH`. It does not set global `CC`, `CXX`, or
+`FC`; MPI builds should use `mpicc`, `mpicxx`, and `mpifort` from
+`cse/openmpi` or `cse/mpich`.
+
+## Personal Test Install
+
+A first build does not need a shared filesystem or a `cse` Unix group:
 
 ```bash
-module load cse-init/mpich
-module avail cse
-# cse/cmake  cse/mpich  cse/hdf5-mpi  cse/hdf5-serial  cse/netcdf-c-mpi  ...
-module load cse/mpich cse/hdf5-mpi cse/netcdf-fortran-mpi
-mpif90 -I$NETCDF_FORTRAN_DIR/include -L$NETCDF_FORTRAN_DIR/lib \
-       -lnetcdff my_program.f90 -o my_program
-srun -n 4 ./my_program
+./scripts/deploy.sh \
+  --variant v1-openmpi \
+  --release test \
+  --shared-path /tmp/cse-test
 ```
 
-On Cray/Slingshot, MPICH uses the system libfabric for OFI transport automatically — no extra module loads or environment flags required.
+For personal installs, group ownership checks are advisory. For shared cluster
+installs, create the shared root with the desired group and setgid bit, then
+pass `--group <name>`.
 
-For PBS systems with PALS, substitute `mpiexec -n 4 ./my_program`.
+The default Spack target is `x86_64` for portability across login, build, and
+compute nodes. Use `--target x86_64_v3` only after confirming every target node
+supports that ISA level.
 
----
+## Prepared Deploy Workflow
 
-## MPICH Version Selection (v2-mpich)
-
-The MPICH version is chosen to match the ABI of the installed cray-mpich for future runtime splice compatibility:
-
-| cray-mpich series | Spack MPICH spec |
-|-------------------|-----------------|
-| 8.x | `mpich@3.4.3` |
-| 9.x | `mpich@4.2.2` |
-| Non-Cray / not detected | `mpich@4.2.2` |
-
-Override with `--mpich-version <ver>` if needed.
-
----
-
-## Non-Module Workflow (Site Views)
-
-Users who prefer a flat tree of headers, libraries, and binaries without `module load`:
+Use the wrapper scripts when the target system cannot perform the whole
+connected build itself:
 
 ```bash
-export CSE_VIEW=$SHARED_PATH/cse/$CSE_RELEASE/v1-openmpi/views/mpi
-gcc -I$CSE_VIEW/include -L$CSE_VIEW/lib -lnetcdf my_program.c
+./scripts/network_prepare_request.sh \
+  --request-dir /tmp/cse-request \
+  --variant v2-mpich \
+  --release 2026_04 \
+  --shared-path /shared/cse \
+  --network-mode airgapped
+
+./scripts/network_fulfill_request.sh \
+  --request-dir /tmp/cse-request \
+  --output-dir /tmp/cse-artifacts \
+  --shared-path /tmp/cse-helper \
+  --with-buildcache
+
+./scripts/network_deploy.sh \
+  --manifest /tmp/cse-artifacts/manifest.json \
+  --shared-path /shared/cse
 ```
 
-Two views exist per variant: `views/mpi` (parallel packages + tooling) and `views/serial` (serial packages + tooling).
+`network_prepare_request.sh` captures the target profile and deployment intent.
+`network_fulfill_request.sh` runs on a connected helper machine, produces the
+authoritative lockfile, and packages the source mirror, bootstrap bundle,
+optional buildcache, and air-gap Spack seed. `network_deploy.sh` validates the
+manifest, unpacks the local mirror/buildcache payloads, and calls the normal
+staged deploy flow with the prepared artifacts.
 
----
+## Buildcache Target Policy
 
-## User-Side Spack via Upstream Chaining
+Keep the default buildcache generic until the site layout is proven:
 
-Advanced users who want to build their own Spack environments on top of the CSE baseline:
+- Generic cache: `target=x86_64`, broadest reuse across mixed nodes and nearby
+  systems.
+- Optimized cache: `target=x86_64_v3`, `x86_64_v4`, `zen3`, or similar only
+  when every consumer node is compatible.
+- Do not mix generic and optimized binaries under the same cache/release name;
+  use a distinct release, target suffix, or cache namespace.
 
-```yaml
-# ~/.spack/upstreams.yaml
-upstreams:
-  cse:
-    install_tree: /your/shared/path/cse/2026_04/<variant>/store
+The generic cache is the baseline for first production builds. Optimized caches
+are a later site-specific layer.
+
+## Dry Runs
+
+Dry-runs render the intended YAML/module content and execute no build:
+
+```bash
+./scripts/deploy.sh \
+  --variant v1-openmpi \
+  --release test \
+  --shared-path /tmp/cse-test \
+  --dry-run
+
+./scripts/deploy.sh \
+  --variant v2-mpich \
+  --release test \
+  --shared-path /tmp/cse-test \
+  --mock-profile profiles/mock-cray.yaml \
+  --dry-run
 ```
 
-With this configuration, `spack install` will reuse CSE-installed packages rather than rebuilding them from source.
+## Stages
 
----
+`deploy.sh` runs five idempotent stages:
 
-## Repository Layout
+| Stage | Script | Purpose |
+|---|---|---|
+| 1 | `stage1_profile.sh` | Capture a Cluster Inspector system profile |
+| 2 | `stage2_spack.sh` | Clone Spack to `${SHARED_PATH}/cse/spack-site` and bootstrap GCC |
+| 3 | `stage3_externals.sh` | Render `packages.yaml` |
+| 4 | `stage4_build.sh` | Render remaining Spack config, concretize, and install |
+| 5 | `stage5_modules.sh` | Refresh Spack modules and render/install `cse-init` |
 
+Stage 2 writes `${SHARED_PATH}/cse/<release>/<variant>/gcc-bootstrap.yaml`.
+Stage 4 includes that file as the only compiler registration for the
+bootstrapped GCC.
+
+For prepared restricted or air-gapped deploys, `deploy.sh` also accepts:
+
+- `--network-mode online|restricted|airgapped`
+- `--spack-seed <tar-or-dir>`
+- `--bootstrap-bundle <tar-or-dir>`
+- `--lockfile <spack.lock>`
+- `--mirror-path <local-mirror-dir>`
+- `--buildcache-uri file:///...`
+
+If `--lockfile` is supplied, Stage 4 reuses that concretization and does not
+silently re-concretize on the target.
+
+## Module Policy
+
+The module configuration follows Spack's recommended production pattern:
+
+- `autoload: direct` loads direct link and run dependencies recursively.
+- `hide_implicits: true` hides dependency modules from `module avail` while
+  preserving autoload.
+- `exclude_implicits` is not used because excluded dependency modules cannot be
+  autoloaded.
+- `cse-init` activates the namespace only; it does not hard-code HDF5, NetCDF,
+  or MPI dependency loads.
+
+## Mac And Container Testing
+
+macOS is useful for syntax checks and dry-runs, but not for validating the Linux
+HPC build. On this machine Docker CLI is installed; start Docker Desktop before
+running Linux container tests.
+
+```bash
+./scripts/docker_smoke_test.sh
 ```
-cse-stack/
-├── README.md
-├── HANDOFF.md                      # original agent handoff brief
-├── modules/
-│   └── cse-init/                   # hand-written activation modulefiles (Lua + Tcl)
-│       ├── openmpi.lua / openmpi.tcl
-│       └── mpich.lua   / mpich.tcl
-├── scripts/
-│   ├── deploy.sh                   # orchestrator
-│   ├── stage{1..5}_*.sh            # individual stages
-│   ├── mirror_fetch.sh             # pre-populate a source mirror
-│   ├── buildcache_push.sh          # push binaries to a build cache after install
-│   └── lib/
-│       ├── profile.py              # typed accessors for Cluster Inspector YAML
-│       └── render.py               # Jinja2 template renderer
-├── templates/                      # Jinja2 templates (*.j2)
-├── profiles/
-│   └── mock-cray.yaml              # mock Cluster Inspector output for Cray testing
-└── docs/
-    ├── phase_two_summary.md
-    └── implementation_plan.md
+
+The smoke test builds a small Rocky-based test image, checks shell/Python
+syntax, and runs dry-runs for both variants. It does not compile the full Spack
+stack; that still needs a Linux builder or the cluster.
+
+For a reduced real Spack build in Docker, use:
+
+```bash
+./scripts/docker_cse_buildcache_test.sh --dry-run
+./scripts/docker_cse_buildcache_test.sh --cache-only
 ```
 
----
+This builds a Docker image with Spack `1.1.1` and missing compiler/runtime
+tools, then runs the same staged CSE deploy path used on real systems. It keeps
+state under `.docker-spack/cse-buildcache-test` so the Spack site, CSE env,
+store, cache, modulefiles, and logs are inspectable and reusable across runs.
 
-## Open Items
+The Docker buildcache test uses `--package-set public-buildcache-smoke` by
+default. That package set keeps one main package in the environment, `pkgconf`,
+because it has a much better chance of producing a real hit on the public Spack
+buildcache than an HPC-tuned MPI/HDF5 stack. In this mode the Docker script
+keeps the staged deploy flow but uses the container's system GCC as the CSE
+compiler baseline, because the public mirror is not expected to contain our
+pinned Stage 2 GCC bootstrap chain in cache-only mode.
 
-- Phase 2: cray-mpich ABI splice via `LD_LIBRARY_PATH` in `cse-init/mpich` (`CSE_MPICH_SPLICE=1` reserved; not yet implemented).
-- Whether `parallel-netcdf` (PnetCDF) gets its own `cse/parallel-netcdf` module (currently a transitive dep of NetCDF-C).
-- Shared path root per site (currently `/shared_path` as default).
+```text
+pkgconf@2.5.1
+```
+
+The reduced CSE-functional package set is still available as
+`hdf5-mpi-smoke` when you want to validate the HDF5+MPI layout itself:
+
+```text
+hdf5@1.14.4+mpi+hl~fortran~cxx ^openmpi@5.0.5 fabrics=ucx,ofi schedulers=slurm
+```
+
+By default `--cache-only` uses the public Spack buildcache URI configured in
+the script and fails if any required binary is missing. Override the cache,
+target, or package set if needed:
+
+```bash
+CSE_DOCKER_TARGET=x86_64_v3 ./scripts/docker_cse_buildcache_test.sh --cache-only
+CSE_DOCKER_BUILDCACHE_URI=file:///path/to/cache ./scripts/docker_cse_buildcache_test.sh --cache-only
+```
+
+## Future Ansible Use
+
+The bash scripts are the canonical implementation for now. They are kept
+parameter-driven and idempotent so Ansible can later call the same stages
+instead of reimplementing the deployment logic.

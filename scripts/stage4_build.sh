@@ -15,6 +15,8 @@ set -euo pipefail
 : "${REPO_ROOT:?stage4_build.sh must be run via deploy.sh}"
 
 VARIANT_ENV_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/env"
+NETWORK_MODE="${CSE_NETWORK_MODE:-online}"
+LOCKFILE_PATH="${AUTHORITATIVE_LOCKFILE:-}"
 # Full Spack isolation: no ~/.spack/ config, no /etc/spack/ site config,
 # and no writes to ~/.spack/cache — all cache lives under the shared path.
 export SPACK_DISABLE_LOCAL_CONFIG=1
@@ -53,12 +55,25 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     fi
     echo "[dry-run] Stage 4: would run:"
     echo "[dry-run]   spack env activate -d ${VARIANT_ENV_DIR}"
-    echo "[dry-run]   spack concretize --fresh"
-    echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --fail-fast"
-    if [[ -n "${BUILDCACHE_URI:-}" ]]; then
+    if [[ -n "${LOCKFILE_PATH}" ]]; then
+        echo "[dry-run]   cp ${LOCKFILE_PATH} ${VARIANT_ENV_DIR}/spack.lock"
+        echo "[dry-run]   # authoritative lockfile present; skip concretize"
+    else
+        echo "[dry-run]   spack concretize --fresh"
+    fi
+    if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
+        if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then
+            echo "[dry-run]   spack install --cache-only --no-check-signature -j ${SPACK_INSTALL_JOBS:-4} --fail-fast"
+        else
+            echo "[dry-run]   spack install --cache-only -j ${SPACK_INSTALL_JOBS:-4} --fail-fast"
+        fi
+    else
+        echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --fail-fast"
+    fi
+    if [[ "${SPACK_CACHE_ONLY:-0}" != "1" && -n "${BUILDCACHE_URI:-}" ]]; then
         echo "[dry-run]   spack buildcache push --unsigned ${BUILDCACHE_URI}"
     fi
-    exit 0
+    return 0 2>/dev/null || exit 0
 fi
 
 # ------------------------------------------------------------------
@@ -104,7 +119,15 @@ EOF
 echo "Stage 4: rendering config.yaml, modules.yaml, spack.yaml..."
 _render "config.yaml.j2"  "${VARIANT_ENV_DIR}/config.yaml"
 _render "modules.yaml.j2" "${VARIANT_ENV_DIR}/modules.yaml"
-_render "spack.yaml.j2"   "${VARIANT_ENV_DIR}/spack.yaml"
+
+if [[ "${NETWORK_MODE}" != "online" && -z "${MIRROR_PATH:-}" ]]; then
+    echo "ERROR: network mode ${NETWORK_MODE} requires a local source mirror." >&2
+    exit 1
+fi
+if [[ "${NETWORK_MODE}" != "online" && -z "${LOCKFILE_PATH}" ]]; then
+    echo "ERROR: network mode ${NETWORK_MODE} requires an authoritative lockfile." >&2
+    exit 1
+fi
 
 # Write mirrors.yaml if a source mirror or build cache was provided
 if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
@@ -124,24 +147,48 @@ if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
         printf '  cse-buildcache: %s\n' "${BUILDCACHE_URI}" >> "${VARIANT_ENV_DIR}/mirrors.yaml"
     fi
 fi
+_render "spack.yaml.j2"   "${VARIANT_ENV_DIR}/spack.yaml"
 
-# Activate Spack — use the shared spack instance
+# Activate Spack — both variants use the shared site Spack instance.
 if [[ -z "${SPACK_ROOT:-}" ]]; then
     SPACK_ROOT="${SHARED_PATH}/cse/spack-site"
 fi
 # shellcheck source=/dev/null
 . "${SPACK_ROOT}/share/spack/setup-env.sh"
 
+if [[ "${SPACK_CACHE_ONLY:-0}" == "1" && "${SPACK_NO_CHECK_SIGNATURE:-0}" != "1" && -n "${BUILDCACHE_URI:-}" ]]; then
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 60 spack buildcache keys --install --trust --force || true
+    else
+        spack buildcache keys --install --trust --force || true
+    fi
+fi
+
 echo "Stage 4: activating Spack environment at ${VARIANT_ENV_DIR}..."
 spack env activate -d "${VARIANT_ENV_DIR}"
 
-echo "Stage 4: concretizing..."
-spack concretize --fresh
+if [[ -n "${LOCKFILE_PATH}" ]]; then
+    echo "Stage 4: reusing authoritative lockfile ${LOCKFILE_PATH}..."
+    cp "${LOCKFILE_PATH}" "${VARIANT_ENV_DIR}/spack.lock"
+else
+    if [[ -f "${VARIANT_ENV_DIR}/spack.lock" ]]; then
+        rm -f "${VARIANT_ENV_DIR}/spack.lock"
+    fi
+    echo "Stage 4: concretizing..."
+    spack concretize --fresh
+fi
 
 echo "Stage 4: installing (this will take a while on first run)..."
-spack install -j "${SPACK_INSTALL_JOBS:-4}" --fail-fast
+_INSTALL_ARGS=(install -j "${SPACK_INSTALL_JOBS:-4}" --fail-fast)
+if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
+    _INSTALL_ARGS+=(--cache-only)
+    if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then
+        _INSTALL_ARGS+=(--no-check-signature)
+    fi
+fi
+spack "${_INSTALL_ARGS[@]}"
 
-if [[ -n "${BUILDCACHE_URI:-}" ]]; then
+if [[ "${SPACK_CACHE_ONLY:-0}" != "1" && -n "${BUILDCACHE_URI:-}" ]]; then
     echo "Stage 4: pushing installed packages to build cache at ${BUILDCACHE_URI}..."
     spack buildcache push --unsigned "${BUILDCACHE_URI}"
 fi
