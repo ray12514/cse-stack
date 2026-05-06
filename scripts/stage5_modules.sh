@@ -39,17 +39,18 @@ render_stage5_template() {
 
 detect_generated_module_root() {
     local base="$1"
+    local module_file=""
     local cse_dir=""
 
-    if [[ -d "${base}/cse" ]]; then
-        printf '%s\n' "${base}"
-        return 0
-    fi
-    if [[ -d "${base}/Core/cse" ]]; then
-        printf '%s\n' "${base}/Core"
+    module_file="$(find "${base}" -type f -path "*/cse/*/*" 2>/dev/null | sort | head -1 || true)"
+    if [[ -n "${module_file}" ]]; then
+        cse_dir="${module_file%/cse/*}"
+        printf '%s\n' "${cse_dir}"
         return 0
     fi
 
+    # Fall back to namespace directories for module systems that create marker
+    # files or unusual file depths.
     cse_dir="$(find "${base}" -type d -name cse 2>/dev/null | sort | head -1 || true)"
     if [[ -n "${cse_dir}" ]]; then
         dirname "${cse_dir}"
