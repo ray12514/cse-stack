@@ -273,12 +273,14 @@ export SPACK_DISABLE_LOCAL_CONFIG=1
 if [[ -n "${MODULE_SYSTEM_OVERRIDE}" ]]; then
     MODULE_SYSTEM="${MODULE_SYSTEM_OVERRIDE}"
 else
-    if command -v lmod &>/dev/null || [[ -n "${LMOD_CMD:-}" ]]; then
+    if [[ -n "${LMOD_CMD:-}" ]]; then
         MODULE_SYSTEM="lmod"
     elif command -v modulecmd.tcl &>/dev/null \
-         || command -v modulecmd &>/dev/null \
-         || [[ -f /usr/share/modules/init/bash ]]; then
+         || [[ -f /usr/share/modules/init/bash ]] \
+         || [[ -n "${MODULESHOME:-}" ]]; then
         MODULE_SYSTEM="tcl"
+    elif command -v lmod &>/dev/null; then
+        MODULE_SYSTEM="lmod"
     else
         MODULE_SYSTEM="lmod"    # assume Lmod; override with --module-system if needed
     fi
