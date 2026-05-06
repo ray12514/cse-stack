@@ -22,7 +22,7 @@ set shared_path [expr { [info exists ::env(CSE_SHARED_PATH)] \
                          ? $::env(CSE_SHARED_PATH)     : "/shared_path" }]
 set variant     "v1-openmpi"
 set cse_root    "$shared_path/cse/$cse_release/$variant"
-set mod_root    "$cse_root/modules/Core"
+set mod_root    "$cse_root/modules"
 
 setenv CSE_RELEASE $cse_release
 setenv CSE_VARIANT $variant

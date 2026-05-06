@@ -25,7 +25,7 @@ local cse_release = os.getenv("CSE_RELEASE_DEFAULT") or "2026_04"
 local shared_path = os.getenv("CSE_SHARED_PATH")     or "/shared_path"
 local variant     = "v2-mpich"
 local cse_root    = pathJoin(shared_path, "cse", cse_release, variant)
-local mod_root    = pathJoin(cse_root, "modules", "Core")
+local mod_root    = pathJoin(cse_root, "modules")
 
 setenv("CSE_RELEASE", cse_release)
 setenv("CSE_VARIANT", variant)
