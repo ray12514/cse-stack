@@ -6,8 +6,6 @@ variants:
     mpi_provider: openmpi
     specs:
       - "openmpi@4.1.6 fabrics=auto"
-      - "cmake@3.29.6"
-      - "zlib@1.3.1"
       - "hdf5@1.14.4 +mpi  +fortran +cxx +hl +threadsafe"
       - "hdf5@1.14.4 ~mpi  +fortran +cxx +hl +threadsafe"
       - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.4+mpi"
@@ -20,21 +18,15 @@ variants:
       mpi:
         - "+mpi"
         - "openmpi"
-        - "cmake"
-        - "zlib"
       serial:
         - "hdf5~mpi"
         - "netcdf-c~mpi"
         - "netcdf-fortran ^netcdf-c~mpi"
         - "netcdf-cxx4 ^netcdf-c~mpi"
-        - "cmake"
-        - "zlib"
   v2-mpich:
     mpi_provider: mpich
     specs:
       - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix"
-      - "cmake@3.29.6"
-      - "zlib@1.3.1"
       - "hdf5@1.14.4 +mpi  +fortran +cxx +hl +threadsafe ^mpich"
       - "hdf5@1.14.4 ~mpi  +fortran +cxx +hl +threadsafe"
       - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.4+mpi  ^mpich"
@@ -47,12 +39,8 @@ variants:
       mpi:
         - "+mpi"
         - "mpich"
-        - "cmake"
-        - "zlib"
       serial:
         - "hdf5~mpi"
         - "netcdf-c~mpi"
         - "netcdf-fortran ^netcdf-c~mpi"
         - "netcdf-cxx4 ^netcdf-c~mpi"
-        - "cmake"
-        - "zlib"

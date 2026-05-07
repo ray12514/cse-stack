@@ -56,6 +56,9 @@ paths and Tcl-only module features:
 - NetCDF modules load only their matching public CSE dependency modules.
 - MPI provider modules do not load their low-level implementation dependency
   graph.
+- Explicit root entries in package-set `specs:` become public modules.
+  Transitive implementation dependencies such as bzip2 and zlib remain
+  installed but hidden from `module avail`.
 - `use_view: cse_modules` makes generated package modulefiles point at clean
   Spack view prefixes instead of raw hashed install-store prefixes.
 
@@ -115,6 +118,8 @@ Use optimized targets only as explicit site-specific layers:
 - Dry-run `network_prepare_request.sh`, `network_fulfill_request.sh`, and
   `network_deploy.sh` with representative artifacts.
 - Inspect rendered YAML for one compiler handoff source.
+- Inspect rendered module YAML for root-spec-derived public `include` plus
+  `exclude: ["*"]`.
 - Inspect generated modulefiles for curated module load/depends-on statements.
 - In a clean module shell, verify loading `cse/netcdf-fortran/4.6.1-mpi` loads
   NetCDF-C, HDF5, and MPI, but not the full low-level dependency graph.

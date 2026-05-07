@@ -66,7 +66,10 @@ public module loads: HDF5 MPI modules load the MPI provider, NetCDF modules load
 the matching public HDF5 or NetCDF-C module, and MPI provider modules do not
 load their low-level implementation dependency graph. Package modules are
 generated relative to the `cse_modules` Spack view so modulefiles expose clean
-view paths instead of raw hashed install-store prefixes.
+view paths instead of raw hashed install-store prefixes. Build implementation
+dependencies such as bzip2, zlib, and compiler runtime libraries remain
+installed, but they are not published as user-facing modules unless they are
+explicit root entries in the selected package set.
 
 `cse-init` sets `CSE_GCC_ROOT`, `CSE_CC`, `CSE_CXX`, and `CSE_FC`, and prepends
 the CSE GCC `bin` directory to `PATH` through the clean compiler view path
@@ -205,6 +208,8 @@ and Tcl-only module features:
   view.
 - Prefix inspections provide `PATH`, `LD_LIBRARY_PATH`, `CPATH`,
   `PKG_CONFIG_PATH`, `CMAKE_PREFIX_PATH`, and `MANPATH`.
+- The module catalog is derived from explicit root entries in package-set
+  `specs:`; transitive dependencies are excluded from modulefile generation.
 - Generic `{name}_ROOT`, `{name}_DIR`, and `{name}_HOME` variables are not set
   because Spack does not project those manual entries through `use_view`.
 - Broad dependency autoload is disabled; only curated public module loads are
