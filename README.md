@@ -61,18 +61,18 @@ module load cse/netcdf-fortran/4.6.1-mpi
 ```
 
 `cse-init/<mpi>` exposes the CSE compiler baseline and the selected module
-tree. Spack-generated package modules own dependency loading. With
-`autoload: direct`, loading `cse/netcdf-fortran/4.6.1-mpi` should recursively load
-the matching NetCDF-C, HDF5, MPI, and required direct runtime/link
-dependencies. Hidden implicit dependency modules stay loadable but do not
-clutter `module avail`. Package modules are generated relative to the
-`cse_modules` Spack view so modulefiles expose clean view paths instead of raw
-hashed install-store prefixes.
+tree. Spack-generated package modules own dependency loading through curated
+public module loads: HDF5 MPI modules load the MPI provider, NetCDF modules load
+the matching public HDF5 or NetCDF-C module, and MPI provider modules do not
+load their low-level implementation dependency graph. Package modules are
+generated relative to the `cse_modules` Spack view so modulefiles expose clean
+view paths instead of raw hashed install-store prefixes.
 
 `cse-init` sets `CSE_GCC_ROOT`, `CSE_CC`, `CSE_CXX`, and `CSE_FC`, and prepends
-the CSE GCC `bin` directory to `PATH`. It does not set global `CC`, `CXX`, or
-`FC`; MPI builds should use `mpicc`, `mpicxx`, and `mpifort` from
-`cse/openmpi/<version>` or `cse/mpich/<version>`.
+the CSE GCC `bin` directory to `PATH` through the clean compiler view path
+`${SHARED_PATH}/cse/<release>/<variant>/views/compiler/gcc/<version>`. It does
+not set global `CC`, `CXX`, or `FC`; MPI builds should use `mpicc`, `mpicxx`,
+and `mpifort` from `cse/openmpi/<version>` or `cse/mpich/<version>`.
 
 ## Personal Test Install
 
@@ -198,13 +198,17 @@ silently re-concretize on the target.
 
 ## Module Policy
 
-The module configuration follows Spack's recommended production pattern:
+The module configuration keeps Spack in charge while avoiding raw store paths
+and Tcl-only module features:
 
-- `autoload: direct` loads direct link and run dependencies recursively.
-- `hide_implicits: true` hides dependency modules from `module avail` while
-  preserving autoload.
-- `exclude_implicits` is not used because excluded dependency modules cannot be
-  autoloaded.
+- `use_view: cse_modules` projects generated path edits through the clean Spack
+  view.
+- Prefix inspections provide `PATH`, `LD_LIBRARY_PATH`, `CPATH`,
+  `PKG_CONFIG_PATH`, `CMAKE_PREFIX_PATH`, and `MANPATH`.
+- Generic `{name}_ROOT`, `{name}_DIR`, and `{name}_HOME` variables are not set
+  because Spack does not project those manual entries through `use_view`.
+- Broad dependency autoload is disabled; only curated public module loads are
+  emitted.
 - `cse-init` activates the namespace only; it does not hard-code HDF5, NetCDF,
   or MPI dependency loads.
 
