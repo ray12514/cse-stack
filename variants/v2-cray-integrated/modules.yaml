@@ -12,20 +12,22 @@ modules:
       - PKG_CONFIG_PATH
     lib64/pkgconfig:
       - PKG_CONFIG_PATH
+    share/pkgconfig:
+      - PKG_CONFIG_PATH
     share/man:
       - MANPATH
+    .:
+      - CMAKE_PREFIX_PATH
 
   default:
     enable:
       - lmod
-    use_view: false
+    use_view: cse_modules
     roots:
       lmod: $SHARED_PATH/cse/$CSE_RELEASE/v2-cray-integrated/modules
     lmod:
       hierarchy: []
       hash_length: 0
-      hide_implicits: true
-      exclude_implicits: true
       projections:
         all: 'cse/{name}'
       include:
@@ -33,59 +35,47 @@ modules:
         - cray-libsci
         - cray-pals    # remove on Slurm Cray systems; keep on PBS Cray systems
       all:
-        autoload: direct
-        environment:
-          set:
-            '{name}_ROOT': '{prefix}'
-            '{name}_DIR':  '{prefix}'
-            '{name}_HOME': '{prefix}'
+        autoload: none
       hdf5:
         suffixes:
           '+mpi': 'mpi'
           '~mpi': 'serial'
-        environment:
-          set:
-            HDF5_ROOT: '{prefix}'
-            HDF5_DIR:  '{prefix}'
-            HDF5_HOME: '{prefix}'
+      hdf5 +mpi:
+        load:
+          - cse/cray-mpich
       netcdf-c:
         suffixes:
           '+mpi': 'mpi'
           '~mpi': 'serial'
-        environment:
-          set:
-            NETCDF_ROOT:   '{prefix}'
-            NETCDF_DIR:    '{prefix}'
-            NETCDF_HOME:   '{prefix}'
-            NETCDF_C_ROOT: '{prefix}'
+      netcdf-c +mpi:
+        load:
+          - cse/hdf5-mpi
+      netcdf-c ~mpi:
+        load:
+          - cse/hdf5-serial
       netcdf-fortran:
         suffixes:
           '^netcdf-c +mpi': 'mpi'
           '^netcdf-c ~mpi': 'serial'
-        environment:
-          set:
-            NETCDF_FORTRAN_ROOT: '{prefix}'
-            NETCDF_FORTRAN_DIR:  '{prefix}'
+      netcdf-fortran ^netcdf-c +mpi:
+        load:
+          - cse/netcdf-c-mpi
+      netcdf-fortran ^netcdf-c ~mpi:
+        load:
+          - cse/netcdf-c-serial
       netcdf-cxx4:
         suffixes:
           '^netcdf-c +mpi': 'mpi'
           '^netcdf-c ~mpi': 'serial'
-        environment:
-          set:
-            NETCDF_CXX_ROOT: '{prefix}'
+      netcdf-cxx4 ^netcdf-c +mpi:
+        load:
+          - cse/netcdf-c-mpi
+      netcdf-cxx4 ^netcdf-c ~mpi:
+        load:
+          - cse/netcdf-c-serial
       cray-mpich:
-        environment:
-          set:
-            MPI_HOME:              '{prefix}'
-            MPI_ROOT:              '{prefix}'
-            MPICH_DIR:             '{prefix}'
-            CRAY_MPICH_PREFIX_DIR: '{prefix}'
+        autoload: none
       cray-libsci:
-        environment:
-          set:
-            CRAY_LIBSCI_PREFIX_DIR: '{prefix}'
-            LIBSCI_BASE_DIR:        '{prefix}'
+        autoload: none
       cray-pals:
-        environment:
-          set:
-            CRAY_PALS_PREFIX_DIR: '{prefix}'
+        autoload: none

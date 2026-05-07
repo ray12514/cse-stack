@@ -10,6 +10,16 @@ spack:
     - ../gcc-bootstrap.yaml
 
   view:
+    cse_modules:
+      root: $SHARED_PATH/cse/$CSE_RELEASE/v2-cray-integrated/views/modules
+      projections:
+        all: "{name}/{version}"
+        "+mpi": "{name}/{version}-mpi"
+        "~mpi": "{name}/{version}-serial"
+        "^netcdf-c +mpi": "{name}/{version}-mpi"
+        "^netcdf-c ~mpi": "{name}/{version}-serial"
+      link: all
+      link_type: symlink
     mpi:
       root: $SHARED_PATH/cse/$CSE_RELEASE/v2-cray-integrated/views/mpi
       select:

@@ -34,6 +34,7 @@ SPACK_SITE="${SHARED_PATH}/cse/spack-site"
 VARIANT_DIR="${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}"
 USE_SYSTEM_GCC="${CSE_USE_SYSTEM_GCC:-0}"
 BOOTSTRAP_ROOT="${SHARED_PATH}/cse/cache/bootstrap"
+COMPILER_VIEW_ROOT="${VARIANT_DIR}/views/compiler/gcc"
 
 _normalize_spack_version() {
     local normalized="${1#v}"
@@ -70,6 +71,24 @@ _find_installed_gcc_bin() {
     fi
 
     find "${SPACK_SITE}/opt" -path "*/gcc-${GCC_VERSION}*/bin/gcc" 2>/dev/null | head -1
+}
+
+_publish_compiler_view() {
+    local gcc_prefix="$1" gcc_version="$2"
+    local clean_prefix="${COMPILER_VIEW_ROOT}/${gcc_version}"
+
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo "[dry-run] Stage 2: would link ${clean_prefix} -> ${gcc_prefix}"
+        return 0
+    fi
+
+    mkdir -p "${COMPILER_VIEW_ROOT}"
+    if [[ -e "${clean_prefix}" && ! -L "${clean_prefix}" ]]; then
+        echo "ERROR: compiler view path exists and is not a symlink: ${clean_prefix}" >&2
+        exit 1
+    fi
+    ln -sfn "${gcc_prefix}" "${clean_prefix}"
+    chgrp -h "${CSE_GROUP:-$(id -gn)}" "${clean_prefix}" 2>/dev/null || true
 }
 
 # Prevent Spack from reading ~/.spack/ or /etc/spack/ — we write all config
@@ -155,6 +174,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
         fi
     fi
     echo "[dry-run] Stage 2: would write ${GCC_BOOTSTRAP_YAML}"
+    echo "[dry-run] Stage 2: would publish compiler view at ${COMPILER_VIEW_ROOT}/${GCC_VERSION}"
     echo "[dry-run] Stage 2: would remove temporary ${SPACK_SITE}/etc/spack/compilers.yaml"
 else
     # Advisory group ownership check
@@ -295,6 +315,9 @@ packages:
           fortran: ${GCC_PREFIX}/bin/gfortran
     buildable: false
 EOF
+
+    echo "Stage 2: publishing compiler view ${COMPILER_VIEW_ROOT}/${GCC_VERSION} -> ${GCC_PREFIX}"
+    _publish_compiler_view "${GCC_PREFIX}" "${GCC_VERSION}"
 
     # The site compilers.yaml is only a temporary bootstrap aid. Stage 4 uses
     # gcc-bootstrap.yaml so compiler registration has one source of truth.

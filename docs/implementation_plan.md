@@ -46,16 +46,16 @@ idea, not part of the current build path.
 
 ## Module Loading
 
-The module design follows Spack's documented production pattern:
+The module design keeps package modules first class while avoiding raw store
+paths and Tcl-only module features:
 
 - `cse-init/<mpi>` prepends the generated module tree and exposes CSE GCC.
 - Package dependencies are loaded by Spack-generated modules, not by `cse-init`.
-- `all: autoload: direct` causes direct link and run dependencies to load
-  recursively.
-- `hide_implicits: true` hides implicit dependency modules from `module avail`
-  while keeping them available for autoload.
-- `exclude_implicits` is intentionally not used because excluded modules cannot
-  be autoloaded.
+- Broad dependency autoload is disabled.
+- HDF5 MPI modules load the MPI provider module.
+- NetCDF modules load only their matching public CSE dependency modules.
+- MPI provider modules do not load their low-level implementation dependency
+  graph.
 - `use_view: cse_modules` makes generated package modulefiles point at clean
   Spack view prefixes instead of raw hashed install-store prefixes.
 
@@ -67,11 +67,12 @@ module load cse/netcdf-fortran/4.6.1-mpi
 ```
 
 The second command should load NetCDF-Fortran plus the matching NetCDF-C, HDF5,
-MPI, and required direct dependency modules.
+and MPI provider modules, without loading the full low-level dependency graph.
 
 ## Compiler Contract
 
-`cse-init` sets:
+`cse-init` sets these variables from the clean compiler view path
+`${SHARED_PATH}/cse/<release>/<variant>/views/compiler/gcc/<version>`:
 
 - `CSE_GCC_ROOT`
 - `CSE_CC`
@@ -114,6 +115,6 @@ Use optimized targets only as explicit site-specific layers:
 - Dry-run `network_prepare_request.sh`, `network_fulfill_request.sh`, and
   `network_deploy.sh` with representative artifacts.
 - Inspect rendered YAML for one compiler handoff source.
-- Inspect generated modulefiles for autoload/depends-on statements.
+- Inspect generated modulefiles for curated module load/depends-on statements.
 - In a clean module shell, verify loading `cse/netcdf-fortran/4.6.1-mpi` loads
-  NetCDF-C, HDF5, MPI, and direct dependencies.
+  NetCDF-C, HDF5, and MPI, but not the full low-level dependency graph.

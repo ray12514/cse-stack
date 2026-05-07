@@ -15,8 +15,8 @@ state is documented in `README.md`, `docs/implementation_plan.md`, and
 - Restricted and air-gapped flows can use request/fulfillment/deploy wrappers
   plus authoritative lockfiles and artifact manifests.
 - `cse-init/<mpi>` exposes the CSE GCC baseline and the variant module tree.
-- Spack-generated package modules use `autoload: direct` so high-level modules
-  load their direct dependency modules recursively.
+- Spack-generated package modules use clean view-backed paths and curated
+  public dependency loads instead of broad recursive autoload.
 - `v2-mpich` builds upstream MPICH and may consume Cray libfabric/cray-pals as
   externals when detected; it does not currently use external `cray-mpich`.
 

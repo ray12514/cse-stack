@@ -6,7 +6,7 @@ help([[
 The CSE {{ "OpenMPI" if is_openmpi else "MPICH" }} variant ({{ variant }}).
 After loading this module, packages are available under the cse/* namespace.
 Try:  module avail cse
-      module load cse/{{ mpi_provider }} cse/hdf5-mpi cse/netcdf-fortran-mpi
+      module load {{ mpi_module }} {{ hdf5_mpi_module }} {{ netcdf_fortran_mpi_module }}
 ]])
 
 whatis("Name        : cse-init/{{ "openmpi" if is_openmpi else "mpich" }}")

@@ -70,12 +70,16 @@ module list
 ```
 
 The loaded module list should include NetCDF-Fortran, NetCDF-C, HDF5, MPI, and
-their direct dependency modules. This is driven by Spack `autoload: direct`.
+no full low-level MPI dependency graph. This is driven by curated public module
+loads in `modules.yaml`.
 
 ## Notes
 
 - `cse-init` exposes the compiler baseline but does not set global `CC`, `CXX`,
   or `FC`.
+- `CSE_GCC_ROOT`, `CSE_CC`, `CSE_CXX`, and `CSE_FC` point through the clean
+  compiler view path under `views/compiler/gcc/<version>`, not the hashed Spack
+  store path.
 - MPI builds should use the MPI wrapper compilers from `cse/openmpi/<version>`
   or `cse/mpich/<version>`.
 - On Cray/PBS systems, `cray-pals` is relevant to launcher behavior; on Slurm

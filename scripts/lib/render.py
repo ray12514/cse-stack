@@ -87,22 +87,46 @@ def _detect_python() -> tuple:
     return "", ""
 
 
-def _detect_gcc_bootstrap_prefix(variant_dir: str) -> str:
+def _detect_gcc_bootstrap(variant_dir: str) -> tuple[str, str]:
     override = os.environ.get("CSE_GCC_PREFIX", "").strip()
     if override:
-        return override
+        return override, os.environ.get("GCC_VERSION", "").strip()
 
     bootstrap_yaml = Path(variant_dir, "gcc-bootstrap.yaml")
     if not bootstrap_yaml.exists():
-        return ""
+        return "", ""
 
     try:
         text = bootstrap_yaml.read_text()
     except OSError:
-        return ""
+        return "", ""
 
-    match = re.search(r"^\s*prefix:\s*(\S+)\s*$", text, flags=re.MULTILINE)
-    return match.group(1) if match else ""
+    prefix_match = re.search(r"^\s*prefix:\s*(\S+)\s*$", text, flags=re.MULTILINE)
+    spec_match = re.search(r"^\s*-\s*spec:\s*gcc@([^\s]+)", text, flags=re.MULTILINE)
+    prefix = prefix_match.group(1) if prefix_match else ""
+    version = spec_match.group(1) if spec_match else ""
+    return prefix, version
+
+
+def _spec_version(specs: list[str], name: str) -> str:
+    root_pattern = re.compile(rf"^\s*{re.escape(name)}@([^\s+~^]+)")
+    any_pattern = re.compile(rf"(?:^|[\s^]){re.escape(name)}@([^\s+~^]+)")
+
+    for spec in specs:
+        match = root_pattern.search(spec)
+        if match:
+            return match.group(1)
+    for spec in specs:
+        match = any_pattern.search(spec)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _module_use_name(package: str, version: str, suffix: str = "") -> str:
+    if version:
+        return f"cse/{package}/{version}{suffix}"
+    return f"cse/{package}"
 
 
 def _build_context(profile: SystemProfile, variant: str,
@@ -192,6 +216,20 @@ def _build_context(profile: SystemProfile, variant: str,
     ctx["spack_specs"] = package_set_data.get("specs", [])
     ctx["view_mpi_select"] = package_set_data.get("views", {}).get("mpi", [])
     ctx["view_serial_select"] = package_set_data.get("views", {}).get("serial", [])
+    mpi_version = _spec_version(ctx["spack_specs"], ctx["mpi_provider"])
+    hdf5_version = _spec_version(ctx["spack_specs"], "hdf5")
+    netcdf_c_version = _spec_version(ctx["spack_specs"], "netcdf-c")
+    netcdf_fortran_version = _spec_version(ctx["spack_specs"], "netcdf-fortran")
+    ctx["mpi_module"] = _module_use_name(ctx["mpi_provider"], mpi_version)
+    ctx["hdf5_mpi_module"] = _module_use_name("hdf5", hdf5_version, "-mpi")
+    ctx["hdf5_serial_module"] = _module_use_name("hdf5", hdf5_version, "-serial")
+    ctx["netcdf_c_mpi_module"] = _module_use_name("netcdf-c", netcdf_c_version, "-mpi")
+    ctx["netcdf_c_serial_module"] = _module_use_name(
+        "netcdf-c", netcdf_c_version, "-serial"
+    )
+    ctx["netcdf_fortran_mpi_module"] = _module_use_name(
+        "netcdf-fortran", netcdf_fortran_version, "-mpi"
+    )
     ctx["init_module_root"] = (
         os.environ.get("CSE_INIT_MODULE_ROOT", "").strip()
         or (
@@ -200,7 +238,12 @@ def _build_context(profile: SystemProfile, variant: str,
             else ctx["module_root"]
         )
     )
-    ctx["cse_gcc_root"] = _detect_gcc_bootstrap_prefix(variant_dir) or ctx["bootstrap_prefix"]
+    cse_gcc_store_root, cse_gcc_version = _detect_gcc_bootstrap(variant_dir)
+    ctx["cse_gcc_store_root"] = cse_gcc_store_root
+    ctx["cse_gcc_version"] = cse_gcc_version or gcc_version
+    ctx["cse_gcc_root"] = (
+        f"{ctx['views_root']}/compiler/gcc/{ctx['cse_gcc_version']}"
+    )
     ctx["cse_cc"] = f"{ctx['cse_gcc_root']}/bin/gcc"
     ctx["cse_cxx"] = f"{ctx['cse_gcc_root']}/bin/g++"
     ctx["cse_fc"] = f"{ctx['cse_gcc_root']}/bin/gfortran"
