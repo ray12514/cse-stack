@@ -6,25 +6,17 @@ variants:
     mpi_provider: openmpi
     specs:
       - "openmpi@4.1.6 fabrics=auto"
-      - "cmake@3.29.6"
-      - "zlib@1.3.1"
       - "hdf5@1.14.4 +mpi  +fortran +cxx +hl +threadsafe"
     views:
       mpi:
         - "+mpi"
         - "openmpi"
-        - "cmake"
-        - "zlib"
   v2-mpich:
     mpi_provider: mpich
     specs:
       - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix"
-      - "cmake@3.29.6"
-      - "zlib@1.3.1"
       - "hdf5@1.14.4 +mpi  +fortran +cxx +hl +threadsafe ^mpich"
     views:
       mpi:
         - "+mpi"
         - "mpich"
-        - "cmake"
-        - "zlib"

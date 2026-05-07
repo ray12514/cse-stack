@@ -123,6 +123,98 @@ def _spec_version(specs: list[str], name: str) -> str:
     return ""
 
 
+def _root_specs(specs: list[str], name: str) -> list[str]:
+    pattern = re.compile(rf"^\s*{re.escape(name)}(?:@|[\s+~]|$)")
+    return [spec for spec in specs if pattern.search(spec)]
+
+
+def _root_spec_name(spec: str) -> str:
+    match = re.match(r"^\s*([A-Za-z0-9_.+-]+)", spec)
+    return match.group(1) if match else ""
+
+
+def _root_spec_version(spec: str) -> str:
+    match = re.match(r"^\s*[A-Za-z0-9_.+-]+@([^\s+~^]+)", spec)
+    return match.group(1) if match else ""
+
+
+def _root_spec_has_token(spec: str, token: str) -> bool:
+    token_pattern = re.compile(rf"(?<!\S){re.escape(token)}(?!\S)")
+    return bool(token_pattern.search(spec))
+
+
+def _root_spec_has_dep_variant(spec: str, dep_name: str, variant: str) -> bool:
+    dep_pattern = re.compile(
+        rf"\^{re.escape(dep_name)}(?:@[^\s^+~]+)?[^\s^]*{re.escape(variant)}"
+    )
+    spaced_dep_pattern = re.compile(
+        rf"\^{re.escape(dep_name)}(?:@[^\s^+~]+)?(?:\s+[^\^]*)?{re.escape(variant)}"
+    )
+    return bool(dep_pattern.search(spec) or spaced_dep_pattern.search(spec))
+
+
+def _root_spec_suffix(spec: str) -> str:
+    name = _root_spec_name(spec)
+    if name in ("hdf5", "netcdf-c"):
+        if _root_spec_has_token(spec, "+mpi") or re.search(
+            rf"{re.escape(name)}@[^\s^]*\+mpi", spec
+        ):
+            return "-mpi"
+        if _root_spec_has_token(spec, "~mpi") or re.search(
+            rf"{re.escape(name)}@[^\s^]*~mpi", spec
+        ):
+            return "-serial"
+    if name in ("netcdf-fortran", "netcdf-cxx4"):
+        if _root_spec_has_dep_variant(spec, "netcdf-c", "+mpi"):
+            return "-mpi"
+        if _root_spec_has_dep_variant(spec, "netcdf-c", "~mpi"):
+            return "-serial"
+    return ""
+
+
+def _root_public_modules(specs: list[str]) -> list[dict[str, str]]:
+    modules = []
+    for spec in specs:
+        name = _root_spec_name(spec)
+        if not name:
+            continue
+        modules.append(
+            {
+                "name": name,
+                "version": _root_spec_version(spec),
+                "suffix": _root_spec_suffix(spec),
+                "module": _module_use_name(
+                    name, _root_spec_version(spec), _root_spec_suffix(spec)
+                ),
+            }
+        )
+    return modules
+
+
+def _root_spec_has_variant(specs: list[str], name: str, variant: str) -> bool:
+    token_pattern = re.compile(rf"(?<!\S){re.escape(variant)}(?!\S)")
+    compact_pattern = re.compile(rf"{re.escape(name)}@[^\s^]*{re.escape(variant)}")
+    for spec in _root_specs(specs, name):
+        if token_pattern.search(spec) or compact_pattern.search(spec):
+            return True
+    return False
+
+
+def _root_spec_dep_has_variant(
+    specs: list[str], name: str, dep_name: str, variant: str
+) -> bool:
+    dep_pattern = re.compile(
+        rf"\^{re.escape(dep_name)}(?:@[^\s^+~]+)?[^\s^]*{re.escape(variant)}"
+    )
+    spaced_dep_pattern = re.compile(
+        rf"\^{re.escape(dep_name)}(?:@[^\s^+~]+)?(?:\s+[^\^]*)?{re.escape(variant)}"
+    )
+    for spec in _root_specs(specs, name):
+        if dep_pattern.search(spec) or spaced_dep_pattern.search(spec):
+            return True
+    return False
+
+
 def _module_use_name(package: str, version: str, suffix: str = "") -> str:
     if version:
         return f"cse/{package}/{version}{suffix}"
@@ -220,6 +312,7 @@ def _build_context(profile: SystemProfile, variant: str,
     hdf5_version = _spec_version(ctx["spack_specs"], "hdf5")
     netcdf_c_version = _spec_version(ctx["spack_specs"], "netcdf-c")
     netcdf_fortran_version = _spec_version(ctx["spack_specs"], "netcdf-fortran")
+    netcdf_cxx4_version = _spec_version(ctx["spack_specs"], "netcdf-cxx4")
     ctx["mpi_module"] = _module_use_name(ctx["mpi_provider"], mpi_version)
     ctx["hdf5_mpi_module"] = _module_use_name("hdf5", hdf5_version, "-mpi")
     ctx["hdf5_serial_module"] = _module_use_name("hdf5", hdf5_version, "-serial")
@@ -230,6 +323,96 @@ def _build_context(profile: SystemProfile, variant: str,
     ctx["netcdf_fortran_mpi_module"] = _module_use_name(
         "netcdf-fortran", netcdf_fortran_version, "-mpi"
     )
+    ctx["netcdf_fortran_serial_module"] = _module_use_name(
+        "netcdf-fortran", netcdf_fortran_version, "-serial"
+    )
+    ctx["netcdf_cxx4_mpi_module"] = _module_use_name(
+        "netcdf-cxx4", netcdf_cxx4_version, "-mpi"
+    )
+    ctx["netcdf_cxx4_serial_module"] = _module_use_name(
+        "netcdf-cxx4", netcdf_cxx4_version, "-serial"
+    )
+    public_modules = _root_public_modules(ctx["spack_specs"])
+    ctx["public_module_include_specs"] = list(
+        dict.fromkeys(item["name"] for item in public_modules)
+    )
+    ctx["public_module_names"] = list(
+        dict.fromkeys(item["module"] for item in public_modules)
+    )
+    public_module_set = set(ctx["public_module_names"])
+    ctx["load_hdf5_mpi"] = (
+        ctx["mpi_module"] in public_module_set
+        and ctx["hdf5_mpi_module"] in public_module_set
+    )
+    ctx["load_netcdf_c_mpi"] = (
+        ctx["hdf5_mpi_module"] in public_module_set
+        and ctx["netcdf_c_mpi_module"] in public_module_set
+    )
+    ctx["load_netcdf_c_serial"] = (
+        ctx["hdf5_serial_module"] in public_module_set
+        and ctx["netcdf_c_serial_module"] in public_module_set
+    )
+    ctx["load_netcdf_fortran_mpi"] = (
+        ctx["netcdf_c_mpi_module"] in public_module_set
+        and ctx["netcdf_fortran_mpi_module"] in public_module_set
+    )
+    ctx["load_netcdf_fortran_serial"] = (
+        ctx["netcdf_c_serial_module"] in public_module_set
+        and ctx["netcdf_fortran_serial_module"] in public_module_set
+    )
+    ctx["load_netcdf_cxx4_mpi"] = (
+        ctx["netcdf_c_mpi_module"] in public_module_set
+        and ctx["netcdf_cxx4_mpi_module"] in public_module_set
+    )
+    ctx["load_netcdf_cxx4_serial"] = (
+        ctx["netcdf_c_serial_module"] in public_module_set
+        and ctx["netcdf_cxx4_serial_module"] in public_module_set
+    )
+    curated_load_modules = []
+    if (
+        hdf5_version
+        and _root_spec_has_variant(ctx["spack_specs"], "hdf5", "+mpi")
+        and mpi_version
+        and ctx["load_hdf5_mpi"]
+    ):
+        curated_load_modules.append(ctx["mpi_module"])
+    if (
+        netcdf_c_version
+        and _root_spec_has_variant(ctx["spack_specs"], "netcdf-c", "+mpi")
+        and ctx["load_netcdf_c_mpi"]
+    ):
+        curated_load_modules.append(ctx["hdf5_mpi_module"])
+    if (
+        netcdf_c_version
+        and _root_spec_has_variant(ctx["spack_specs"], "netcdf-c", "~mpi")
+        and ctx["load_netcdf_c_serial"]
+    ):
+        curated_load_modules.append(ctx["hdf5_serial_module"])
+    if (
+        netcdf_fortran_version
+        and _root_spec_dep_has_variant(ctx["spack_specs"], "netcdf-fortran", "netcdf-c", "+mpi")
+        and ctx["load_netcdf_fortran_mpi"]
+    ):
+        curated_load_modules.append(ctx["netcdf_c_mpi_module"])
+    if (
+        netcdf_fortran_version
+        and _root_spec_dep_has_variant(ctx["spack_specs"], "netcdf-fortran", "netcdf-c", "~mpi")
+        and ctx["load_netcdf_fortran_serial"]
+    ):
+        curated_load_modules.append(ctx["netcdf_c_serial_module"])
+    if (
+        netcdf_cxx4_version
+        and _root_spec_dep_has_variant(ctx["spack_specs"], "netcdf-cxx4", "netcdf-c", "+mpi")
+        and ctx["load_netcdf_cxx4_mpi"]
+    ):
+        curated_load_modules.append(ctx["netcdf_c_mpi_module"])
+    if (
+        netcdf_cxx4_version
+        and _root_spec_dep_has_variant(ctx["spack_specs"], "netcdf-cxx4", "netcdf-c", "~mpi")
+        and ctx["load_netcdf_cxx4_serial"]
+    ):
+        curated_load_modules.append(ctx["netcdf_c_serial_module"])
+    ctx["curated_load_modules"] = list(dict.fromkeys(curated_load_modules))
     ctx["init_module_root"] = (
         os.environ.get("CSE_INIT_MODULE_ROOT", "").strip()
         or (
@@ -250,32 +433,41 @@ def _build_context(profile: SystemProfile, variant: str,
     return ctx
 
 
+def _load_profile(profile_path: Optional[str], variant: str) -> SystemProfile:
+    if profile_path and Path(profile_path).exists():
+        return SystemProfile.from_file(profile_path)
+
+    # Build a minimal stub so templates render without a real profile.
+    stub: dict = {
+        "system": {"name": "stub", "platform_class": "unknown",
+                   "environment_model": "unknown"},
+        "os": {"glibc_version": "2.34"},
+        "modules": {"system": "lmod", "loaded": []},
+        "scheduler": {"type": "unknown"},
+        "hardware": {"cpu": {}},
+        "vendor_substrate": {"prgenv_module": "", "mpi_module": "",
+                              "source": "unknown"},
+    }
+    if variant == "v2-mpich":
+        # Inject Cray signals so the template gets plausible values.
+        stub["system"]["platform_class"] = "cray"
+        stub["vendor_substrate"]["source"] = "cray"
+    return SystemProfile(stub)
+
+
+def _context_from_args(profile_path: Optional[str], variant: str,
+                       shared_path: str, release: str) -> dict:
+    profile = _load_profile(profile_path, variant)
+    return _build_context(profile, variant, shared_path, release,
+                          gcc_version_override=os.environ.get("GCC_VERSION", ""),
+                          cse_group=os.environ.get("CSE_GROUP", "cse"))
+
+
 def render_template(template_path: str, profile_path: Optional[str],
                     variant: str, shared_path: str, release: str,
                     dry_run: bool = False, output_path: Optional[str] = None) -> int:
     repo_root = Path(__file__).parent.parent.parent
     templates_dir = repo_root / "templates"
-
-    # Load profile (use empty/mock if not supplied, e.g. in dry-run without Stage 1)
-    if profile_path and Path(profile_path).exists():
-        profile = SystemProfile.from_file(profile_path)
-    else:
-        # Build a minimal stub so templates render without a real profile
-        stub: dict = {
-            "system": {"name": "stub", "platform_class": "unknown",
-                       "environment_model": "unknown"},
-            "os": {"glibc_version": "2.34"},
-            "modules": {"system": "lmod", "loaded": []},
-            "scheduler": {"type": "unknown"},
-            "hardware": {"cpu": {}},
-            "vendor_substrate": {"prgenv_module": "", "mpi_module": "",
-                                  "source": "unknown"},
-        }
-        if variant == "v2-mpich":
-            # Inject Cray signals so the template gets plausible values
-            stub["system"]["platform_class"] = "cray"
-            stub["vendor_substrate"]["source"] = "cray"
-        profile = SystemProfile(stub)
 
     env = Environment(
         loader=FileSystemLoader(str(templates_dir)),
@@ -291,9 +483,7 @@ def render_template(template_path: str, profile_path: Optional[str],
         return 1
 
     try:
-        ctx = _build_context(profile, variant, shared_path, release,
-                             gcc_version_override=os.environ.get("GCC_VERSION", ""),
-                             cse_group=os.environ.get("CSE_GROUP", "cse"))
+        ctx = _context_from_args(profile_path, variant, shared_path, release)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -314,9 +504,32 @@ def render_template(template_path: str, profile_path: Optional[str],
     return 0
 
 
+def emit_context_list(list_name: str, profile_path: Optional[str],
+                      variant: str, shared_path: str, release: str) -> int:
+    keys = {
+        "public-modules": "public_module_names",
+        "curated-loads": "curated_load_modules",
+        "public-include-specs": "public_module_include_specs",
+    }
+    key = keys.get(list_name)
+    if not key:
+        print(f"ERROR: unknown list: {list_name}", file=sys.stderr)
+        return 1
+
+    try:
+        ctx = _context_from_args(profile_path, variant, shared_path, release)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    for item in ctx[key]:
+        print(item)
+    return 0
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Render a CSE Jinja2 template")
-    p.add_argument("--template", required=True, help="Path to .j2 template file")
+    p.add_argument("--template", default="", help="Path to .j2 template file")
     p.add_argument("--output", default="", help="Output file path (omit to print to stdout)")
     p.add_argument("--profile", default="", help="Path to Cluster Inspector YAML profile")
     p.add_argument("--variant", required=True,
@@ -324,11 +537,28 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--shared-path", required=True, dest="shared_path")
     p.add_argument("--release", required=True)
     p.add_argument("--dry-run", action="store_true", dest="dry_run")
+    p.add_argument(
+        "--list",
+        choices=["public-modules", "curated-loads", "public-include-specs"],
+        default="",
+        help="Print a derived render-context list instead of rendering a template",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
+    if args.list:
+        sys.exit(emit_context_list(
+            list_name=args.list,
+            profile_path=args.profile or None,
+            variant=args.variant,
+            shared_path=args.shared_path,
+            release=args.release,
+        ))
+    if not args.template:
+        print("ERROR: --template is required unless --list is used", file=sys.stderr)
+        sys.exit(1)
     sys.exit(render_template(
         template_path=args.template,
         profile_path=args.profile or None,

@@ -17,6 +17,8 @@ state is documented in `README.md`, `docs/implementation_plan.md`, and
 - `cse-init/<mpi>` exposes the CSE GCC baseline and the variant module tree.
 - Spack-generated package modules use clean view-backed paths and curated
   public dependency loads instead of broad recursive autoload.
+- The generated module catalog follows explicit root package-set specs;
+  low-level transitive dependencies remain installed but hidden.
 - `v2-mpich` builds upstream MPICH and may consume Cray libfabric/cray-pals as
   externals when detected; it does not currently use external `cray-mpich`.
 

@@ -71,7 +71,8 @@ module list
 
 The loaded module list should include NetCDF-Fortran, NetCDF-C, HDF5, MPI, and
 no full low-level MPI dependency graph. This is driven by curated public module
-loads in `modules.yaml`.
+loads in `modules.yaml`. `module avail cse` should show only explicit root
+package-set specs, not transitive dependencies such as bzip2 or zlib.
 
 ## Notes
 

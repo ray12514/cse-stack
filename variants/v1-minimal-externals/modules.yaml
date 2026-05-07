@@ -28,6 +28,14 @@ modules:
     lmod:
       hierarchy: []
       hash_length: 0
+      include:
+        - openmpi
+        - hdf5
+        - netcdf-c
+        - netcdf-fortran
+        - netcdf-cxx4
+      exclude:
+        - '*'
       projections:
         all: 'cse/{name}'
       all:

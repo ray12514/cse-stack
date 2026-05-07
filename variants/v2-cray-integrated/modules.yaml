@@ -32,8 +32,12 @@ modules:
         all: 'cse/{name}'
       include:
         - cray-mpich
-        - cray-libsci
-        - cray-pals    # remove on Slurm Cray systems; keep on PBS Cray systems
+        - hdf5
+        - netcdf-c
+        - netcdf-fortran
+        - netcdf-cxx4
+      exclude:
+        - '*'
       all:
         autoload: none
       hdf5:

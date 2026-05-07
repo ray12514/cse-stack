@@ -38,6 +38,20 @@ render_stage5_template() {
     python3 "${REPO_ROOT}/scripts/lib/render.py" "${args[@]}"
 }
 
+render_stage5_list() {
+    local list_name="$1"
+    local args=(
+        --list "${list_name}"
+        --variant "${CSE_VARIANT}"
+        --shared-path "${SHARED_PATH}"
+        --release "${CSE_RELEASE}"
+    )
+    if [[ -n "${PROFILE_FILE:-}" && -f "${PROFILE_FILE}" ]]; then
+        args+=(--profile "${PROFILE_FILE}")
+    fi
+    python3 "${REPO_ROOT}/scripts/lib/render.py" "${args[@]}"
+}
+
 detect_generated_module_root() {
     local base="$1"
     local module_file=""
@@ -59,6 +73,77 @@ detect_generated_module_root() {
     fi
 
     return 1
+}
+
+module_file_exists() {
+    local module_name="$1"
+    [[ -f "${CSE_INIT_MODULE_ROOT}/${module_name}" ]] \
+        || [[ -f "${CSE_INIT_MODULE_ROOT}/${module_name}.lua" ]] \
+        || [[ -f "${CSE_INIT_MODULE_ROOT}/${module_name}.tcl" ]]
+}
+
+collect_generated_modules() {
+    local cse_dir="${CSE_INIT_MODULE_ROOT}/cse"
+    local path rel
+
+    [[ -d "${cse_dir}" ]] || return 0
+    find "${cse_dir}" -type f 2>/dev/null | while IFS= read -r path; do
+        rel="${path#${CSE_INIT_MODULE_ROOT}/}"
+        case "${rel}" in
+            *.modulerc|*.modulerc.lua|*.version|*.version.lua)
+                continue
+                ;;
+        esac
+        rel="${rel%.lua}"
+        rel="${rel%.tcl}"
+        printf '%s\n' "${rel}"
+    done | sort -u
+}
+
+validate_generated_modules() {
+    local expected_file="" actual_file="" curated_file=""
+    local module_name="" missing="" unexpected=""
+
+    expected_file="$(mktemp)"
+    actual_file="$(mktemp)"
+    curated_file="$(mktemp)"
+
+    render_stage5_list public-modules | sort -u > "${expected_file}"
+    render_stage5_list curated-loads | sort -u > "${curated_file}"
+    collect_generated_modules > "${actual_file}"
+
+    while IFS= read -r module_name; do
+        [[ -n "${module_name}" ]] || continue
+        if ! module_file_exists "${module_name}"; then
+            missing="${missing}${module_name}"$'\n'
+        fi
+    done < "${expected_file}"
+
+    while IFS= read -r module_name; do
+        [[ -n "${module_name}" ]] || continue
+        if ! module_file_exists "${module_name}"; then
+            missing="${missing}${module_name}"$'\n'
+        fi
+    done < "${curated_file}"
+
+    unexpected="$(comm -13 "${expected_file}" "${actual_file}" || true)"
+
+    if [[ -n "${missing}" || -n "${unexpected}" ]]; then
+        echo "ERROR: generated module tree does not match the public CSE catalog." >&2
+        if [[ -n "${missing}" ]]; then
+            echo "Missing expected/curated module targets:" >&2
+            printf '%s' "${missing}" >&2
+        fi
+        if [[ -n "${unexpected}" ]]; then
+            echo "Unexpected generated public modules:" >&2
+            printf '%s\n' "${unexpected}" >&2
+        fi
+        echo "Module root checked: ${CSE_INIT_MODULE_ROOT}" >&2
+        exit 1
+    fi
+
+    rm -f "${expected_file}" "${actual_file}" "${curated_file}"
+    echo "Stage 5: validated public module catalog under ${CSE_INIT_MODULE_ROOT}"
 }
 
 publish_compiler_view_from_bootstrap() {
@@ -113,6 +198,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run]   spack env activate -d ${VARIANT_ENV_DIR}"
     echo "[dry-run]   spack env view regenerate"
     echo "[dry-run]   spack module ${SPACK_MODULE_CMD} refresh --delete-tree -y"
+    echo "[dry-run]   validate public module catalog and curated load targets"
     echo "[dry-run]   mkdir -p $(dirname "${INIT_DST}")"
     echo "[dry-run]   python3 ${REPO_ROOT}/scripts/lib/render.py --template ${INIT_TEMPLATE} --output ${INIT_DST} --variant ${CSE_VARIANT} --shared-path ${SHARED_PATH} --release ${CSE_RELEASE}"
     exit 0
@@ -141,6 +227,7 @@ if ! CSE_INIT_MODULE_ROOT="$(detect_generated_module_root "${MODULE_ROOT_BASE}")
 fi
 export CSE_INIT_MODULE_ROOT
 echo "Stage 5: detected generated module root ${CSE_INIT_MODULE_ROOT}"
+validate_generated_modules
 
 echo "Stage 5: rendering cse-init/${INIT_NAME} to ${INIT_DST}..."
 umask 022
