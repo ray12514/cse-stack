@@ -163,15 +163,14 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     if [[ "${USE_SYSTEM_GCC}" == "1" ]]; then
         echo "[dry-run] Stage 2: would skip GCC bootstrap and use the detected system compiler as CSE GCC"
     else
+        _DRY_RUN_INSTALL="spack install"
         if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
-            if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then
-                echo "[dry-run] Stage 2: would run: spack install --cache-only --no-check-signature --deprecated --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
-            else
-                echo "[dry-run] Stage 2: would run: spack install --cache-only --deprecated --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
-            fi
-        else
-            echo "[dry-run] Stage 2: would run: spack install --deprecated --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
+            _DRY_RUN_INSTALL="${_DRY_RUN_INSTALL} --cache-only"
         fi
+        if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" && -n "${BUILDCACHE_URI:-}" ]]; then
+            _DRY_RUN_INSTALL="${_DRY_RUN_INSTALL} --no-check-signature"
+        fi
+        echo "[dry-run] Stage 2: would run: ${_DRY_RUN_INSTALL} --deprecated --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
     fi
     echo "[dry-run] Stage 2: would write ${GCC_BOOTSTRAP_YAML}"
     echo "[dry-run] Stage 2: would publish compiler view at ${COMPILER_VIEW_ROOT}/${GCC_VERSION}"
@@ -280,11 +279,11 @@ SYSEOF
         else
             echo "Stage 2: building gcc@${GCC_VERSION} (this may take a while)..."
             _INSTALL_ARGS=(install --deprecated --concurrent-packages "${SPACK_INSTALL_JOBS:-4}" --jobs "${SPACK_MAKE_JOBS:-16}" --no-checksum)
+            if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" && -n "${BUILDCACHE_URI:-}" ]]; then
+                _INSTALL_ARGS+=(--no-check-signature)
+            fi
             if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
                 _INSTALL_ARGS+=(--cache-only)
-                if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then
-                    _INSTALL_ARGS+=(--no-check-signature)
-                fi
             fi
             spack "${_INSTALL_ARGS[@]}" "gcc@${GCC_VERSION}" ~bootstrap +binutils "target=${SPACK_TARGET}"
             GCC_BIN="$(_find_installed_gcc_bin)"
