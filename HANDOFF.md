@@ -2,7 +2,8 @@
 
 This file is preserved as a short handoff note. The current implementation
 state is documented in `README.md`, `docs/implementation_plan.md`, and
-`docs/phase_two_summary.md`.
+`docs/phase_two_summary.md`. Build troubleshooting and lessons learned are
+tracked in `docs/build_process_notes.md`.
 
 ## Current Decisions
 
