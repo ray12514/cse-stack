@@ -66,6 +66,38 @@ reset_spack_views() {
     done
 }
 
+report_duplicate_name_versions() {
+    local specs=""
+    specs="$(spack find --deps --format '{name}@{version} /{hash}' 2>/dev/null || true)"
+    if [[ -z "${specs}" ]]; then
+        return 0
+    fi
+
+    printf '%s\n' "${specs}" | python3 -c '
+import collections
+import sys
+
+by_key = collections.defaultdict(set)
+for line in sys.stdin:
+    parts = line.split()
+    if len(parts) < 2:
+        continue
+    key, digest = parts[0], parts[1]
+    if digest:
+        by_key[key].add(digest)
+
+duplicates = sorted((key, sorted(hashes)) for key, hashes in by_key.items() if len(hashes) > 1)
+if not duplicates:
+    sys.exit(0)
+
+print("Stage 4: detected duplicate concrete name/version specs; hashed fallback view projections will disambiguate:")
+for key, hashes in duplicates[:20]:
+    print("  {}: {}".format(key, " ".join(hashes)))
+if len(duplicates) > 20:
+    print(f"  ... {len(duplicates) - 20} more")
+'
+}
+
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run] Stage 4: would render config.yaml, modules.yaml, spack.yaml"
     _render "config.yaml.j2"  "${VARIANT_ENV_DIR}/config.yaml"
@@ -86,6 +118,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo "[dry-run]   remove stale Spack views under ${VARIANT_DIR}/views/{modules,mpi,serial}"
         echo "[dry-run]   spack concretize --fresh"
     fi
+    echo "[dry-run]   detect duplicate concrete name/version specs for hashed view fallback"
     if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
         echo "[dry-run]   spack mirror list"
     fi
@@ -217,6 +250,8 @@ else
     echo "Stage 4: concretizing..."
     spack concretize --fresh
 fi
+
+report_duplicate_name_versions
 
 echo "Stage 4: installing (this will take a while on first run)..."
 reset_spack_views

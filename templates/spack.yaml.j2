@@ -22,28 +22,44 @@ spack:
     cse_modules:
       root: {{ views_root }}/modules
       projections:
+{% for name in clean_view_projection_names %}
+        {{ name }}: "{name}/{version}"
+{% endfor %}
         boost+mpi: "{name}/{version}/mpi"
         boost~mpi: "{name}/{version}/serial"
-        pango: "{name}/{version}/{hash:7}"
-        all: "{name}/{version}"
-        "+mpi": "{name}/{version}-mpi"
-        "~mpi": "{name}/{version}-serial"
-        "^netcdf-c +mpi": "{name}/{version}-mpi"
-        "^netcdf-c ~mpi": "{name}/{version}-serial"
+        fftw+mpi: "{name}/{version}-mpi"
+        fftw~mpi: "{name}/{version}-serial"
+        hdf5+mpi: "{name}/{version}-mpi"
+        hdf5~mpi: "{name}/{version}-serial"
+        netcdf-c+mpi: "{name}/{version}-mpi"
+        netcdf-c~mpi: "{name}/{version}-serial"
+        "netcdf-fortran ^netcdf-c+mpi": "{name}/{version}-mpi"
+        "netcdf-fortran ^netcdf-c~mpi": "{name}/{version}-serial"
+        "netcdf-cxx4 ^netcdf-c+mpi": "{name}/{version}-mpi"
+        "netcdf-cxx4 ^netcdf-c~mpi": "{name}/{version}-serial"
+        all: "{name}/{version}/{hash:7}"
       link: all
       link_type: symlink
 {% if view_mpi_select %}
     mpi:
       root: {{ views_root }}/mpi
       projections:
+{% for name in clean_view_projection_names %}
+        {{ name }}: "{name}/{version}"
+{% endfor %}
         boost+mpi: "{name}/{version}/mpi"
         boost~mpi: "{name}/{version}/serial"
-        pango: "{name}/{version}/{hash:7}"
-        all: "{name}/{version}"
-        "+mpi": "{name}/{version}-mpi"
-        "~mpi": "{name}/{version}-serial"
-        "^netcdf-c +mpi": "{name}/{version}-mpi"
-        "^netcdf-c ~mpi": "{name}/{version}-serial"
+        fftw+mpi: "{name}/{version}-mpi"
+        fftw~mpi: "{name}/{version}-serial"
+        hdf5+mpi: "{name}/{version}-mpi"
+        hdf5~mpi: "{name}/{version}-serial"
+        netcdf-c+mpi: "{name}/{version}-mpi"
+        netcdf-c~mpi: "{name}/{version}-serial"
+        "netcdf-fortran ^netcdf-c+mpi": "{name}/{version}-mpi"
+        "netcdf-fortran ^netcdf-c~mpi": "{name}/{version}-serial"
+        "netcdf-cxx4 ^netcdf-c+mpi": "{name}/{version}-mpi"
+        "netcdf-cxx4 ^netcdf-c~mpi": "{name}/{version}-serial"
+        all: "{name}/{version}/{hash:7}"
       select:
 {% for item in view_mpi_select %}
         - "{{ item }}"
@@ -55,14 +71,22 @@ spack:
     serial:
       root: {{ views_root }}/serial
       projections:
+{% for name in clean_view_projection_names %}
+        {{ name }}: "{name}/{version}"
+{% endfor %}
         boost+mpi: "{name}/{version}/mpi"
         boost~mpi: "{name}/{version}/serial"
-        pango: "{name}/{version}/{hash:7}"
-        all: "{name}/{version}"
-        "+mpi": "{name}/{version}-mpi"
-        "~mpi": "{name}/{version}-serial"
-        "^netcdf-c +mpi": "{name}/{version}-mpi"
-        "^netcdf-c ~mpi": "{name}/{version}-serial"
+        fftw+mpi: "{name}/{version}-mpi"
+        fftw~mpi: "{name}/{version}-serial"
+        hdf5+mpi: "{name}/{version}-mpi"
+        hdf5~mpi: "{name}/{version}-serial"
+        netcdf-c+mpi: "{name}/{version}-mpi"
+        netcdf-c~mpi: "{name}/{version}-serial"
+        "netcdf-fortran ^netcdf-c+mpi": "{name}/{version}-mpi"
+        "netcdf-fortran ^netcdf-c~mpi": "{name}/{version}-serial"
+        "netcdf-cxx4 ^netcdf-c+mpi": "{name}/{version}-mpi"
+        "netcdf-cxx4 ^netcdf-c~mpi": "{name}/{version}-serial"
+        all: "{name}/{version}/{hash:7}"
       select:
 {% for item in view_serial_select %}
         - "{{ item }}"
