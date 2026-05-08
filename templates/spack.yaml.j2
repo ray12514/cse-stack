@@ -18,7 +18,8 @@ spack:
     cse_modules:
       root: {{ views_root }}/modules
       projections:
-        boost: "{name}/{version}-{hash:7}"
+        boost+mpi: "{name}/{version}/mpi"
+        boost~mpi: "{name}/{version}/serial"
         all: "{name}/{version}"
         "+mpi": "{name}/{version}-mpi"
         "~mpi": "{name}/{version}-serial"
@@ -30,7 +31,8 @@ spack:
     mpi:
       root: {{ views_root }}/mpi
       projections:
-        boost: "{name}/{version}-{hash:7}"
+        boost+mpi: "{name}/{version}/mpi"
+        boost~mpi: "{name}/{version}/serial"
         all: "{name}/{version}"
         "+mpi": "{name}/{version}-mpi"
         "~mpi": "{name}/{version}-serial"
@@ -47,7 +49,8 @@ spack:
     serial:
       root: {{ views_root }}/serial
       projections:
-        boost: "{name}/{version}-{hash:7}"
+        boost+mpi: "{name}/{version}/mpi"
+        boost~mpi: "{name}/{version}/serial"
         all: "{name}/{version}"
         "+mpi": "{name}/{version}-mpi"
         "~mpi": "{name}/{version}-serial"

@@ -66,6 +66,13 @@ modules:
           '+mpi': 'mpi'
           '~mpi': 'serial'
 
+      boost:
+        suffixes:
+          '+mpi': 'mpi'
+          '~mpi': 'serial'
+        conflict:
+          - 'cse/{name}'
+
 {% for rule in module_load_rules %}
       {{ rule.selector }}:
         load:
