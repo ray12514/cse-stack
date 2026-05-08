@@ -179,6 +179,28 @@ Resolution:
 - Boost modules conflict with `cse/boost` so users do not load incompatible
   Boost variants together.
 
+### Pango Transitive View Collision
+
+Symptom:
+
+- The build completes, but view regeneration fails because multiple concrete
+  `pango` specs project to the same view path.
+
+Cause:
+
+- `pango` is not a top-level CSE package-set spec. It is pulled in by graphics
+  dependencies, most visibly through the `gnuplot` stack.
+- Multiple top-level specs can require different concrete `pango` DAGs. They
+  may share the same package version while differing by dependency hash, which
+  makes the default `{name}/{version}` view projection collide.
+
+Resolution:
+
+- Keep `pango` hidden from public modules.
+- Project `pango` in views as `{name}/{version}/{hash:7}` so multiple concrete
+  transitive instances can coexist without changing the clean public module
+  names.
+
 ### HDF5 Threadsafe Variant Pressure
 
 Symptom:
