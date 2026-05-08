@@ -34,7 +34,7 @@ variants:
       - matrix:
         - ["cmake@4.1.2", "cmake@4.1.1"]
       - matrix:
-        - ["boost@1.88.0", "boost@1.87.0"]
+        - ["boost@1.88.0 ~mpi", "boost@1.87.0 ~mpi"]
       - matrix:
         - ["python@3.14.0", "python@3.13.8"]
       - "py-numpy@2.3.4 ^python@3.14.0"
@@ -54,7 +54,7 @@ variants:
         - "gnuplot"
         - "gsl"
         - "cmake"
-        - "boost"
+        - "boost~mpi"
         - "python"
         - "py-numpy"
         - "miniforge3"
@@ -88,7 +88,7 @@ variants:
       - matrix:
         - ["cmake@4.1.2", "cmake@4.1.1"]
       - matrix:
-        - ["boost@1.88.0", "boost@1.87.0"]
+        - ["boost@1.88.0 ~mpi", "boost@1.87.0 ~mpi"]
       - matrix:
         - ["python@3.14.0", "python@3.13.8"]
       - "py-numpy@2.3.4 ^python@3.14.0"
@@ -108,7 +108,7 @@ variants:
         - "gnuplot"
         - "gsl"
         - "cmake"
-        - "boost"
+        - "boost~mpi"
         - "python"
         - "py-numpy"
         - "miniforge3"
