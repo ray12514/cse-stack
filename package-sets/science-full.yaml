@@ -7,15 +7,15 @@ variants:
   v1-openmpi:
     mpi_provider: openmpi
     specs:
-      - "openmpi@5.0.10 fabrics=auto"
-      - "hdf5@2.1.0 +mpi  +fortran +cxx +hl +threadsafe"
-      - "hdf5@2.1.0 ~mpi  +fortran +cxx +hl +threadsafe"
+      - "openmpi@5.0.8 fabrics=auto"
       - "hdf5@1.14.6 +mpi  +fortran +cxx +hl +threadsafe"
       - "hdf5@1.14.6 ~mpi  +fortran +cxx +hl +threadsafe"
-      - "netcdf-c@4.9.3 +mpi  +parallel-netcdf  ^hdf5@2.1.0+mpi"
-      - "netcdf-c@4.9.3 ~mpi                    ^hdf5@2.1.0~mpi"
-      - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.6+mpi"
-      - "netcdf-c@4.9.2 ~mpi                    ^hdf5@1.14.6~mpi"
+      - "hdf5@1.14.5 +mpi  +fortran +cxx +hl +threadsafe"
+      - "hdf5@1.14.5 ~mpi  +fortran +cxx +hl +threadsafe"
+      - "netcdf-c@4.9.3 +mpi  +parallel-netcdf  ^hdf5@1.14.6+mpi"
+      - "netcdf-c@4.9.3 ~mpi                    ^hdf5@1.14.6~mpi"
+      - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.5+mpi"
+      - "netcdf-c@4.9.2 ~mpi                    ^hdf5@1.14.5~mpi"
       - "netcdf-fortran@4.6.2                   ^netcdf-c@4.9.3+mpi"
       - "netcdf-fortran@4.6.2                   ^netcdf-c@4.9.3~mpi"
       - "netcdf-fortran@4.6.1                   ^netcdf-c@4.9.2+mpi"
@@ -23,22 +23,22 @@ variants:
       - "netcdf-cxx4@4.3.1                      ^netcdf-c@4.9.3+mpi"
       - "netcdf-cxx4@4.3.1                      ^netcdf-c@4.9.3~mpi"
       - matrix:
-        - ["fftw@3.3.11", "fftw@3.3.10"]
+        - ["fftw@3.3.10", "fftw@3.3.9"]
         - ["+mpi ^openmpi", "~mpi"]
       - matrix:
-        - ["openblas@0.3.32", "openblas@0.3.30"]
+        - ["openblas@0.3.30", "openblas@0.3.29"]
       - matrix:
         - ["gnuplot@6.0.0", "gnuplot@5.4.10"]
       - matrix:
         - ["gsl@2.8", "gsl@2.7.1"]
       - matrix:
-        - ["cmake@4.2.3", "cmake@4.1.5"]
+        - ["cmake@4.1.2", "cmake@4.1.1"]
       - matrix:
-        - ["boost@1.90.0", "boost@1.89.0"]
+        - ["boost@1.88.0", "boost@1.87.0"]
       - matrix:
-        - ["python@3.14.3", "python@3.13.12"]
-      - "py-numpy@2.4.4 ^python@3.14.3"
-      - "py-numpy@2.4.3 ^python@3.13.12"
+        - ["python@3.14.0", "python@3.13.8"]
+      - "py-numpy@2.3.4 ^python@3.14.0"
+      - "py-numpy@2.3.3 ^python@3.13.8"
       - "miniforge3@25.3.0-3"
     views:
       mpi:
@@ -61,15 +61,15 @@ variants:
   v2-mpich:
     mpi_provider: mpich
     specs:
-      - "mpich@5.0.1 device=ch4 netmod=ofi pmi=pmix"
-      - "hdf5@2.1.0 +mpi  +fortran +cxx +hl +threadsafe ^mpich"
-      - "hdf5@2.1.0 ~mpi  +fortran +cxx +hl +threadsafe"
+      - "mpich@4.3.2 device=ch4 netmod=ofi pmi=pmix"
       - "hdf5@1.14.6 +mpi  +fortran +cxx +hl +threadsafe ^mpich"
       - "hdf5@1.14.6 ~mpi  +fortran +cxx +hl +threadsafe"
-      - "netcdf-c@4.9.3 +mpi  +parallel-netcdf  ^hdf5@2.1.0+mpi  ^mpich"
-      - "netcdf-c@4.9.3 ~mpi                    ^hdf5@2.1.0~mpi"
-      - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.6+mpi  ^mpich"
-      - "netcdf-c@4.9.2 ~mpi                    ^hdf5@1.14.6~mpi"
+      - "hdf5@1.14.5 +mpi  +fortran +cxx +hl +threadsafe ^mpich"
+      - "hdf5@1.14.5 ~mpi  +fortran +cxx +hl +threadsafe"
+      - "netcdf-c@4.9.3 +mpi  +parallel-netcdf  ^hdf5@1.14.6+mpi  ^mpich"
+      - "netcdf-c@4.9.3 ~mpi                    ^hdf5@1.14.6~mpi"
+      - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.5+mpi  ^mpich"
+      - "netcdf-c@4.9.2 ~mpi                    ^hdf5@1.14.5~mpi"
       - "netcdf-fortran@4.6.2                   ^netcdf-c@4.9.3+mpi"
       - "netcdf-fortran@4.6.2                   ^netcdf-c@4.9.3~mpi"
       - "netcdf-fortran@4.6.1                   ^netcdf-c@4.9.2+mpi"
@@ -77,22 +77,22 @@ variants:
       - "netcdf-cxx4@4.3.1                      ^netcdf-c@4.9.3+mpi"
       - "netcdf-cxx4@4.3.1                      ^netcdf-c@4.9.3~mpi"
       - matrix:
-        - ["fftw@3.3.11", "fftw@3.3.10"]
+        - ["fftw@3.3.10", "fftw@3.3.9"]
         - ["+mpi ^mpich", "~mpi"]
       - matrix:
-        - ["openblas@0.3.32", "openblas@0.3.30"]
+        - ["openblas@0.3.30", "openblas@0.3.29"]
       - matrix:
         - ["gnuplot@6.0.0", "gnuplot@5.4.10"]
       - matrix:
         - ["gsl@2.8", "gsl@2.7.1"]
       - matrix:
-        - ["cmake@4.2.3", "cmake@4.1.5"]
+        - ["cmake@4.1.2", "cmake@4.1.1"]
       - matrix:
-        - ["boost@1.90.0", "boost@1.89.0"]
+        - ["boost@1.88.0", "boost@1.87.0"]
       - matrix:
-        - ["python@3.14.3", "python@3.13.12"]
-      - "py-numpy@2.4.4 ^python@3.14.3"
-      - "py-numpy@2.4.3 ^python@3.13.12"
+        - ["python@3.14.0", "python@3.13.8"]
+      - "py-numpy@2.3.4 ^python@3.14.0"
+      - "py-numpy@2.3.3 ^python@3.13.8"
       - "miniforge3@25.3.0-3"
     views:
       mpi:
