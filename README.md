@@ -156,6 +156,11 @@ Keep the default buildcache generic until the site layout is proven:
 The generic cache is the baseline for first production builds. Optimized caches
 are a later site-specific layer.
 
+Install-prefix padding is disabled by default. It can help when relocating
+binaries to a longer destination prefix, but the long placeholder paths can
+break generated build-time scripts in packages such as `gobject-introspection`.
+Use `SPACK_PADDED_LENGTH=<n>` only for a dedicated relocation test build.
+
 ## Post-Build Mirror And Buildcache
 
 After a successful build, the environment lockfile at

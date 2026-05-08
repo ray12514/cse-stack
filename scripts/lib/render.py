@@ -349,6 +349,10 @@ def _build_context(profile: SystemProfile, variant: str,
         make_jobs = int(os.environ.get("SPACK_MAKE_JOBS", "") or "16")
     except ValueError:
         make_jobs = 16
+    try:
+        padded_length = int(os.environ.get("SPACK_PADDED_LENGTH", "") or "0")
+    except ValueError:
+        padded_length = 0
     _ssl_ver, _ssl_prefix = detect_system_openssl()
     _curl_ver, _curl_prefix = _detect_curl()
     _perl_ver, _perl_prefix = _detect_perl()
@@ -378,6 +382,9 @@ def _build_context(profile: SystemProfile, variant: str,
         "mpich_version": mpich_version,
         # Threads per package build → templates/config.yaml.j2 build_jobs
         "make_jobs": make_jobs,
+        # Disabled by default. Long padded prefixes can break generated
+        # shebangs during builds such as gobject-introspection.
+        "padded_length": padded_length if padded_length > 0 else 0,
         # Cray detection — libfabric and pals for v2-mpich
         "is_cray":           profile.is_cray(),
         "has_libfabric":     profile.has_libfabric(),

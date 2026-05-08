@@ -3,10 +3,11 @@ config:
     root: {{ store_root }}
     projections:
       all: '{architecture}/{compiler.name}-{compiler.version}/{name}-{version}-{hash:7}'
-    # Pad install paths so binaries can be relocated to longer prefixes when
-    # transferred to another system (e.g. air-gapped targets).  Spack rewrites
-    # the placeholder characters at install time; users never see the padding.
-    padded_length: 256
+{% if padded_length %}
+    # Optional relocation padding. Disabled by default because long padded
+    # prefixes can break generated shebangs during some package builds.
+    padded_length: {{ padded_length }}
+{% endif %}
 
   build_stage:
     - $tempdir/$user/spack-stage
