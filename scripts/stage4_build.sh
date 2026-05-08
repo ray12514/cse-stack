@@ -86,16 +86,19 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo "[dry-run]   remove stale Spack views under ${VARIANT_DIR}/views/{modules,mpi,serial}"
         echo "[dry-run]   spack concretize --fresh"
     fi
+    if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
+        echo "[dry-run]   spack mirror list"
+    fi
     echo "[dry-run]   remove stale Spack views under ${VARIANT_DIR}/views/{modules,mpi,serial}"
-if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
-    _DRY_RUN_INSTALL="spack install --cache-only"
-else
-    _DRY_RUN_INSTALL="spack install"
-fi
-if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" && -n "${BUILDCACHE_URI:-}" ]]; then
-    _DRY_RUN_INSTALL="${_DRY_RUN_INSTALL} --no-check-signature"
-fi
-echo "[dry-run]   ${_DRY_RUN_INSTALL} --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --fail-fast"
+    if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
+        _DRY_RUN_INSTALL="spack install --cache-only"
+    else
+        _DRY_RUN_INSTALL="spack install"
+    fi
+    if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" && -n "${BUILDCACHE_URI:-}" ]]; then
+        _DRY_RUN_INSTALL="${_DRY_RUN_INSTALL} --no-check-signature"
+    fi
+    echo "[dry-run]   ${_DRY_RUN_INSTALL} --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --fail-fast"
     if [[ "${SPACK_CACHE_ONLY:-0}" != "1" && -n "${BUILDCACHE_URI:-}" ]]; then
         echo "[dry-run]   spack buildcache push --unsigned ${BUILDCACHE_URI}"
     fi
@@ -198,6 +201,10 @@ fi
 
 echo "Stage 4: activating Spack environment at ${VARIANT_ENV_DIR}..."
 spack env activate -d "${VARIANT_ENV_DIR}"
+if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
+    echo "Stage 4: active Spack mirrors:"
+    spack mirror list || true
+fi
 reset_spack_views
 
 if [[ -n "${LOCKFILE_PATH}" ]]; then

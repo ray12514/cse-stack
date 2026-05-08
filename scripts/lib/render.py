@@ -415,6 +415,11 @@ def _build_context(profile: SystemProfile, variant: str,
     ctx["gcc_compilers_yaml_exists"] = os.path.exists(
         os.path.join(variant_dir, "gcc-compilers.yaml")
     )
+    ctx["mirrors_yaml_enabled"] = bool(
+        os.environ.get("MIRROR_PATH")
+        or os.environ.get("BUILDCACHE_URI")
+        or os.path.exists(os.path.join(variant_dir, "env", "mirrors.yaml"))
+    )
     package_set = os.environ.get("CSE_PACKAGE_SET", "full")
     ctx["package_set"] = package_set
     package_set_data = load_package_set(Path(__file__).parent.parent.parent, package_set, variant, ctx)
