@@ -3,6 +3,10 @@ spack:
     - ./packages.yaml
     - ./config.yaml
     - ./modules.yaml
+{% if mirrors_yaml_enabled %}
+    # Written by stage 4 when --mirror-path or --buildcache-uri is set.
+    - ./mirrors.yaml
+{% endif %}
 {% if gcc_compilers_yaml_exists %}
     # Written by scripts/stage2_spack.sh — compiler entries for the
     # bootstrapped GCC, read by stage 4 concretization and build.
