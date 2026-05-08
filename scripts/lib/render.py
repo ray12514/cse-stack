@@ -15,6 +15,7 @@ With --dry-run the rendered content is printed to stdout and no file is written.
 """
 
 import argparse
+from itertools import product
 import os
 import re
 import subprocess
@@ -32,6 +33,7 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent))
 from profile import SystemProfile  # noqa: E402
 from package_sets import detect_system_openssl, load_package_set  # noqa: E402
+import yaml  # noqa: E402
 
 
 _SYSTEM_PREFIXES = ("/usr", "/usr/local")
@@ -123,6 +125,42 @@ def _spec_version(specs: list[str], name: str) -> str:
     return ""
 
 
+def _format_spack_spec_entry(spec: object) -> str:
+    if isinstance(spec, str):
+        return f"    - {spec}"
+    rendered = yaml.safe_dump([spec], default_flow_style=False, sort_keys=False).rstrip()
+    return "\n".join(f"    {line}" for line in rendered.splitlines())
+
+
+def _expand_matrix_entry(entry: dict) -> list[str]:
+    axes = entry.get("matrix", [])
+    if not isinstance(axes, list) or not axes:
+        return []
+
+    expanded = []
+    for combination in product(*axes):
+        parts = []
+        for item in combination:
+            if isinstance(item, list):
+                parts.extend(str(part) for part in item if str(part).strip())
+            elif str(item).strip():
+                parts.append(str(item))
+        spec = " ".join(parts).strip()
+        if spec:
+            expanded.append(spec)
+    return expanded
+
+
+def _expand_spack_specs(specs: list[object]) -> list[str]:
+    expanded = []
+    for spec in specs:
+        if isinstance(spec, str):
+            expanded.append(spec)
+        elif isinstance(spec, dict) and "matrix" in spec:
+            expanded.extend(_expand_matrix_entry(spec))
+    return expanded
+
+
 def _root_specs(specs: list[str], name: str) -> list[str]:
     pattern = re.compile(rf"^\s*{re.escape(name)}(?:@|[\s+~]|$)")
     return [spec for spec in specs if pattern.search(spec)]
@@ -143,6 +181,11 @@ def _root_spec_has_token(spec: str, token: str) -> bool:
     return bool(token_pattern.search(spec))
 
 
+def _root_spec_dep_version(spec: str, dep_name: str) -> str:
+    match = re.search(rf"\^{re.escape(dep_name)}@([^\s+~^]+)", spec)
+    return match.group(1) if match else ""
+
+
 def _root_spec_has_dep_variant(spec: str, dep_name: str, variant: str) -> bool:
     dep_pattern = re.compile(
         rf"\^{re.escape(dep_name)}(?:@[^\s^+~]+)?[^\s^]*{re.escape(variant)}"
@@ -155,7 +198,7 @@ def _root_spec_has_dep_variant(spec: str, dep_name: str, variant: str) -> bool:
 
 def _root_spec_suffix(spec: str) -> str:
     name = _root_spec_name(spec)
-    if name in ("hdf5", "netcdf-c"):
+    if name in ("hdf5", "netcdf-c", "fftw"):
         if _root_spec_has_token(spec, "+mpi") or re.search(
             rf"{re.escape(name)}@[^\s^]*\+mpi", spec
         ):
@@ -191,15 +234,6 @@ def _root_public_modules(specs: list[str]) -> list[dict[str, str]]:
     return modules
 
 
-def _root_spec_has_variant(specs: list[str], name: str, variant: str) -> bool:
-    token_pattern = re.compile(rf"(?<!\S){re.escape(variant)}(?!\S)")
-    compact_pattern = re.compile(rf"{re.escape(name)}@[^\s^]*{re.escape(variant)}")
-    for spec in _root_specs(specs, name):
-        if token_pattern.search(spec) or compact_pattern.search(spec):
-            return True
-    return False
-
-
 def _root_spec_dep_has_variant(
     specs: list[str], name: str, dep_name: str, variant: str
 ) -> bool:
@@ -219,6 +253,73 @@ def _module_use_name(package: str, version: str, suffix: str = "") -> str:
     if version:
         return f"cse/{package}/{version}{suffix}"
     return f"cse/{package}"
+
+
+def _module_load_rule(
+    selector: str,
+    module: str,
+    public_module_set: set[str],
+) -> Optional[dict[str, object]]:
+    if module not in public_module_set:
+        return None
+    return {"selector": selector, "loads": [module]}
+
+
+def _build_module_load_rules(
+    specs: list[str],
+    mpi_module: str,
+    public_module_set: set[str],
+) -> list[dict[str, object]]:
+    rules = []
+    for spec in specs:
+        name = _root_spec_name(spec)
+        version = _root_spec_version(spec)
+        if not name or not version:
+            continue
+
+        rule = None
+        if name in ("hdf5", "fftw") and _root_spec_has_token(spec, "+mpi"):
+            rule = _module_load_rule(f"{name}@{version} +mpi", mpi_module, public_module_set)
+        elif name == "netcdf-c":
+            hdf5_version = _root_spec_dep_version(spec, "hdf5")
+            if _root_spec_has_token(spec, "+mpi"):
+                rule = _module_load_rule(
+                    f"netcdf-c@{version} +mpi",
+                    _module_use_name("hdf5", hdf5_version, "-mpi"),
+                    public_module_set,
+                )
+            elif _root_spec_has_token(spec, "~mpi"):
+                rule = _module_load_rule(
+                    f"netcdf-c@{version} ~mpi",
+                    _module_use_name("hdf5", hdf5_version, "-serial"),
+                    public_module_set,
+                )
+        elif name in ("netcdf-fortran", "netcdf-cxx4"):
+            netcdf_c_version = _root_spec_dep_version(spec, "netcdf-c")
+            if _root_spec_has_dep_variant(spec, "netcdf-c", "+mpi"):
+                rule = _module_load_rule(
+                    f"{name}@{version} ^netcdf-c@{netcdf_c_version} +mpi",
+                    _module_use_name("netcdf-c", netcdf_c_version, "-mpi"),
+                    public_module_set,
+                )
+            elif _root_spec_has_dep_variant(spec, "netcdf-c", "~mpi"):
+                rule = _module_load_rule(
+                    f"{name}@{version} ^netcdf-c@{netcdf_c_version} ~mpi",
+                    _module_use_name("netcdf-c", netcdf_c_version, "-serial"),
+                    public_module_set,
+                )
+        elif name == "py-numpy":
+            python_version = _root_spec_dep_version(spec, "python")
+            if python_version:
+                rule = _module_load_rule(
+                    f"py-numpy@{version} ^python@{python_version}",
+                    _module_use_name("python", python_version),
+                    public_module_set,
+                )
+
+        if rule and rule not in rules:
+            rules.append(rule)
+    return rules
 
 
 def _build_context(profile: SystemProfile, variant: str,
@@ -306,33 +407,15 @@ def _build_context(profile: SystemProfile, variant: str,
         "mpi_provider", "openmpi" if variant == "v1-openmpi" else "mpich"
     )
     ctx["spack_specs"] = package_set_data.get("specs", [])
+    ctx["spack_spec_entries"] = [
+        _format_spack_spec_entry(spec) for spec in ctx["spack_specs"]
+    ]
+    ctx["expanded_spack_specs"] = _expand_spack_specs(ctx["spack_specs"])
     ctx["view_mpi_select"] = package_set_data.get("views", {}).get("mpi", [])
     ctx["view_serial_select"] = package_set_data.get("views", {}).get("serial", [])
-    mpi_version = _spec_version(ctx["spack_specs"], ctx["mpi_provider"])
-    hdf5_version = _spec_version(ctx["spack_specs"], "hdf5")
-    netcdf_c_version = _spec_version(ctx["spack_specs"], "netcdf-c")
-    netcdf_fortran_version = _spec_version(ctx["spack_specs"], "netcdf-fortran")
-    netcdf_cxx4_version = _spec_version(ctx["spack_specs"], "netcdf-cxx4")
+    mpi_version = _spec_version(ctx["expanded_spack_specs"], ctx["mpi_provider"])
     ctx["mpi_module"] = _module_use_name(ctx["mpi_provider"], mpi_version)
-    ctx["hdf5_mpi_module"] = _module_use_name("hdf5", hdf5_version, "-mpi")
-    ctx["hdf5_serial_module"] = _module_use_name("hdf5", hdf5_version, "-serial")
-    ctx["netcdf_c_mpi_module"] = _module_use_name("netcdf-c", netcdf_c_version, "-mpi")
-    ctx["netcdf_c_serial_module"] = _module_use_name(
-        "netcdf-c", netcdf_c_version, "-serial"
-    )
-    ctx["netcdf_fortran_mpi_module"] = _module_use_name(
-        "netcdf-fortran", netcdf_fortran_version, "-mpi"
-    )
-    ctx["netcdf_fortran_serial_module"] = _module_use_name(
-        "netcdf-fortran", netcdf_fortran_version, "-serial"
-    )
-    ctx["netcdf_cxx4_mpi_module"] = _module_use_name(
-        "netcdf-cxx4", netcdf_cxx4_version, "-mpi"
-    )
-    ctx["netcdf_cxx4_serial_module"] = _module_use_name(
-        "netcdf-cxx4", netcdf_cxx4_version, "-serial"
-    )
-    public_modules = _root_public_modules(ctx["spack_specs"])
+    public_modules = _root_public_modules(ctx["expanded_spack_specs"])
     ctx["public_module_include_specs"] = list(
         dict.fromkeys(item["name"] for item in public_modules)
     )
@@ -340,79 +423,18 @@ def _build_context(profile: SystemProfile, variant: str,
         dict.fromkeys(item["module"] for item in public_modules)
     )
     public_module_set = set(ctx["public_module_names"])
-    ctx["load_hdf5_mpi"] = (
-        ctx["mpi_module"] in public_module_set
-        and ctx["hdf5_mpi_module"] in public_module_set
+    ctx["module_load_rules"] = _build_module_load_rules(
+        ctx["expanded_spack_specs"],
+        ctx["mpi_module"],
+        public_module_set,
     )
-    ctx["load_netcdf_c_mpi"] = (
-        ctx["hdf5_mpi_module"] in public_module_set
-        and ctx["netcdf_c_mpi_module"] in public_module_set
+    ctx["curated_load_modules"] = list(
+        dict.fromkeys(
+            module
+            for rule in ctx["module_load_rules"]
+            for module in rule["loads"]
+        )
     )
-    ctx["load_netcdf_c_serial"] = (
-        ctx["hdf5_serial_module"] in public_module_set
-        and ctx["netcdf_c_serial_module"] in public_module_set
-    )
-    ctx["load_netcdf_fortran_mpi"] = (
-        ctx["netcdf_c_mpi_module"] in public_module_set
-        and ctx["netcdf_fortran_mpi_module"] in public_module_set
-    )
-    ctx["load_netcdf_fortran_serial"] = (
-        ctx["netcdf_c_serial_module"] in public_module_set
-        and ctx["netcdf_fortran_serial_module"] in public_module_set
-    )
-    ctx["load_netcdf_cxx4_mpi"] = (
-        ctx["netcdf_c_mpi_module"] in public_module_set
-        and ctx["netcdf_cxx4_mpi_module"] in public_module_set
-    )
-    ctx["load_netcdf_cxx4_serial"] = (
-        ctx["netcdf_c_serial_module"] in public_module_set
-        and ctx["netcdf_cxx4_serial_module"] in public_module_set
-    )
-    curated_load_modules = []
-    if (
-        hdf5_version
-        and _root_spec_has_variant(ctx["spack_specs"], "hdf5", "+mpi")
-        and mpi_version
-        and ctx["load_hdf5_mpi"]
-    ):
-        curated_load_modules.append(ctx["mpi_module"])
-    if (
-        netcdf_c_version
-        and _root_spec_has_variant(ctx["spack_specs"], "netcdf-c", "+mpi")
-        and ctx["load_netcdf_c_mpi"]
-    ):
-        curated_load_modules.append(ctx["hdf5_mpi_module"])
-    if (
-        netcdf_c_version
-        and _root_spec_has_variant(ctx["spack_specs"], "netcdf-c", "~mpi")
-        and ctx["load_netcdf_c_serial"]
-    ):
-        curated_load_modules.append(ctx["hdf5_serial_module"])
-    if (
-        netcdf_fortran_version
-        and _root_spec_dep_has_variant(ctx["spack_specs"], "netcdf-fortran", "netcdf-c", "+mpi")
-        and ctx["load_netcdf_fortran_mpi"]
-    ):
-        curated_load_modules.append(ctx["netcdf_c_mpi_module"])
-    if (
-        netcdf_fortran_version
-        and _root_spec_dep_has_variant(ctx["spack_specs"], "netcdf-fortran", "netcdf-c", "~mpi")
-        and ctx["load_netcdf_fortran_serial"]
-    ):
-        curated_load_modules.append(ctx["netcdf_c_serial_module"])
-    if (
-        netcdf_cxx4_version
-        and _root_spec_dep_has_variant(ctx["spack_specs"], "netcdf-cxx4", "netcdf-c", "+mpi")
-        and ctx["load_netcdf_cxx4_mpi"]
-    ):
-        curated_load_modules.append(ctx["netcdf_c_mpi_module"])
-    if (
-        netcdf_cxx4_version
-        and _root_spec_dep_has_variant(ctx["spack_specs"], "netcdf-cxx4", "netcdf-c", "~mpi")
-        and ctx["load_netcdf_cxx4_serial"]
-    ):
-        curated_load_modules.append(ctx["netcdf_c_serial_module"])
-    ctx["curated_load_modules"] = list(dict.fromkeys(curated_load_modules))
     ctx["init_module_root"] = (
         os.environ.get("CSE_INIT_MODULE_ROOT", "").strip()
         or (

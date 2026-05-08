@@ -27,6 +27,10 @@ alternate package set.
 Current supported package-set names include:
 
 - `full`: preferred default stack, expects external OpenSSL 3.x
+- `science-full`: expanded two-version science stack, with latest-only
+  Miniforge
+- `science-full-legacy-openssl`: expanded two-version science stack for older
+  site OpenSSL
 - `full-legacy-openssl`: legacy-compatible full stack for older site OpenSSL
 - `hdf5-mpi-smoke`: reduced MPI smoke stack, also expects external OpenSSL 3.x
 - `hdf5-mpi-smoke-legacy-openssl`: reduced MPI smoke stack for older site OpenSSL
@@ -151,6 +155,53 @@ Keep the default buildcache generic until the site layout is proven:
 
 The generic cache is the baseline for first production builds. Optimized caches
 are a later site-specific layer.
+
+## Post-Build Mirror And Buildcache
+
+After a successful build, the environment lockfile at
+`${SHARED_PATH}/cse/<release>/<variant>/env/spack.lock` can be used to create
+transferable source and binary artifacts.
+
+Create a source mirror for the concretized package closure:
+
+```bash
+./scripts/mirror_fetch.sh \
+  --mirror-path /tmp/cse-source-mirror \
+  --variant v1-openmpi \
+  --release test \
+  --shared-path /tmp/cse-test
+```
+
+Create a binary buildcache from the installed packages:
+
+```bash
+./scripts/buildcache_push.sh \
+  --cache-uri file:///tmp/cse-buildcache \
+  --variant v1-openmpi \
+  --release test \
+  --shared-path /tmp/cse-test
+```
+
+Use the matching `--variant`, `--release`, and `--shared-path` from the stack
+that was already built. `mirror_fetch.sh` downloads source tarballs and needs
+network access. `buildcache_push.sh` publishes installed binaries from the
+existing Spack environment and requires Stage 4 to have completed.
+
+To test a cache-only install from a local buildcache:
+
+```bash
+SPACK_NO_CHECK_SIGNATURE=1 ./scripts/deploy.sh \
+  --variant v1-openmpi \
+  --release test-cache \
+  --shared-path /tmp/cse-cache-test \
+  --package-set public-buildcache-smoke \
+  --buildcache-uri file:///tmp/cse-buildcache \
+  --cache-only
+```
+
+Use `SPACK_NO_CHECK_SIGNATURE=1` only for unsigned local test caches. Production
+caches should use a signing and trust policy before `--cache-only` deploys rely
+on them.
 
 ## Dry Runs
 

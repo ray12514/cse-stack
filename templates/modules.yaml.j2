@@ -46,62 +46,34 @@ modules:
           '+mpi': 'mpi'
           '~mpi': 'serial'
 
-{% if load_hdf5_mpi %}
-      hdf5 +mpi:
-        load:
-          - '{{ mpi_module }}'
-{% endif %}
-
       netcdf-c:
         suffixes:
           '+mpi': 'mpi'
           '~mpi': 'serial'
-
-{% if load_netcdf_c_mpi %}
-      netcdf-c +mpi:
-        load:
-          - '{{ hdf5_mpi_module }}'
-{% endif %}
-
-{% if load_netcdf_c_serial %}
-      netcdf-c ~mpi:
-        load:
-          - '{{ hdf5_serial_module }}'
-{% endif %}
 
       netcdf-fortran:
         suffixes:
           '^netcdf-c +mpi': 'mpi'
           '^netcdf-c ~mpi': 'serial'
 
-{% if load_netcdf_fortran_mpi %}
-      netcdf-fortran ^netcdf-c +mpi:
-        load:
-          - '{{ netcdf_c_mpi_module }}'
-{% endif %}
-
-{% if load_netcdf_fortran_serial %}
-      netcdf-fortran ^netcdf-c ~mpi:
-        load:
-          - '{{ netcdf_c_serial_module }}'
-{% endif %}
-
       netcdf-cxx4:
         suffixes:
           '^netcdf-c +mpi': 'mpi'
           '^netcdf-c ~mpi': 'serial'
 
-{% if load_netcdf_cxx4_mpi %}
-      netcdf-cxx4 ^netcdf-c +mpi:
-        load:
-          - '{{ netcdf_c_mpi_module }}'
-{% endif %}
+      fftw:
+        suffixes:
+          '+mpi': 'mpi'
+          '~mpi': 'serial'
 
-{% if load_netcdf_cxx4_serial %}
-      netcdf-cxx4 ^netcdf-c ~mpi:
+{% for rule in module_load_rules %}
+      {{ rule.selector }}:
         load:
-          - '{{ netcdf_c_serial_module }}'
-{% endif %}
+{% for module in rule.loads %}
+          - '{{ module }}'
+{% endfor %}
+
+{% endfor %}
 
 {% if is_openmpi %}
       openmpi:
