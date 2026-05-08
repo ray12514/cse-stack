@@ -14,6 +14,24 @@ The current proof-of-concept supports two variants:
 Both variants bootstrap `gcc@13.3.0` with Spack and use that compiler for the
 stack. `gcc@13.2.0` is deprecated upstream and is no longer the default.
 
+## Roadmap Documents
+
+The current implementation details are in
+[docs/implementation_plan.md](docs/implementation_plan.md) and
+[docs/manual_build_guide.md](docs/manual_build_guide.md). The next
+platform-planning layer is documented here:
+
+- [docs/spack_platform_strategy.md](docs/spack_platform_strategy.md): top-level
+  operating model and roadmap phases.
+- [docs/catalog_model.md](docs/catalog_model.md): public package catalog and
+  module publication model.
+- [docs/conda_python_integration.md](docs/conda_python_integration.md):
+  Python, Conda, and CSE ABI boundaries.
+- [docs/release_pipeline.md](docs/release_pipeline.md): release candidate,
+  artifact, validation, and promotion flow.
+- [docs/ansible_ci_cd_plan.md](docs/ansible_ci_cd_plan.md): Ansible
+  orchestration and CI/CD plan.
+
 ## OpenSSL Policy
 
 OpenSSL is always treated as a site external and is never built by Spack in
