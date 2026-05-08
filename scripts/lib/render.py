@@ -440,6 +440,19 @@ def _build_context(profile: SystemProfile, variant: str,
     ctx["public_module_include_specs"] = list(
         dict.fromkeys(item["name"] for item in public_modules)
     )
+    variant_projected_names = {
+        "boost",
+        "fftw",
+        "hdf5",
+        "netcdf-c",
+        "netcdf-cxx4",
+        "netcdf-fortran",
+    }
+    ctx["clean_view_projection_names"] = [
+        name
+        for name in ctx["public_module_include_specs"]
+        if name not in variant_projected_names
+    ]
     ctx["public_module_names"] = list(
         dict.fromkeys(item["module"] for item in public_modules)
     )
