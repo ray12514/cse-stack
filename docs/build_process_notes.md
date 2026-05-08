@@ -176,6 +176,8 @@ Resolution:
 
 - Boost view projections use readable variant subdirectories:
   `boost/<version>/serial` and `boost/<version>/mpi`.
+- Boost module names use Spack's module suffix form:
+  `cse/boost/<version>-serial` and `cse/boost/<version>-mpi`.
 - Boost modules conflict with `cse/boost` so users do not load incompatible
   Boost variants together.
 
