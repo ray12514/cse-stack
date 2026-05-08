@@ -6,10 +6,10 @@ variants:
     mpi_provider: openmpi
     specs:
       - "openmpi@4.1.6 fabrics=auto"
-      - "hdf5@1.14.6 +mpi  +fortran +cxx +hl +threadsafe"
-      - "hdf5@1.14.6 ~mpi  +fortran +cxx +hl +threadsafe"
-      - "hdf5@1.14.5 +mpi  +fortran +cxx +hl +threadsafe"
-      - "hdf5@1.14.5 ~mpi  +fortran +cxx +hl +threadsafe"
+      - "hdf5@1.14.6 +mpi  +fortran +cxx +hl"
+      - "hdf5@1.14.6 ~mpi  +fortran +cxx +hl"
+      - "hdf5@1.14.5 +mpi  +fortran +cxx +hl"
+      - "hdf5@1.14.5 ~mpi  +fortran +cxx +hl"
       - "netcdf-c@4.9.3 +mpi  +parallel-netcdf  ^hdf5@1.14.6+mpi"
       - "netcdf-c@4.9.3 ~mpi                    ^hdf5@1.14.6~mpi"
       - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.5+mpi"
@@ -60,10 +60,10 @@ variants:
     mpi_provider: mpich
     specs:
       - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix"
-      - "hdf5@1.14.6 +mpi  +fortran +cxx +hl +threadsafe ^mpich"
-      - "hdf5@1.14.6 ~mpi  +fortran +cxx +hl +threadsafe"
-      - "hdf5@1.14.5 +mpi  +fortran +cxx +hl +threadsafe ^mpich"
-      - "hdf5@1.14.5 ~mpi  +fortran +cxx +hl +threadsafe"
+      - "hdf5@1.14.6 +mpi  +fortran +cxx +hl ^mpich"
+      - "hdf5@1.14.6 ~mpi  +fortran +cxx +hl"
+      - "hdf5@1.14.5 +mpi  +fortran +cxx +hl ^mpich"
+      - "hdf5@1.14.5 ~mpi  +fortran +cxx +hl"
       - "netcdf-c@4.9.3 +mpi  +parallel-netcdf  ^hdf5@1.14.6+mpi  ^mpich"
       - "netcdf-c@4.9.3 ~mpi                    ^hdf5@1.14.6~mpi"
       - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.5+mpi  ^mpich"
