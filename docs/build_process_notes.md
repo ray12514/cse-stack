@@ -205,6 +205,9 @@ Resolution:
   names.
 - Stage 4 reports duplicate concrete `name@version` specs after concretization
   so this class of collision is visible before install/view regeneration.
+- Stage 5 enforces that expected public and curated-load module targets exist.
+  Extra generated dependency modules are reported as warnings instead of
+  failing the release, because the public contract is the curated catalog.
 
 ### HDF5 Threadsafe Variant Pressure
 

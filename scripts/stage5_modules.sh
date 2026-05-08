@@ -128,18 +128,20 @@ validate_generated_modules() {
 
     unexpected="$(comm -13 "${expected_file}" "${actual_file}" || true)"
 
-    if [[ -n "${missing}" || -n "${unexpected}" ]]; then
+    if [[ -n "${missing}" ]]; then
         echo "ERROR: generated module tree does not match the public CSE catalog." >&2
-        if [[ -n "${missing}" ]]; then
-            echo "Missing expected/curated module targets:" >&2
-            printf '%s' "${missing}" >&2
-        fi
-        if [[ -n "${unexpected}" ]]; then
-            echo "Unexpected generated public modules:" >&2
-            printf '%s\n' "${unexpected}" >&2
-        fi
+        echo "Missing expected/curated module targets:" >&2
+        printf '%s' "${missing}" >&2
         echo "Module root checked: ${CSE_INIT_MODULE_ROOT}" >&2
         exit 1
+    fi
+
+    if [[ -n "${unexpected}" ]]; then
+        echo "WARNING: generated module tree contains modules outside the public CSE catalog." >&2
+        echo "         They may be Spack-generated dependency modules; cse-init still exposes the curated namespace." >&2
+        echo "Unexpected generated modules:" >&2
+        printf '%s\n' "${unexpected}" >&2
+        echo "Module root checked: ${CSE_INIT_MODULE_ROOT}" >&2
     fi
 
     rm -f "${expected_file}" "${actual_file}" "${curated_file}"
