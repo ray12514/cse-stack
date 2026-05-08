@@ -1,0 +1,205 @@
+# Build Process Notes
+
+This is the running log for practical lessons learned while building and
+recovering CSE Spack stacks. Keep the README focused on supported operator
+flows; put observed failures, root causes, diagnostics, and recovery notes here.
+
+## Current Baseline
+
+- Default release target is portable `target=x86_64`.
+- Default parallelism is four concurrent package builds with up to sixteen
+  build threads per package:
+
+  ```bash
+  ./scripts/deploy.sh ... --jobs 4 --make-jobs 16
+  ```
+
+- Install-prefix padding is disabled by default. Use
+  `SPACK_PADDED_LENGTH=<n>` only for a dedicated relocation test build.
+- Local test buildcaches are pushed unsigned. Use
+  `SPACK_NO_CHECK_SIGNATURE=1` when consuming those caches.
+- Environment-local mirror configuration must be visible through rendered
+  `spack.yaml`. Stage 4 includes `./mirrors.yaml` whenever `--mirror-path` or
+  `--buildcache-uri` is set.
+
+## Buildcache Recovery Flow
+
+When a build fails after some packages were installed, export what exists before
+cleaning the release-local store:
+
+```bash
+./scripts/buildcache_push.sh \
+  --cache-uri file:///p/work1/ravonmv/cse/cache/buildcache \
+  --variant v1-openmpi \
+  --release 20260508 \
+  --shared-path /p/work1/ravonmv \
+  --allow-partial
+```
+
+To retry the same release name from a clean release-local store:
+
+```bash
+SPACK_NO_CHECK_SIGNATURE=1 ./scripts/deploy.sh \
+  --variant v1-openmpi \
+  --release 20260508 \
+  --shared-path /p/work1/ravonmv \
+  --package-set science-full \
+  --buildcache-uri file:///p/work1/ravonmv/cse/cache/buildcache \
+  --restart-release \
+  --jobs 4 \
+  --make-jobs 16
+```
+
+`--restart-release` removes only release-local generated state:
+
+- `${SHARED_PATH}/cse/<release>/<variant>/env`
+- `${SHARED_PATH}/cse/<release>/<variant>/store`
+- `${SHARED_PATH}/cse/<release>/<variant>/views`
+- `${SHARED_PATH}/cse/<release>/<variant>/modules`
+- `${SHARED_PATH}/cse/<release>/<variant>/.cse-install-meta`
+
+It does not remove the shared Spack clone or shared caches under
+`${SHARED_PATH}/cse/cache`.
+
+## Buildcache Diagnostics
+
+Stage 4 prints the active mirror list when a mirror or buildcache is configured.
+Confirm that the output includes the expected buildcache:
+
+```text
+Stage 4: active Spack mirrors:
+cse-buildcache  file:///p/work1/ravonmv/cse/cache/buildcache
+```
+
+If Spack sees the mirror but still builds from source, compare concrete hashes:
+
+```bash
+. /p/work1/ravonmv/cse/spack-site/share/spack/setup-env.sh
+spack env activate -d /p/work1/ravonmv/cse/20260508/v1-openmpi/env
+spack find -L -c pkgconf
+spack buildcache list -L pkgconf
+```
+
+The hash from `spack find -L -c` must appear in `spack buildcache list -L`.
+Matching names are not enough. The hash includes OS, compiler, target, variants,
+package versions, and dependency DAG.
+
+## Known Failure Modes
+
+### Padded Prefix Breaks GIR Generation
+
+Symptom:
+
+- `gobject-introspection` fails while generating `gir/GLib-2.0.gir`.
+- The log contains `/usr/bin/env: ... __spack_path_placeholder__ ... No such
+  file or directory`.
+
+Cause:
+
+- `padded_length: 256` creates very long placeholder prefixes.
+- Some generated build-time scripts can preserve or truncate those placeholder
+  paths in a way that makes the interpreter path invalid.
+
+Resolution:
+
+- Prefix padding is now disabled by default.
+- Retry with `--restart-release` so the release-local store is rebuilt without
+  padded paths.
+- Use `SPACK_PADDED_LENGTH=<n>` only in a separate relocation test.
+
+### Unsigned Buildcache Ignored During Normal Installs
+
+Symptom:
+
+- A local buildcache is passed with `--buildcache-uri`.
+- Packages still install from source.
+- Cache-only may behave differently from a normal install.
+
+Cause:
+
+- Local caches are pushed with `spack buildcache push --unsigned`.
+- Spack needs `--no-check-signature` to consume unsigned binaries.
+
+Resolution:
+
+- Run deploy with `SPACK_NO_CHECK_SIGNATURE=1` for unsigned local test caches.
+- Stage 2 and Stage 4 now pass `--no-check-signature` for normal installs when a
+  buildcache URI is set and `SPACK_NO_CHECK_SIGNATURE=1`.
+
+### Environment Mirror File Not Included
+
+Symptom:
+
+- Stage 4 writes `mirrors.yaml`, but the build still behaves as if no binary
+  cache was configured.
+
+Cause:
+
+- The rendered environment `spack.yaml` did not include `./mirrors.yaml`.
+
+Resolution:
+
+- `templates/spack.yaml.j2` now includes `./mirrors.yaml` whenever
+  `--mirror-path` or `--buildcache-uri` is set.
+- Stage 4 prints `spack mirror list` after activating the environment.
+
+### Stale Views Block Restart
+
+Symptom:
+
+- A stopped or failed Stage 4 run later fails during view regeneration.
+- Errors mention an existing or non-empty view path, including hidden staging
+  paths such as `views/._modules/...`.
+
+Cause:
+
+- Spack can leave view directories or hidden temporary view directories behind
+  after interrupted installs.
+
+Resolution:
+
+- Stage 4 and Stage 5 remove stale `modules`, `mpi`, `serial`, `._modules`,
+  `._mpi`, and `._serial` view paths before concretize/install/regenerate.
+
+### Boost Serial View Collision
+
+Symptom:
+
+- Serial environment view fails because multiple Boost versions project to the
+  same prefix.
+
+Cause:
+
+- Multiple `boost~mpi` versions projected to the same view path.
+
+Resolution:
+
+- Boost view projections use readable variant subdirectories:
+  `boost/<version>/serial` and `boost/<version>/mpi`.
+- Boost modules conflict with `cse/boost` so users do not load incompatible
+  Boost variants together.
+
+### HDF5 Threadsafe Variant Pressure
+
+Symptom:
+
+- HDF5 builds become harder to satisfy or fail around feature combinations.
+
+Cause:
+
+- `+threadsafe` is not required for the current science stack and can conflict
+  with other HDF5 features depending on package version and dependency choices.
+
+Resolution:
+
+- `science-full` no longer requests `+threadsafe` by default.
+
+## Open Items
+
+- Decide when to introduce signed production buildcaches and key trust
+  management.
+- Add a first-class cache inspection command that summarizes mirror visibility,
+  root spec hashes, and cache hit/miss status before the long install starts.
+- Keep evaluating whether generic `x86_64` remains the right default for the
+  first production cache, or whether a site-specific optimized cache namespace
+  should be added later.

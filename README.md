@@ -142,6 +142,9 @@ optional buildcache, and air-gap Spack seed. `network_deploy.sh` validates the
 manifest, unpacks the local mirror/buildcache payloads, and calls the normal
 staged deploy flow with the prepared artifacts.
 
+Operational lessons from real builds are tracked in
+`docs/build_process_notes.md`.
+
 ## Buildcache Target Policy
 
 Keep the default buildcache generic until the site layout is proven:
