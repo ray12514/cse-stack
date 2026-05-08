@@ -211,11 +211,11 @@ def _root_spec_suffix(spec: str) -> str:
         if _root_spec_has_token(spec, "+mpi") or re.search(
             rf"{re.escape(name)}@[^\s^]*\+mpi", spec
         ):
-            return "/mpi"
+            return "-mpi"
         if _root_spec_has_token(spec, "~mpi") or re.search(
             rf"{re.escape(name)}@[^\s^]*~mpi", spec
         ):
-            return "/serial"
+            return "-serial"
     if name in ("netcdf-fortran", "netcdf-cxx4"):
         if _root_spec_has_dep_variant(spec, "netcdf-c", "+mpi"):
             return "-mpi"
