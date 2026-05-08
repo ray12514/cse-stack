@@ -48,7 +48,10 @@ reset_spack_views() {
     local views_root="${VARIANT_DIR}/views"
     local view_path=""
 
-    for view_path in "${views_root}/modules" "${views_root}/mpi" "${views_root}/serial"; do
+    for view_path in \
+        "${views_root}/modules" "${views_root}/._modules" \
+        "${views_root}/mpi" "${views_root}/._mpi" \
+        "${views_root}/serial" "${views_root}/._serial"; do
         case "${view_path}" in
             "${VARIANT_DIR}/views/"*) ;;
             *)
