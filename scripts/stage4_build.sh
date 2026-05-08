@@ -80,6 +80,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo "[dry-run]   cp ${LOCKFILE_PATH} ${VARIANT_ENV_DIR}/spack.lock"
         echo "[dry-run]   # authoritative lockfile present; skip concretize"
     else
+        echo "[dry-run]   remove stale Spack views under ${VARIANT_DIR}/views/{modules,mpi,serial}"
         echo "[dry-run]   spack concretize --fresh"
     fi
     echo "[dry-run]   remove stale Spack views under ${VARIANT_DIR}/views/{modules,mpi,serial}"
@@ -194,6 +195,7 @@ fi
 
 echo "Stage 4: activating Spack environment at ${VARIANT_ENV_DIR}..."
 spack env activate -d "${VARIANT_ENV_DIR}"
+reset_spack_views
 
 if [[ -n "${LOCKFILE_PATH}" ]]; then
     echo "Stage 4: reusing authoritative lockfile ${LOCKFILE_PATH}..."
