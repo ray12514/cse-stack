@@ -174,6 +174,25 @@ publish_compiler_view_from_bootstrap() {
     echo "Stage 5: compiler view ${clean_prefix} -> ${gcc_prefix}"
 }
 
+reset_spack_views() {
+    local views_root="${VARIANT_DIR}/views"
+    local view_path=""
+
+    for view_path in "${views_root}/modules" "${views_root}/mpi" "${views_root}/serial"; do
+        case "${view_path}" in
+            "${VARIANT_DIR}/views/"*) ;;
+            *)
+                echo "ERROR: refusing to remove unexpected view path: ${view_path}" >&2
+                exit 1
+                ;;
+        esac
+        if [[ -e "${view_path}" || -L "${view_path}" ]]; then
+            echo "Stage 5: removing stale Spack view ${view_path}"
+            rm -rf "${view_path}"
+        fi
+    done
+}
+
 # Determine which cse-init file to install
 if [[ "${CSE_VARIANT}" == "v1-openmpi" ]]; then
     INIT_NAME="openmpi"
@@ -196,6 +215,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run]   render modules.yaml and spack.yaml"
     echo "[dry-run]   refresh compiler view from ${VARIANT_DIR}/gcc-bootstrap.yaml"
     echo "[dry-run]   spack env activate -d ${VARIANT_ENV_DIR}"
+    echo "[dry-run]   remove stale Spack views under ${VARIANT_DIR}/views/{modules,mpi,serial}"
     echo "[dry-run]   spack env view regenerate"
     echo "[dry-run]   spack module ${SPACK_MODULE_CMD} refresh --delete-tree -y"
     echo "[dry-run]   validate public module catalog and curated load targets"
@@ -217,6 +237,7 @@ publish_compiler_view_from_bootstrap
 
 echo "Stage 5: activating environment and refreshing modulefiles..."
 spack env activate -d "${VARIANT_ENV_DIR}"
+reset_spack_views
 spack env view regenerate
 spack module "${SPACK_MODULE_CMD}" refresh --delete-tree -y
 
