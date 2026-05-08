@@ -6,7 +6,7 @@ variants:
     mpi_provider: openmpi
     specs:
       - "openmpi@4.1.6 fabrics=auto"
-      - "hdf5@1.14.4 +mpi  +fortran +cxx +hl +threadsafe"
+      - "hdf5@1.14.4 +mpi  +fortran +cxx +hl"
     views:
       mpi:
         - "+mpi"
@@ -15,7 +15,7 @@ variants:
     mpi_provider: mpich
     specs:
       - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix"
-      - "hdf5@1.14.4 +mpi  +fortran +cxx +hl +threadsafe ^mpich"
+      - "hdf5@1.14.4 +mpi  +fortran +cxx +hl ^mpich"
     views:
       mpi:
         - "+mpi"
