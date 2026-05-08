@@ -65,12 +65,12 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     fi
     if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
         if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then
-            echo "[dry-run]   spack install --cache-only --no-check-signature -j ${SPACK_INSTALL_JOBS:-4} --fail-fast"
+            echo "[dry-run]   spack install --cache-only --no-check-signature --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --fail-fast"
         else
-            echo "[dry-run]   spack install --cache-only -j ${SPACK_INSTALL_JOBS:-4} --fail-fast"
+            echo "[dry-run]   spack install --cache-only --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --fail-fast"
         fi
     else
-        echo "[dry-run]   spack install -j ${SPACK_INSTALL_JOBS:-4} --fail-fast"
+        echo "[dry-run]   spack install --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --fail-fast"
     fi
     if [[ "${SPACK_CACHE_ONLY:-0}" != "1" && -n "${BUILDCACHE_URI:-}" ]]; then
         echo "[dry-run]   spack buildcache push --unsigned ${BUILDCACHE_URI}"
@@ -187,7 +187,7 @@ else
 fi
 
 echo "Stage 4: installing (this will take a while on first run)..."
-_INSTALL_ARGS=(install -j "${SPACK_INSTALL_JOBS:-4}" --fail-fast)
+_INSTALL_ARGS=(install --concurrent-packages "${SPACK_INSTALL_JOBS:-4}" --jobs "${SPACK_MAKE_JOBS:-16}" --fail-fast)
 if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
     _INSTALL_ARGS+=(--cache-only)
     if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then

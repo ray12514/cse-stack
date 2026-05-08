@@ -10,7 +10,7 @@
 #   DRY_RUN                                — "1" for dry-run
 #   SPACK_VERSION                          — git tag to clone (default: v1.1.1)
 #   GCC_VERSION                            — GCC version to build (default: 13.3.0)
-#   SPACK_INSTALL_JOBS                     — parallel jobs for spack install
+#   SPACK_INSTALL_JOBS                     — packages to build concurrently
 #   SPACK_TARGET                           — Spack build target preference (default: x86_64)
 #   SPACK_CACHE_ONLY                       — "1" to install only from build cache
 #   SPACK_NO_CHECK_SIGNATURE               — "1" to skip binary signature checks
@@ -165,12 +165,12 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     else
         if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
             if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then
-                echo "[dry-run] Stage 2: would run: spack install --cache-only --no-check-signature --deprecated -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
+                echo "[dry-run] Stage 2: would run: spack install --cache-only --no-check-signature --deprecated --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
             else
-                echo "[dry-run] Stage 2: would run: spack install --cache-only --deprecated -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
+                echo "[dry-run] Stage 2: would run: spack install --cache-only --deprecated --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
             fi
         else
-            echo "[dry-run] Stage 2: would run: spack install --deprecated -j ${SPACK_INSTALL_JOBS:-4} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
+            echo "[dry-run] Stage 2: would run: spack install --deprecated --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
         fi
     fi
     echo "[dry-run] Stage 2: would write ${GCC_BOOTSTRAP_YAML}"
@@ -279,7 +279,7 @@ SYSEOF
             echo "Stage 2: gcc@${GCC_VERSION} already installed — skipping build."
         else
             echo "Stage 2: building gcc@${GCC_VERSION} (this may take a while)..."
-            _INSTALL_ARGS=(install --deprecated -j "${SPACK_INSTALL_JOBS:-4}" --no-checksum)
+            _INSTALL_ARGS=(install --deprecated --concurrent-packages "${SPACK_INSTALL_JOBS:-4}" --jobs "${SPACK_MAKE_JOBS:-16}" --no-checksum)
             if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
                 _INSTALL_ARGS+=(--cache-only)
                 if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then

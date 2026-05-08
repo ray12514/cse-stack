@@ -43,9 +43,9 @@
 #                     (cray-mpich 8.x → 3.4.3; 9.x → 4.2.2).
 #   --jobs N          Number of packages to build in parallel (default: 4).
 #                     Conservative on shared login nodes; raise on dedicated builders.
-#                     Wired to `spack install -j N` in stages 2 and 4.
+#                     Wired to `spack install --concurrent-packages N` in stages 2 and 4.
 #   --make-jobs N     Threads per package build (default: nproc/2, clamped to [4,16]).
-#                     Wired to `config:build_jobs` via templates/config.yaml.j2.
+#                     Wired to `spack install --jobs N` and config:build_jobs.
 #   --package-set     Package set to render (default: full). Use
 #                     hdf5-mpi-smoke for a reduced same-pipeline build.
 #   --target TARGET   Spack target preference (default: x86_64). Use
@@ -242,8 +242,8 @@ if [[ -n "${MPICH_VERSION_OVERRIDE}" ]]; then
     export MPICH_VERSION="${MPICH_VERSION_OVERRIDE}"
 fi
 # Parallelism knobs.
-#   SPACK_INSTALL_JOBS — `spack install -j N` (packages built in parallel).
-#   SPACK_MAKE_JOBS    — config:build_jobs in config.yaml (threads per package).
+#   SPACK_INSTALL_JOBS — `spack install --concurrent-packages N`.
+#   SPACK_MAKE_JOBS    — `spack install --jobs N` and config:build_jobs.
 # Default install jobs to 4 (conservative on shared login nodes); default make
 # jobs to nproc/2 clamped to [4,16] so a single package can saturate cores
 # without overwhelming the box when combined with parallel installs.
