@@ -87,15 +87,15 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo "[dry-run]   spack concretize --fresh"
     fi
     echo "[dry-run]   remove stale Spack views under ${VARIANT_DIR}/views/{modules,mpi,serial}"
-    if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
-        if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then
-            echo "[dry-run]   spack install --cache-only --no-check-signature --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --fail-fast"
-        else
-            echo "[dry-run]   spack install --cache-only --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --fail-fast"
-        fi
-    else
-        echo "[dry-run]   spack install --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --fail-fast"
-    fi
+if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
+    _DRY_RUN_INSTALL="spack install --cache-only"
+else
+    _DRY_RUN_INSTALL="spack install"
+fi
+if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" && -n "${BUILDCACHE_URI:-}" ]]; then
+    _DRY_RUN_INSTALL="${_DRY_RUN_INSTALL} --no-check-signature"
+fi
+echo "[dry-run]   ${_DRY_RUN_INSTALL} --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --fail-fast"
     if [[ "${SPACK_CACHE_ONLY:-0}" != "1" && -n "${BUILDCACHE_URI:-}" ]]; then
         echo "[dry-run]   spack buildcache push --unsigned ${BUILDCACHE_URI}"
     fi
@@ -214,11 +214,11 @@ fi
 echo "Stage 4: installing (this will take a while on first run)..."
 reset_spack_views
 _INSTALL_ARGS=(install --concurrent-packages "${SPACK_INSTALL_JOBS:-4}" --jobs "${SPACK_MAKE_JOBS:-16}" --fail-fast)
+if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" && -n "${BUILDCACHE_URI:-}" ]]; then
+    _INSTALL_ARGS+=(--no-check-signature)
+fi
 if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
     _INSTALL_ARGS+=(--cache-only)
-    if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then
-        _INSTALL_ARGS+=(--no-check-signature)
-    fi
 fi
 spack "${_INSTALL_ARGS[@]}"
 

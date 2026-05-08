@@ -243,9 +243,9 @@ SPACK_NO_CHECK_SIGNATURE=1 ./scripts/deploy.sh \
   --cache-only
 ```
 
-Use `SPACK_NO_CHECK_SIGNATURE=1` only for unsigned local test caches. Production
-caches should use a signing and trust policy before `--cache-only` deploys rely
-on them.
+Use `SPACK_NO_CHECK_SIGNATURE=1` for unsigned local test caches, including
+normal rebuilds that use `--buildcache-uri` without `--cache-only`. Production
+caches should use a signing and trust policy before deploys rely on them.
 
 Buildcache hits require an exact concrete Spack spec match, not just the same
 package name. The hash includes the compiler, target, operating system, variants,
