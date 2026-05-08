@@ -192,6 +192,45 @@ that was already built. `mirror_fetch.sh` downloads source tarballs and needs
 network access. `buildcache_push.sh` publishes installed binaries from the
 existing Spack environment and requires Stage 4 to have completed.
 
+If Stage 4 failed after some packages installed, push the partial environment
+before cleaning it up:
+
+```bash
+./scripts/buildcache_push.sh \
+  --cache-uri file:///tmp/cse-buildcache \
+  --variant v1-openmpi \
+  --release test \
+  --shared-path /tmp/cse-test \
+  --allow-partial
+```
+
+`--allow-partial` first attempts the normal environment push. If the full
+environment cannot be pushed because not every root spec installed, it falls
+back to the installed specs Spack can see in the active environment.
+
+To rerun the same release name from a clean release-local store, use
+`--restart-release`. When a `--buildcache-uri` is supplied and the previous
+environment lockfile exists, deploy exports the installed packages to that cache
+before deleting the old release-local `env`, `store`, `views`, and `modules`:
+
+```bash
+./scripts/deploy.sh \
+  --variant v1-openmpi \
+  --release test \
+  --shared-path /tmp/cse-test \
+  --package-set science-full \
+  --buildcache-uri file:///tmp/cse-buildcache \
+  --restart-release \
+  --jobs 4 \
+  --make-jobs 16
+```
+
+This is the preferred recovery path when a deploy setting changes in a way that
+affects installed prefixes, such as toggling `SPACK_PADDED_LENGTH`. Do not reuse
+the old release-local store in place after that kind of change; export what is
+usable to a buildcache, clear the release state, and reinstall into a fresh
+store.
+
 To test a cache-only install from a local buildcache:
 
 ```bash

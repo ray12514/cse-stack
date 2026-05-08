@@ -11,6 +11,7 @@
 #                       [--network-mode <mode>]    \
 #                       [--dry-run]                \
 #                       [--from-stage N]           \
+#                       [--restart-release]        \
 #                       [--gcc-version <ver>]      \
 #                       [--mpich-version <ver>]    \
 #                       [--jobs <n>]               \
@@ -35,6 +36,9 @@
 #   --dry-run         Print every command that would run; render template YAML;
 #                     exit 0 without modifying any state.
 #   --from-stage N    Skip stages 1 through N-1 (assumes their outputs exist).
+#   --restart-release Clear generated state for this release/variant before
+#                     running. If --buildcache-uri is set and an old lockfile
+#                     exists, export installed packages to that buildcache first.
 #   --gcc-version     Spack GCC version to bootstrap (default: 13.3.0).
 #                     gcc@13.2.0 is deprecated upstream; 13.3.0 is the current
 #                     supported 13.x release.
@@ -86,6 +90,7 @@ SHARED_PATH=""
 NETWORK_MODE="${CSE_NETWORK_MODE:-online}"
 DRY_RUN=0
 FROM_STAGE=1
+RESTART_RELEASE=0
 GCC_VERSION_OVERRIDE=""
 MPICH_VERSION_OVERRIDE=""
 INSTALL_JOBS_OVERRIDE=""
@@ -122,6 +127,7 @@ while [[ $# -gt 0 ]]; do
         --network-mode)   require_arg_value "$1" "${2:-}"; NETWORK_MODE="$2";           shift 2 ;;
         --dry-run)        DRY_RUN=1;                   shift   ;;
         --from-stage)     require_arg_value "$1" "${2:-}"; FROM_STAGE="$2";             shift 2 ;;
+        --restart|--restart-release) RESTART_RELEASE=1; shift ;;
         --gcc-version)    require_arg_value "$1" "${2:-}"; GCC_VERSION_OVERRIDE="$2";   shift 2 ;;
         --mpich-version)  require_arg_value "$1" "${2:-}"; MPICH_VERSION_OVERRIDE="$2"; shift 2 ;;
         --jobs)           require_arg_value "$1" "${2:-}"; INSTALL_JOBS_OVERRIDE="$2";  shift 2 ;;
@@ -204,6 +210,10 @@ if [[ "${SPACK_CACHE_ONLY}" == "1" && -z "${BUILDCACHE_URI}" ]]; then
 fi
 if [[ "${FROM_STAGE}" -lt 1 || "${FROM_STAGE}" -gt 5 ]]; then
     echo "ERROR: --from-stage must be between 1 and 5" >&2
+    errors=1
+fi
+if [[ "${RESTART_RELEASE}" == "1" && "${FROM_STAGE}" -gt 3 ]]; then
+    echo "ERROR: --restart-release removes rendered environment files; use --from-stage 3 or lower" >&2
     errors=1
 fi
 if [[ ${errors} -gt 0 ]]; then
@@ -325,6 +335,9 @@ fi
 if [[ ${DRY_RUN} == 1 ]]; then
     echo "  mode         : DRY-RUN (no changes will be made)"
 fi
+if [[ "${RESTART_RELEASE}" == "1" ]]; then
+    echo "  restart      : yes"
+fi
 echo "========================================================"
 echo ""
 
@@ -407,6 +420,75 @@ python3 "${REPO_ROOT}/scripts/lib/package_sets.py" \
     --package-set "${CSE_PACKAGE_SET}" \
     --variant "${VARIANT}" \
     --mpich-version "${MPICH_VERSION:-}"
+
+restart_release_state() {
+    local release_dir="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}"
+    local old_lockfile="${release_dir}/env/spack.lock"
+    local path=""
+
+    if [[ "${RESTART_RELEASE}" != "1" ]]; then
+        return 0
+    fi
+
+    case "${release_dir}" in
+        "${SHARED_PATH}/cse/${RELEASE}/${VARIANT}") ;;
+        *)
+            echo "ERROR: refusing to restart unexpected release path: ${release_dir}" >&2
+            exit 1
+            ;;
+    esac
+
+    if [[ "${DRY_RUN}" == "1" ]]; then
+        echo "[dry-run] restart: would prepare release restart at ${release_dir}"
+        if [[ -n "${BUILDCACHE_URI}" ]]; then
+            echo "[dry-run] restart: would export existing installed specs to ${BUILDCACHE_URI} before cleanup"
+        fi
+        echo "[dry-run] restart: would remove ${release_dir}/{env,store,views,modules,.cse-install-meta}"
+        return 0
+    fi
+
+    if [[ ! -d "${release_dir}" ]]; then
+        echo "restart: ${release_dir} does not exist yet; nothing to clean."
+        return 0
+    fi
+
+    if [[ -n "${BUILDCACHE_URI}" ]]; then
+        if [[ -f "${old_lockfile}" ]]; then
+            echo "restart: exporting existing installed packages to ${BUILDCACHE_URI} before cleanup..."
+            "${REPO_ROOT}/scripts/buildcache_push.sh" \
+                --cache-uri "${BUILDCACHE_URI}" \
+                --variant "${VARIANT}" \
+                --release "${RELEASE}" \
+                --shared-path "${SHARED_PATH}" \
+                --allow-partial
+        else
+            echo "restart: no existing lockfile at ${old_lockfile}; skipping pre-cleanup buildcache export."
+        fi
+    else
+        echo "restart: no --buildcache-uri set; existing release store will be discarded without cache export."
+    fi
+
+    for path in \
+        "${release_dir}/env" \
+        "${release_dir}/store" \
+        "${release_dir}/views" \
+        "${release_dir}/modules" \
+        "${release_dir}/.cse-install-meta"; do
+        case "${path}" in
+            "${release_dir}/"*) ;;
+            *)
+                echo "ERROR: refusing to remove unexpected restart path: ${path}" >&2
+                exit 1
+                ;;
+        esac
+        if [[ -e "${path}" || -L "${path}" ]]; then
+            echo "restart: removing ${path}"
+            rm -rf "${path}"
+        fi
+    done
+}
+
+restart_release_state
 
 # ------------------------------------------------------------------
 # Stage runner
