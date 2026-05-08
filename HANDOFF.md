@@ -18,6 +18,9 @@ state is documented in `README.md`, `docs/implementation_plan.md`, and
   legacy OpenMPI policy for sites with older external OpenSSL.
 - Restricted and air-gapped flows can use request/fulfillment/deploy wrappers
   plus authoritative lockfiles and artifact manifests.
+- Failed release retries should use `deploy.sh --restart-release`; if
+  `--buildcache-uri` is set, deploy exports installed packages to that cache
+  before clearing the release-local env/store/views/modules.
 - `cse-init/<mpi>` exposes the CSE GCC baseline and the variant module tree.
 - Spack-generated package modules use clean view-backed paths and curated
   public dependency loads instead of broad recursive autoload.
