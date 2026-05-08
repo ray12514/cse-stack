@@ -203,6 +203,39 @@ Use `SPACK_NO_CHECK_SIGNATURE=1` only for unsigned local test caches. Production
 caches should use a signing and trust policy before `--cache-only` deploys rely
 on them.
 
+Buildcache hits require an exact concrete Spack spec match, not just the same
+package name. The hash includes the compiler, target, operating system, variants,
+package version, and dependency DAG. A package like `pkgconf` can be reused
+between releases only when those concrete details are identical.
+
+To compare what the current environment wants with what the cache contains,
+activate the generated environment and query both sides:
+
+```bash
+. "${SHARED_PATH}/cse/spack-site/share/spack/setup-env.sh"
+spack env activate -d "${SHARED_PATH}/cse/<release>/<variant>/env"
+spack find -L -c pkgconf
+spack buildcache list -L pkgconf
+```
+
+If the dependency hash shown by `spack find -L -c` is not present in
+`spack buildcache list -L`, Spack correctly treats the cache entry as a miss.
+
+By default deploy runs up to four package builds at a time and gives each package
+build up to the detected make-job count, clamped to 4-16 threads. Override those
+separately when needed:
+
+```bash
+./scripts/deploy.sh \
+  --variant v1-openmpi \
+  --release test-cache \
+  --shared-path /tmp/cse-cache-test \
+  --package-set science-full \
+  --buildcache-uri file:///tmp/cse-buildcache \
+  --jobs 4 \
+  --make-jobs 16
+```
+
 ## Dry Runs
 
 Dry-runs render the intended YAML/module content and execute no build:
