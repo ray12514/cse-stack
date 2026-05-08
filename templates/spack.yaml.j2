@@ -51,6 +51,6 @@ spack:
     reuse:  true
 
   specs:
-{% for spec in spack_specs %}
-    - {{ spec }}
+{% for entry in spack_spec_entries %}
+{{ entry }}
 {% endfor %}

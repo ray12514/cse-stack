@@ -12,6 +12,10 @@ state is documented in `README.md`, `docs/implementation_plan.md`, and
 - Compiler registration for Stage 4 comes only from `gcc-bootstrap.yaml`.
 - Deploys now carry an explicit network mode: `online`, `restricted`, or
   `airgapped`.
+- `science-full` is the expanded two-version science package set. Miniforge is
+  latest-only, and `netcdf-cxx4` currently has one available Spack version.
+- `science-full-legacy-openssl` keeps that expanded catalog but uses the
+  legacy OpenMPI policy for sites with older external OpenSSL.
 - Restricted and air-gapped flows can use request/fulfillment/deploy wrappers
   plus authoritative lockfiles and artifact manifests.
 - `cse-init/<mpi>` exposes the CSE GCC baseline and the variant module tree.
