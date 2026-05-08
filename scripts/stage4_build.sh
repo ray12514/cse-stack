@@ -44,6 +44,25 @@ _render() {
     fi
 }
 
+reset_spack_views() {
+    local views_root="${VARIANT_DIR}/views"
+    local view_path=""
+
+    for view_path in "${views_root}/modules" "${views_root}/mpi" "${views_root}/serial"; do
+        case "${view_path}" in
+            "${VARIANT_DIR}/views/"*) ;;
+            *)
+                echo "ERROR: refusing to remove unexpected view path: ${view_path}" >&2
+                exit 1
+                ;;
+        esac
+        if [[ -e "${view_path}" || -L "${view_path}" ]]; then
+            echo "Stage 4: removing stale Spack view ${view_path}"
+            rm -rf "${view_path}"
+        fi
+    done
+}
+
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run] Stage 4: would render config.yaml, modules.yaml, spack.yaml"
     _render "config.yaml.j2"  "${VARIANT_ENV_DIR}/config.yaml"
@@ -63,6 +82,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     else
         echo "[dry-run]   spack concretize --fresh"
     fi
+    echo "[dry-run]   remove stale Spack views under ${VARIANT_DIR}/views/{modules,mpi,serial}"
     if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
         if [[ "${SPACK_NO_CHECK_SIGNATURE:-0}" == "1" ]]; then
             echo "[dry-run]   spack install --cache-only --no-check-signature --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --fail-fast"
@@ -187,6 +207,7 @@ else
 fi
 
 echo "Stage 4: installing (this will take a while on first run)..."
+reset_spack_views
 _INSTALL_ARGS=(install --concurrent-packages "${SPACK_INSTALL_JOBS:-4}" --jobs "${SPACK_MAKE_JOBS:-16}" --fail-fast)
 if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
     _INSTALL_ARGS+=(--cache-only)
