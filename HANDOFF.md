@@ -1,8 +1,17 @@
 # cse-stack Handoff
 
 This file is preserved as a short handoff note. The current implementation
-state is documented in `README.md`, `docs/implementation_plan.md`, and
-`docs/phase_two_summary.md`.
+state is documented in [README.md](README.md),
+[docs/implementation_plan.md](docs/implementation_plan.md), and
+[docs/phase_two_summary.md](docs/phase_two_summary.md).
+
+The Spack platform roadmap branch adds these planning documents:
+
+- [docs/spack_platform_strategy.md](docs/spack_platform_strategy.md)
+- [docs/catalog_model.md](docs/catalog_model.md)
+- [docs/conda_python_integration.md](docs/conda_python_integration.md)
+- [docs/release_pipeline.md](docs/release_pipeline.md)
+- [docs/ansible_ci_cd_plan.md](docs/ansible_ci_cd_plan.md)
 
 ## Current Decisions
 
@@ -27,6 +36,8 @@ state is documented in `README.md`, `docs/implementation_plan.md`, and
 - Phase 2: optional Cray `cray-mpich` runtime splice via `CSE_MPICH_SPLICE=1`.
 - Decide whether PnetCDF should become a top-level `cse/parallel-netcdf` module.
 - Add Ansible orchestration after the bash proof-of-concept is stable.
+- Use the roadmap docs to split platform work into catalog schema, release
+  pipeline, Conda/Python integration, and Ansible/CI/CD tracks.
 - Flesh out a first-class custom package-set workflow. The current repo-local
   `--package-set <name>` mechanism works for tracked files under
   `package-sets/`, but follow-up work should define and document a supported
