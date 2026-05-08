@@ -18,6 +18,7 @@ spack:
     cse_modules:
       root: {{ views_root }}/modules
       projections:
+        boost: "{name}/{version}-{hash:7}"
         all: "{name}/{version}"
         "+mpi": "{name}/{version}-mpi"
         "~mpi": "{name}/{version}-serial"
@@ -28,6 +29,13 @@ spack:
 {% if view_mpi_select %}
     mpi:
       root: {{ views_root }}/mpi
+      projections:
+        boost: "{name}/{version}-{hash:7}"
+        all: "{name}/{version}"
+        "+mpi": "{name}/{version}-mpi"
+        "~mpi": "{name}/{version}-serial"
+        "^netcdf-c +mpi": "{name}/{version}-mpi"
+        "^netcdf-c ~mpi": "{name}/{version}-serial"
       select:
 {% for item in view_mpi_select %}
         - "{{ item }}"
@@ -38,6 +46,13 @@ spack:
 {% if view_serial_select %}
     serial:
       root: {{ views_root }}/serial
+      projections:
+        boost: "{name}/{version}-{hash:7}"
+        all: "{name}/{version}"
+        "+mpi": "{name}/{version}-mpi"
+        "~mpi": "{name}/{version}-serial"
+        "^netcdf-c +mpi": "{name}/{version}-mpi"
+        "^netcdf-c ~mpi": "{name}/{version}-serial"
       select:
 {% for item in view_serial_select %}
         - "{{ item }}"
