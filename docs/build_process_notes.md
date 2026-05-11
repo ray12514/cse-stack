@@ -247,6 +247,39 @@ Implications:
 - Operators can switch current back to an already-built release by rerunning
   Stage 5 with that release name.
 
+### Compiler Selection: Why No packages:all:compiler
+
+`packages:all:compiler: [gcc@X]` was added to `packages.yaml.j2` to express a
+compiler preference, then removed because Spack v1.0.x deprecated it and emits a
+warning that it will be dropped. The replacement, `packages:all:require:`, is a
+hard constraint and causes concretization failures for noarch/binary packages
+(the immediate symptom was `miniforge3` failing with "cannot depend on gcc").
+
+The correct mechanism for a self-contained CSE Spack environment is isolation:
+
+- `SPACK_DISABLE_LOCAL_CONFIG=1` — no user `~/.spack/compilers.yaml` leaks in.
+- `SPACK_SYSTEM_CONFIG_PATH=/dev/null` — no site-level compiler config leaks in.
+- `gcc-bootstrap.yaml` (written by stage 2, included by stage 4's `spack.yaml`)
+  is the **only** registered compiler.
+
+With exactly one compiler available, the CLINGO concretizer picks it for every
+buildable package. Externals and noarch packages are unaffected because Spack
+does not assign a compiler to them in the first place.
+
+### Package-Set Matrix Entries: Only fftw Is 2D
+
+The `science-full` package sets used `matrix:` syntax for several packages that
+had only a single axis (e.g., `matrix: [["openblas@0.3.30", "openblas@0.3.29"]]`).
+A single-axis matrix is identical to two plain spec strings and adds parsing
+overhead with no combinatorial benefit. Those entries were flattened to plain
+strings.
+
+`fftw` retains the matrix because it is genuinely two-dimensional: two versions
+× two MPI options = four specs. That is the intended use case for matrix syntax.
+When adding new dual-version packages to a science package set, write them as
+plain specs unless a second axis (variants, MPI providers, etc.) also needs to
+be crossed.
+
 ## Open Items
 
 - Decide when to introduce signed production buildcaches and key trust
