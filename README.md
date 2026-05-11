@@ -57,23 +57,33 @@ The artifact classes are:
 
 ## User Model
 
-Users load one front-door module, then load the package they need:
+Users load one front-door module, then load the package they need. The stable
+front door points at the current promoted release:
 
 ```bash
 module load cse-init/openmpi
 module load cse/netcdf-fortran/4.6.1-mpi
 ```
 
-`cse-init/<mpi>` exposes the CSE compiler baseline and the selected module
-tree. Spack-generated package modules own dependency loading through curated
-public module loads: HDF5 MPI modules load the MPI provider, NetCDF modules load
-the matching public HDF5 or NetCDF-C module, and MPI provider modules do not
-load their low-level implementation dependency graph. Package modules are
-generated relative to the `cse_modules` Spack view so modulefiles expose clean
-view paths instead of raw hashed install-store prefixes. Build implementation
-dependencies such as bzip2, zlib, and compiler runtime libraries remain
-installed, but they are not published as user-facing modules unless they are
-explicit root entries in the selected package set.
+Users can also pin themselves to a completed release:
+
+```bash
+module load cse-init/20260508/openmpi
+module load cse/netcdf-fortran/4.6.1-mpi
+```
+
+`cse-init/<mpi>` exposes the CSE compiler baseline and selected module tree for
+the current promoted release. `cse-init/<release>/<mpi>` exposes the same
+interface for that exact release. Spack-generated package modules own
+dependency loading through curated public module loads: HDF5 MPI modules load
+the MPI provider, NetCDF modules load the matching public HDF5 or NetCDF-C
+module, and MPI provider modules do not load their low-level implementation
+dependency graph. Package modules are generated relative to the `cse_modules`
+Spack view so modulefiles expose clean view paths instead of raw hashed
+install-store prefixes. Build implementation dependencies such as bzip2, zlib,
+and compiler runtime libraries remain installed, but they are not published as
+user-facing modules unless they are explicit root entries in the selected
+package set.
 
 `cse-init` sets `CSE_GCC_ROOT`, `CSE_CC`, `CSE_CXX`, and `CSE_FC`, and prepends
 the CSE GCC `bin` directory to `PATH` through the clean compiler view path
@@ -312,7 +322,7 @@ Dry-runs render the intended YAML/module content and execute no build:
 | 2 | `stage2_spack.sh` | Clone Spack to `${SHARED_PATH}/cse/spack-site` and bootstrap GCC |
 | 3 | `stage3_externals.sh` | Render `packages.yaml` |
 | 4 | `stage4_build.sh` | Render remaining Spack config, concretize, and install |
-| 5 | `stage5_modules.sh` | Refresh Spack modules and render/install `cse-init` |
+| 5 | `stage5_modules.sh` | Refresh Spack modules and render/install current and pinned `cse-init` gates |
 
 Stage 2 writes `${SHARED_PATH}/cse/<release>/<variant>/gcc-bootstrap.yaml`.
 Stage 4 includes that file as the only compiler registration for the
@@ -337,8 +347,13 @@ and Tcl-only module features:
 
 - `use_view: cse_modules` projects generated path edits through the clean Spack
   view.
-- Prefix inspections provide `PATH`, `LD_LIBRARY_PATH`, `CPATH`,
+- Prefix inspections provide build-discovery paths: `PATH`,
   `PKG_CONFIG_PATH`, `CMAKE_PREFIX_PATH`, and `MANPATH`.
+- Generated package modules filter broad low-level path variables such as
+  `LD_LIBRARY_PATH`, `LIBRARY_PATH`, `CPATH`, `C_INCLUDE_PATH`, and
+  `CPLUS_INCLUDE_PATH`. Runtime linking is expected to come from Spack RPATHs;
+  package-specific build discovery should use compiler/MPI wrappers, CMake,
+  pkg-config, or package config tools.
 - The module catalog is derived from explicit root entries in package-set
   `specs:`; transitive dependencies are excluded from modulefile generation.
 - Generic `{name}_ROOT`, `{name}_DIR`, and `{name}_HOME` variables are not set
@@ -347,6 +362,9 @@ and Tcl-only module features:
   emitted.
 - `cse-init` activates the namespace only; it does not hard-code HDF5, NetCDF,
   or MPI dependency loads.
+- Stage 5 writes both `cse-init/<mpi>` and `cse-init/<release>/<mpi>`.
+  `cse-init/<mpi>` is the current promoted release, while the release-pinned
+  path preserves access to a completed release.
 
 ## Future Ansible Use
 
