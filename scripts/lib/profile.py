@@ -365,14 +365,29 @@ class SystemProfile:
         )
 
     def libfabric_prefix(self) -> str:
-        ver = self.libfabric_version()
-        prefix = (
-            self._env_first("CSE_LIBFABRIC_PREFIX_OVERRIDE", "CSE_LIBFABRIC_PREFIX")
-            or self._loaded_module_prefix("libfabric/")
-        )
+        # 1. Explicit operator override
+        prefix = self._env_first("CSE_LIBFABRIC_PREFIX_OVERRIDE", "CSE_LIBFABRIC_PREFIX")
         if prefix:
             return prefix
-        return f"/opt/cray/pe/libfabric/{ver}" if ver else ""
+        # 2. ClusterInspector module dict (populated when --include-modules captures prefix)
+        prefix = self._loaded_module_prefix("libfabric/")
+        if prefix:
+            return prefix
+        # 3. Cray module env vars — set when the libfabric module is loaded
+        prefix = self._env_first("CRAY_LIBFABRIC_PREFIX", "LIBFABRIC_ROOT")
+        if prefix:
+            return prefix
+        # 4. fi_info binary — present when libfabric is on PATH; binary lives at $prefix/bin
+        fi_info = shutil.which("fi_info")
+        if fi_info:
+            return str(Path(fi_info).resolve().parent.parent)
+        # 5. pkg-config
+        prefix = self._pkg_config_value("libfabric", "--variable=prefix")
+        if prefix:
+            return prefix
+        # No reliable path detected; let validation report the gap and instruct
+        # the operator to set CSE_LIBFABRIC_PREFIX_OVERRIDE.
+        return ""
 
     def libfabric_module(self) -> str:
         return self._loaded_module_name("libfabric/")
@@ -405,20 +420,25 @@ class SystemProfile:
         )
 
     def pmix_prefix(self) -> str:
-        override = self._env_first("CSE_PMIX_PREFIX_OVERRIDE", "CSE_PMIX_PREFIX")
-        if override:
-            return override
+        # 1. Explicit operator override
+        prefix = self._env_first("CSE_PMIX_PREFIX_OVERRIDE", "CSE_PMIX_PREFIX")
+        if prefix:
+            return prefix
+        # 2. ClusterInspector module dict
         prefix = self._loaded_module_prefix("pmix/")
         if prefix:
             return prefix
-        ver = self._loaded_module_version("pmix/")
-        if ver:
-            return f"/opt/cray/pe/pmix/{ver}"
+        # 3. Cray module env vars — set when the pmix module is loaded
+        prefix = self._env_first("PMIX_INSTALL_PREFIX", "PMIX_ROOT", "CRAY_PMI_PREFIX")
+        if prefix:
+            return prefix
+        # 4. pkg-config (before any hardcoded path)
         prefix = self._pkg_config_value("pmix", "--variable=prefix")
         if prefix:
             return prefix
-        ver = self.pmix_version()
-        return f"/opt/cray/pe/pmix/{ver}" if ver else ""
+        # No reliable path detected; let validation report the gap and instruct
+        # the operator to set CSE_PMIX_PREFIX_OVERRIDE.
+        return ""
 
     def pmix_module(self) -> str:
         return self._loaded_module_name("pmix/")
