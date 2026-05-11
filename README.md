@@ -347,8 +347,9 @@ and Tcl-only module features:
 
 - `use_view: cse_modules` projects generated path edits through the clean Spack
   view.
-- Prefix inspections provide build-discovery paths: `PATH`,
-  `PKG_CONFIG_PATH`, `CMAKE_PREFIX_PATH`, and `MANPATH`.
+- Spack's default prefix inspections provide build-discovery paths such as
+  `PATH`, `PKG_CONFIG_PATH`, `CMAKE_PREFIX_PATH`, and `MANPATH`; the CSE
+  template does not restate those defaults.
 - Generated package modules filter broad low-level path variables such as
   `LD_LIBRARY_PATH`, `LIBRARY_PATH`, `CPATH`, `C_INCLUDE_PATH`, and
   `CPLUS_INCLUDE_PATH`. Runtime linking is expected to come from Spack RPATHs;
