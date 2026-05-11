@@ -30,6 +30,15 @@ whose external OpenSSL is older than 3.x.
   `gcc-bootstrap.yaml` next to the environment.
 - Stage 4 includes `gcc-bootstrap.yaml`; no rendered `packages.yaml` GCC block
   and no legacy `gcc-compilers.yaml` are used.
+- Compiler selection relies entirely on environment isolation:
+  `SPACK_DISABLE_LOCAL_CONFIG=1` and `SPACK_SYSTEM_CONFIG_PATH=/dev/null` prevent
+  user and system compiler configs from leaking in, so `gcc-bootstrap.yaml` is the
+  only compiler source Spack can see. With exactly one registered compiler, the
+  concretizer uses it for every buildable package without any preference directive.
+  `packages:all:compiler:` was tried but is deprecated in Spack v1.0.x and emits
+  warnings; `packages:all:require:` is a hard constraint that breaks noarch
+  packages such as `miniforge3`. Environment isolation is the correct approach for
+  a self-contained Spack deployment.
 - Stage 5 refreshes Spack modules and renders the `cse-init` module with
   literal release, shared path, module root, and GCC prefix values.
 

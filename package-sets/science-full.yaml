@@ -25,18 +25,18 @@ variants:
       - matrix:
         - ["fftw@3.3.10", "fftw@3.3.9"]
         - ["+mpi ^openmpi", "~mpi"]
-      - matrix:
-        - ["openblas@0.3.30", "openblas@0.3.29"]
-      - matrix:
-        - ["gnuplot@6.0.0", "gnuplot@5.4.10"]
-      - matrix:
-        - ["gsl@2.8", "gsl@2.7.1"]
-      - matrix:
-        - ["cmake@4.1.2", "cmake@4.1.1"]
-      - matrix:
-        - ["boost@1.88.0 ~mpi", "boost@1.87.0 ~mpi"]
-      - matrix:
-        - ["python@3.14.0", "python@3.13.8"]
+      - "openblas@0.3.30"
+      - "openblas@0.3.29"
+      - "gnuplot@6.0.0"
+      - "gnuplot@5.4.10"
+      - "gsl@2.8"
+      - "gsl@2.7.1"
+      - "cmake@4.1.2"
+      - "cmake@4.1.1"
+      - "boost@1.88.0 ~mpi"
+      - "boost@1.87.0 ~mpi"
+      - "python@3.14.0"
+      - "python@3.13.8"
       - "py-numpy@2.3.4 ^python@3.14.0"
       - "py-numpy@2.3.3 ^python@3.13.8"
       - "miniforge3@25.3.0-3"
@@ -79,18 +79,18 @@ variants:
       - matrix:
         - ["fftw@3.3.10", "fftw@3.3.9"]
         - ["+mpi ^mpich", "~mpi"]
-      - matrix:
-        - ["openblas@0.3.30", "openblas@0.3.29"]
-      - matrix:
-        - ["gnuplot@6.0.0", "gnuplot@5.4.10"]
-      - matrix:
-        - ["gsl@2.8", "gsl@2.7.1"]
-      - matrix:
-        - ["cmake@4.1.2", "cmake@4.1.1"]
-      - matrix:
-        - ["boost@1.88.0 ~mpi", "boost@1.87.0 ~mpi"]
-      - matrix:
-        - ["python@3.14.0", "python@3.13.8"]
+      - "openblas@0.3.30"
+      - "openblas@0.3.29"
+      - "gnuplot@6.0.0"
+      - "gnuplot@5.4.10"
+      - "gsl@2.8"
+      - "gsl@2.7.1"
+      - "cmake@4.1.2"
+      - "cmake@4.1.1"
+      - "boost@1.88.0 ~mpi"
+      - "boost@1.87.0 ~mpi"
+      - "python@3.14.0"
+      - "python@3.13.8"
       - "py-numpy@2.3.4 ^python@3.14.0"
       - "py-numpy@2.3.3 ^python@3.13.8"
       - "miniforge3@25.3.0-3"
