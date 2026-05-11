@@ -132,8 +132,10 @@ def _format_spack_spec_entry(spec: object) -> str:
     return "\n".join(f"    {line}" for line in rendered.splitlines())
 
 
-def _attach_root_compiler(spec: str, gcc_version: str) -> str:
+def _attach_root_compiler(spec: object, gcc_version: str) -> object:
     """Apply the bootstrap compiler to a root spec without touching deps."""
+    if not isinstance(spec, str):
+        return spec
     if not gcc_version or "%" in spec:
         return spec
 
