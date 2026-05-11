@@ -17,6 +17,7 @@ spack-stage/
 # Profile artifacts (contain host-specific data)
 profiles/*.yaml
 !profiles/mock-cray.yaml
+!profiles/mock-cray-slurm.yaml
 !profiles/.gitkeep
 
 # Prepared network deploy artifacts

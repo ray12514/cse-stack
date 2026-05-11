@@ -10,8 +10,12 @@ a sensible default rather than raising KeyError so that templates render
 even when a field is absent (e.g. on a non-Cray host missing vendor_substrate).
 """
 
+import os
 import re
+import shutil
+import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
@@ -65,6 +69,23 @@ class SystemProfile:
             return module_str.split("/", 1)[1].strip()
         return module_str.strip()
 
+    @staticmethod
+    def _query_cmd(*cmd: str) -> str:
+        try:
+            return subprocess.check_output(
+                list(cmd), stderr=subprocess.DEVNULL, text=True
+            ).strip()
+        except (FileNotFoundError, subprocess.CalledProcessError, OSError):
+            return ""
+
+    @staticmethod
+    def _env_first(*names: str) -> str:
+        for name in names:
+            value = os.environ.get(name, "").strip()
+            if value:
+                return value
+        return ""
+
     def _loaded_module_version(self, name_prefix: str) -> str:
         """Search modules.loaded list for a module name matching name_prefix.
 
@@ -77,10 +98,18 @@ class SystemProfile:
                 mod_name = mod.get("name", "").lower()
                 # Match "cray-pals" against prefix "cray-pals" or "cray-pals/"
                 if mod_name == bare_prefix or mod_name.startswith(bare_prefix + "/"):
-                    return str(mod.get("version", ""))
+                    version = str(mod.get("version", ""))
+                    if version:
+                        return version
+                    name = str(mod.get("name", ""))
+                    return self._version_from_module_string(name) if "/" in name else ""
             else:
                 mod_str = str(mod).lower()
-                if mod_str.startswith(bare_prefix):
+                if (
+                    mod_str == bare_prefix
+                    or mod_str.startswith(bare_prefix + "/")
+                    or (bare_prefix.endswith("@") and mod_str.startswith(bare_prefix))
+                ):
                     return self._version_from_module_string(str(mod))
         return ""
 
@@ -93,6 +122,31 @@ class SystemProfile:
             mod_name = mod.get("name", "").lower()
             if mod_name == bare_prefix or mod_name.startswith(bare_prefix + "/"):
                 return mod.get("prefix", "")
+        return ""
+
+    def _loaded_module_name(self, name_prefix: str) -> str:
+        """Return the loaded module name for a package, if one is present."""
+        bare_prefix = name_prefix.rstrip("/").lower()
+        for mod in self._loaded_modules():
+            if isinstance(mod, dict):
+                mod_name = str(mod.get("name", ""))
+                mod_name_lower = mod_name.lower()
+                if (
+                    mod_name_lower == bare_prefix
+                    or mod_name_lower.startswith(bare_prefix + "/")
+                ):
+                    if "/" in mod_name:
+                        return mod_name
+                    version = str(mod.get("version", ""))
+                    return f"{mod_name}/{version}" if version else mod_name
+            else:
+                mod_str = str(mod)
+                mod_str_lower = mod_str.lower()
+                if (
+                    mod_str_lower == bare_prefix
+                    or mod_str_lower.startswith(bare_prefix + "/")
+                ):
+                    return mod_str
         return ""
 
     def _loaded_modules(self) -> List[Any]:
@@ -165,6 +219,48 @@ class SystemProfile:
     def scheduler_type(self) -> str:
         """Return 'slurm', 'pbs', or 'unknown'."""
         return self._get("scheduler", "type", default="unknown").lower()
+
+    def has_slurm(self) -> bool:
+        if self.scheduler_type() == "slurm":
+            return True
+        if self._env_first("CSE_SLURM_PREFIX_OVERRIDE", "CSE_SLURM_PREFIX"):
+            return True
+        if self._loaded_module_version("slurm/") or self._loaded_module_prefix("slurm/"):
+            return True
+        return bool(shutil.which("scontrol") or shutil.which("srun"))
+
+    def slurm_version(self) -> str:
+        override = self._env_first("CSE_SLURM_VERSION_OVERRIDE", "CSE_SLURM_VERSION")
+        if override:
+            return override
+        ver = self._loaded_module_version("slurm/")
+        if ver:
+            return ver
+        for binary_name in ("scontrol", "srun"):
+            binary = shutil.which(binary_name)
+            if not binary:
+                continue
+            out = self._query_cmd(binary, "--version")
+            match = re.search(r"slurm\s+([0-9][0-9A-Za-z_.-]*)", out, flags=re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return ""
+
+    def slurm_prefix(self) -> str:
+        override = self._env_first("CSE_SLURM_PREFIX_OVERRIDE", "CSE_SLURM_PREFIX")
+        if override:
+            return override
+        prefix = self._loaded_module_prefix("slurm/")
+        if prefix:
+            return prefix
+        for binary_name in ("scontrol", "srun"):
+            binary = shutil.which(binary_name)
+            if binary:
+                return str(Path(binary).resolve().parent.parent)
+        return "/usr" if self.has_slurm() else ""
+
+    def slurm_module(self) -> str:
+        return self._loaded_module_name("slurm/")
 
     # ------------------------------------------------------------------
     # Variant A: GCC bootstrap
@@ -254,15 +350,78 @@ class SystemProfile:
     # ------------------------------------------------------------------
 
     def has_libfabric(self) -> bool:
-        return bool(self._loaded_module_version("libfabric/"))
+        return bool(
+            self._env_first("CSE_LIBFABRIC_VERSION_OVERRIDE", "CSE_LIBFABRIC_VERSION")
+            or self._env_first("CSE_LIBFABRIC_PREFIX_OVERRIDE", "CSE_LIBFABRIC_PREFIX")
+            or self._loaded_module_version("libfabric/")
+            or self._loaded_module_prefix("libfabric/")
+        )
 
     def libfabric_version(self) -> str:
-        return self._loaded_module_version("libfabric/") or "1.15.2"
+        return (
+            self._env_first("CSE_LIBFABRIC_VERSION_OVERRIDE", "CSE_LIBFABRIC_VERSION")
+            or self._loaded_module_version("libfabric/")
+            or ""
+        )
 
     def libfabric_prefix(self) -> str:
         ver = self.libfabric_version()
-        prefix = self._loaded_module_prefix("libfabric/")
-        return prefix or f"/opt/cray/pe/libfabric/{ver}"
+        prefix = (
+            self._env_first("CSE_LIBFABRIC_PREFIX_OVERRIDE", "CSE_LIBFABRIC_PREFIX")
+            or self._loaded_module_prefix("libfabric/")
+        )
+        if prefix:
+            return prefix
+        return f"/opt/cray/pe/libfabric/{ver}" if ver else ""
+
+    def libfabric_module(self) -> str:
+        return self._loaded_module_name("libfabric/")
+
+    # ------------------------------------------------------------------
+    # PMIx — required for Slurm-launched MPICH pmi=pmix builds
+    # ------------------------------------------------------------------
+
+    def _pkg_config_value(self, package: str, *args: str) -> str:
+        pkg_config = shutil.which("pkg-config")
+        if not pkg_config:
+            return ""
+        return self._query_cmd(pkg_config, *args, package)
+
+    def has_pmix(self) -> bool:
+        return bool(
+            self._env_first("CSE_PMIX_VERSION_OVERRIDE", "CSE_PMIX_VERSION")
+            or self._env_first("CSE_PMIX_PREFIX_OVERRIDE", "CSE_PMIX_PREFIX")
+            or self._loaded_module_version("pmix/")
+            or self._loaded_module_prefix("pmix/")
+            or self._pkg_config_value("pmix", "--modversion")
+        )
+
+    def pmix_version(self) -> str:
+        return (
+            self._env_first("CSE_PMIX_VERSION_OVERRIDE", "CSE_PMIX_VERSION")
+            or self._loaded_module_version("pmix/")
+            or self._pkg_config_value("pmix", "--modversion")
+            or ""
+        )
+
+    def pmix_prefix(self) -> str:
+        override = self._env_first("CSE_PMIX_PREFIX_OVERRIDE", "CSE_PMIX_PREFIX")
+        if override:
+            return override
+        prefix = self._loaded_module_prefix("pmix/")
+        if prefix:
+            return prefix
+        ver = self._loaded_module_version("pmix/")
+        if ver:
+            return f"/opt/cray/pe/pmix/{ver}"
+        prefix = self._pkg_config_value("pmix", "--variable=prefix")
+        if prefix:
+            return prefix
+        ver = self.pmix_version()
+        return f"/opt/cray/pe/pmix/{ver}" if ver else ""
+
+    def pmix_module(self) -> str:
+        return self._loaded_module_name("pmix/")
 
     def mpich_version_for_spack(self) -> str:
         """Map detected cray-mpich series to an ABI-compatible upstream MPICH version.

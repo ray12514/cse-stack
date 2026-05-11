@@ -26,7 +26,7 @@ variants:
   v2-mpich:
     mpi_provider: mpich
     specs:
-      - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix"
+      - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix ~hydra +slurm"
       - "hdf5@1.14.4 +mpi  +fortran +cxx +hl ^mpich"
       - "hdf5@1.14.4 ~mpi  +fortran +cxx +hl"
       - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.4+mpi  ^mpich"
