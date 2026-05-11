@@ -3,6 +3,9 @@ packages:
     target: [{{ cpu_arch }}]
     providers:
       mpi: [{{ mpi_provider }}]
+{% if gcc_version %}
+    compiler: [gcc@{{ gcc_version }}]
+{% endif %}
     permissions:
       read:  world
       write: group

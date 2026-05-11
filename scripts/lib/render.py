@@ -132,21 +132,6 @@ def _format_spack_spec_entry(spec: object) -> str:
     return "\n".join(f"    {line}" for line in rendered.splitlines())
 
 
-def _attach_root_compiler(spec: object, gcc_version: str) -> object:
-    """Apply the bootstrap compiler to a root spec without touching deps."""
-    if not isinstance(spec, str):
-        return spec
-    if not gcc_version or "%" in spec:
-        return spec
-
-    compiler = f"%gcc@{gcc_version}"
-    if "^" in spec:
-        root, rest = spec.split("^", 1)
-        root = root.rstrip()
-        rest = rest.lstrip()
-        return f"{root} {compiler} ^{rest}" if rest else f"{root} {compiler}"
-    return f"{spec.rstrip()} {compiler}"
-
 
 def _expand_matrix_entry(entry: dict) -> list[str]:
     axes = entry.get("matrix", [])
@@ -494,7 +479,7 @@ def _build_context(profile: SystemProfile, variant: str,
     )
     ctx["spack_specs"] = package_set_data.get("specs", [])
     ctx["spack_spec_entries"] = [
-        _format_spack_spec_entry(_attach_root_compiler(spec, gcc_version))
+        _format_spack_spec_entry(spec)
         for spec in ctx["spack_specs"]
     ]
     ctx["expanded_spack_specs"] = _expand_spack_specs(ctx["spack_specs"])
