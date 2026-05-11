@@ -520,8 +520,10 @@ else
     echo "   module use ${SITE_MODULE_PATH}"
     if [[ "${VARIANT}" == "v1-openmpi" ]]; then
         echo "   module load cse-init/openmpi"
+        echo "   module load cse-init/${RELEASE}/openmpi"
     else
         echo "   module load cse-init/mpich"
+        echo "   module load cse-init/${RELEASE}/mpich"
     fi
     echo "   module avail cse"
 fi

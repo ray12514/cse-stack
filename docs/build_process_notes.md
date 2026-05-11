@@ -226,6 +226,27 @@ Resolution:
 
 - `science-full` no longer requests `+threadsafe` by default.
 
+### Current and Pinned Release Gates
+
+Policy:
+
+- `cse-init/<mpi>` is the stable front-door module for the current promoted
+  release.
+- `cse-init/<release>/<mpi>` is the pinned front-door module for one completed
+  release.
+- Stage 5 is the promotion step. Running Stage 5 for a release refreshes the
+  Spack module tree, writes that release's pinned gate, and repoints the stable
+  `cse-init/<mpi>` gate at the same release.
+
+Implications:
+
+- Users who want the current site default load `cse-init/openmpi` or
+  `cse-init/mpich`.
+- Users who need repeatability load a pinned module such as
+  `cse-init/20260508/openmpi`.
+- Operators can switch current back to an already-built release by rerunning
+  Stage 5 with that release name.
+
 ## Open Items
 
 - Decide when to introduce signed production buildcaches and key trust

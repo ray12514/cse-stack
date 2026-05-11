@@ -2,12 +2,6 @@ modules:
   prefix_inspections:
     bin:
       - PATH
-    lib:
-      - LD_LIBRARY_PATH
-    lib64:
-      - LD_LIBRARY_PATH
-    include:
-      - CPATH
     lib/pkgconfig:
       - PKG_CONFIG_PATH
     lib64/pkgconfig:
@@ -40,6 +34,13 @@ modules:
         all: 'cse/{name}/{version}'
       all:
         autoload: none
+        filter:
+          exclude_env_vars:
+            - LD_LIBRARY_PATH
+            - LIBRARY_PATH
+            - CPATH
+            - C_INCLUDE_PATH
+            - CPLUS_INCLUDE_PATH
 
       hdf5:
         suffixes:

@@ -207,11 +207,13 @@ fi
 
 if [[ "${MODULE_SYSTEM}" == "lmod" ]]; then
     INIT_TEMPLATE="${REPO_ROOT}/templates/cse-init.lua.j2"
-    INIT_DST="${SITE_MODULE_PATH}/cse-init/${INIT_NAME}.lua"
+    INIT_CURRENT_DST="${SITE_MODULE_PATH}/cse-init/${INIT_NAME}.lua"
+    INIT_VERSIONED_DST="${SITE_MODULE_PATH}/cse-init/${CSE_RELEASE}/${INIT_NAME}.lua"
     SPACK_MODULE_CMD="lmod"
 else
     INIT_TEMPLATE="${REPO_ROOT}/templates/cse-init.tcl.j2"
-    INIT_DST="${SITE_MODULE_PATH}/cse-init/${INIT_NAME}"
+    INIT_CURRENT_DST="${SITE_MODULE_PATH}/cse-init/${INIT_NAME}"
+    INIT_VERSIONED_DST="${SITE_MODULE_PATH}/cse-init/${CSE_RELEASE}/${INIT_NAME}"
     SPACK_MODULE_CMD="tcl"
 fi
 
@@ -224,8 +226,10 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run]   spack env view regenerate"
     echo "[dry-run]   spack module ${SPACK_MODULE_CMD} refresh --delete-tree -y"
     echo "[dry-run]   validate public module catalog and curated load targets"
-    echo "[dry-run]   mkdir -p $(dirname "${INIT_DST}")"
-    echo "[dry-run]   python3 ${REPO_ROOT}/scripts/lib/render.py --template ${INIT_TEMPLATE} --output ${INIT_DST} --variant ${CSE_VARIANT} --shared-path ${SHARED_PATH} --release ${CSE_RELEASE}"
+    echo "[dry-run]   mkdir -p $(dirname "${INIT_CURRENT_DST}")"
+    echo "[dry-run]   mkdir -p $(dirname "${INIT_VERSIONED_DST}")"
+    echo "[dry-run]   python3 ${REPO_ROOT}/scripts/lib/render.py --template ${INIT_TEMPLATE} --output ${INIT_CURRENT_DST} --variant ${CSE_VARIANT} --shared-path ${SHARED_PATH} --release ${CSE_RELEASE}"
+    echo "[dry-run]   python3 ${REPO_ROOT}/scripts/lib/render.py --template ${INIT_TEMPLATE} --output ${INIT_VERSIONED_DST} --variant ${CSE_VARIANT} --shared-path ${SHARED_PATH} --release ${CSE_RELEASE}"
     exit 0
 fi
 
@@ -255,19 +259,26 @@ export CSE_INIT_MODULE_ROOT
 echo "Stage 5: detected generated module root ${CSE_INIT_MODULE_ROOT}"
 validate_generated_modules
 
-echo "Stage 5: rendering cse-init/${INIT_NAME} to ${INIT_DST}..."
+echo "Stage 5: rendering cse-init/${INIT_NAME} to ${INIT_CURRENT_DST}..."
+echo "Stage 5: rendering cse-init/${CSE_RELEASE}/${INIT_NAME} to ${INIT_VERSIONED_DST}..."
 umask 022
-mkdir -p "$(dirname "${INIT_DST}")"
+mkdir -p "$(dirname "${INIT_CURRENT_DST}")"
+mkdir -p "$(dirname "${INIT_VERSIONED_DST}")"
 rm -f "${SITE_MODULE_PATH}/cse-init/${INIT_NAME}" \
       "${SITE_MODULE_PATH}/cse-init/${INIT_NAME}.tcl" \
       "${SITE_MODULE_PATH}/cse-init/${INIT_NAME}.lua"
-python3 "${REPO_ROOT}/scripts/lib/render.py" \
-    --template "${INIT_TEMPLATE}" \
-    --output "${INIT_DST}" \
-    --variant "${CSE_VARIANT}" \
-    --shared-path "${SHARED_PATH}" \
-    --release "${CSE_RELEASE}"
-chgrp "${CSE_GROUP:-$(id -gn)}" "${INIT_DST}" 2>/dev/null || true
+rm -f "${SITE_MODULE_PATH}/cse-init/${CSE_RELEASE}/${INIT_NAME}" \
+      "${SITE_MODULE_PATH}/cse-init/${CSE_RELEASE}/${INIT_NAME}.tcl" \
+      "${SITE_MODULE_PATH}/cse-init/${CSE_RELEASE}/${INIT_NAME}.lua"
+for init_dst in "${INIT_CURRENT_DST}" "${INIT_VERSIONED_DST}"; do
+    python3 "${REPO_ROOT}/scripts/lib/render.py" \
+        --template "${INIT_TEMPLATE}" \
+        --output "${init_dst}" \
+        --variant "${CSE_VARIANT}" \
+        --shared-path "${SHARED_PATH}" \
+        --release "${CSE_RELEASE}"
+    chgrp "${CSE_GROUP:-$(id -gn)}" "${init_dst}" 2>/dev/null || true
+done
 
 echo "Stage 5: done."
 echo ""
@@ -275,7 +286,9 @@ echo "Users can now load the CSE environment with:"
 echo "  module use ${SITE_MODULE_PATH}"
 if [[ "${CSE_VARIANT}" == "v1-openmpi" ]]; then
     echo "  module load cse-init/openmpi"
+    echo "  module load cse-init/${CSE_RELEASE}/openmpi"
 else
     echo "  module load cse-init/mpich"
+    echo "  module load cse-init/${CSE_RELEASE}/mpich"
 fi
 echo "  module avail cse"
