@@ -52,9 +52,35 @@ packages:
   libfabric:
     buildable: false
     externals:
-      - spec: libfabric@{{ libfabric_version }}
+      - spec: libfabric{% if libfabric_version %}@{{ libfabric_version }}{% endif %}
         prefix: {{ libfabric_prefix }}
-        modules: [libfabric/{{ libfabric_version }}]
+{% if libfabric_module %}
+        modules: [{{ libfabric_module }}]
+{% endif %}
+{% endif %}
+
+{% if is_mpich and scheduler_type == "slurm" and has_slurm %}
+  # slurm — site scheduler/runtime for srun-based MPI launch.
+  slurm:
+    buildable: false
+    externals:
+      - spec: slurm{% if slurm_version %}@{{ slurm_version }}{% endif %}
+        prefix: {{ slurm_prefix }}
+{% if slurm_module %}
+        modules: [{{ slurm_module }}]
+{% endif %}
+{% endif %}
+
+{% if is_mpich and scheduler_type == "slurm" and has_pmix %}
+  # pmix — site PMIx used by MPICH pmi=pmix with Slurm launch.
+  pmix:
+    buildable: false
+    externals:
+      - spec: pmix{% if pmix_version %}@{{ pmix_version }}{% endif %}
+        prefix: {{ pmix_prefix }}
+{% if pmix_module %}
+        modules: [{{ pmix_module }}]
+{% endif %}
 {% endif %}
 
 {% if is_mpich and has_cray_pals %}

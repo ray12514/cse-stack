@@ -339,6 +339,38 @@ def _build_module_load_rules(
     return rules
 
 
+def _validate_v2_mpich_slurm_externals(ctx: dict) -> None:
+    """Fail before concretization when Slurm MPICH needs site externals."""
+    if not ctx.get("is_mpich") or ctx.get("scheduler_type") != "slurm":
+        return
+    if not _root_specs(ctx.get("expanded_spack_specs", []), "mpich"):
+        return
+
+    failures = []
+    if not (ctx.get("has_libfabric") and ctx.get("libfabric_prefix")):
+        failures.append(
+            "libfabric external not detected; load a libfabric/<version> module "
+            "or set CSE_LIBFABRIC_PREFIX_OVERRIDE and CSE_LIBFABRIC_VERSION_OVERRIDE"
+        )
+    if not (ctx.get("has_slurm") and ctx.get("slurm_prefix")):
+        failures.append(
+            "Slurm external not detected; run from a Slurm login node with srun/scontrol "
+            "available or set CSE_SLURM_PREFIX_OVERRIDE and CSE_SLURM_VERSION_OVERRIDE"
+        )
+    if not (ctx.get("has_pmix") and ctx.get("pmix_prefix")):
+        failures.append(
+            "PMIx external not detected; load a pmix/<version> module, make pkg-config "
+            "find pmix, or set CSE_PMIX_PREFIX_OVERRIDE and CSE_PMIX_VERSION_OVERRIDE"
+        )
+
+    if failures:
+        details = "\n  - ".join(failures)
+        raise ValueError(
+            "v2-mpich on Slurm requires site-managed libfabric, Slurm, and PMIx "
+            f"externals for srun + PMIx launch.\n  - {details}"
+        )
+
+
 def _build_context(profile: SystemProfile, variant: str,
                    shared_path: str, release: str,
                    gcc_version_override: str = "",
@@ -384,6 +416,10 @@ def _build_context(profile: SystemProfile, variant: str,
         "module_system": os.environ.get("MODULE_SYSTEM", profile.module_system()),
         # Scheduler
         "scheduler_type": profile.scheduler_type(),
+        "has_slurm": profile.has_slurm(),
+        "slurm_version": profile.slurm_version(),
+        "slurm_prefix": profile.slurm_prefix(),
+        "slurm_module": profile.slurm_module(),
         # GCC — both variants bootstrap from Spack
         "gcc_version": gcc_version,
         # MPICH version (auto-detected from cray-mpich series for ABI compat)
@@ -398,9 +434,14 @@ def _build_context(profile: SystemProfile, variant: str,
         "has_libfabric":     profile.has_libfabric(),
         "libfabric_version": profile.libfabric_version(),
         "libfabric_prefix":  profile.libfabric_prefix(),
+        "libfabric_module":  profile.libfabric_module(),
         "has_cray_pals":     profile.has_cray_pals(),
         "cray_pals_version": profile.cray_pals_version(),
         "cray_pals_prefix":  profile.cray_pals_prefix(),
+        "has_pmix":          profile.has_pmix(),
+        "pmix_version":      profile.pmix_version(),
+        "pmix_prefix":       profile.pmix_prefix(),
+        "pmix_module":       profile.pmix_module(),
     }
     # variant_slug == variant name — no shortening needed
     ctx["variant_slug"] = variant
@@ -440,6 +481,7 @@ def _build_context(profile: SystemProfile, variant: str,
         _format_spack_spec_entry(spec) for spec in ctx["spack_specs"]
     ]
     ctx["expanded_spack_specs"] = _expand_spack_specs(ctx["spack_specs"])
+    _validate_v2_mpich_slurm_externals(ctx)
     ctx["view_mpi_select"] = package_set_data.get("views", {}).get("mpi", [])
     ctx["view_serial_select"] = package_set_data.get("views", {}).get("serial", [])
     mpi_version = _spec_version(ctx["expanded_spack_specs"], ctx["mpi_provider"])

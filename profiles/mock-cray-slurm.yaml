@@ -1,0 +1,65 @@
+# Mock Cluster Inspector system profile for a Cray Slurm system (v2-mpich target).
+# Used to test Slurm + PMIx externals in v2-mpich dry runs.
+
+schema_version: 1
+
+system:
+  name: slurm-login01
+  site: example-hpc
+  platform_class: cray
+  node_role: login
+  environment_model: cray-pe
+  observed_platform_signals:
+    - cray_pe_modules
+  classification_confidence: high
+
+os:
+  name: SLES
+  version: "15.5"
+  kernel: 5.14.21-150500.55.83-default
+  glibc_version: "2.34"
+
+modules:
+  system: lmod
+  modulepath: /opt/cray/pe/lmod/modulefiles/core
+  loaded:
+    - libfabric/1.22
+    - name: cray-mpich
+      version: "9.0.0"
+      prefix: /opt/cray/pe/mpich/9.0.0/ofi/gnu/13.3
+    - pmix/4.2.8
+
+scheduler:
+  type: slurm
+
+hardware:
+  cpu:
+    microarch: zen3
+    model: AMD EPYC 7763
+    sockets: 2
+    cores_per_socket: 64
+  gpus:
+    vendor: unknown
+    count_per_node: 0
+  nics: []
+  network:
+    fabric: slingshot
+    communication_provider: libfabric
+
+vendor_substrate:
+  mpi_module: "cray-mpich/9.0.0"
+  mpi_family: mpich
+  source: cray
+
+externals_policy:
+  forbid_build:
+    - libfabric
+    - slurm
+    - pmix
+  module_based_externals: true
+
+capabilities:
+  t0: {state: ready}
+  t1: {state: ready}
+  t2: {state: unknown}
+  t3: {state: unknown}
