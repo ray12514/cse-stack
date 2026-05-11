@@ -243,6 +243,14 @@ def _root_public_modules(specs: list[str]) -> list[dict[str, str]]:
     return modules
 
 
+def _root_module_example(specs: list[str], name: str, suffix: str = "") -> str:
+    for spec in _root_specs(specs, name):
+        version = _root_spec_version(spec)
+        if version:
+            return _module_use_name(name, version, suffix)
+    return _module_use_name(name, "", suffix)
+
+
 def _root_spec_dep_has_variant(
     specs: list[str], name: str, dep_name: str, variant: str
 ) -> bool:
@@ -436,6 +444,10 @@ def _build_context(profile: SystemProfile, variant: str,
     ctx["view_serial_select"] = package_set_data.get("views", {}).get("serial", [])
     mpi_version = _spec_version(ctx["expanded_spack_specs"], ctx["mpi_provider"])
     ctx["mpi_module"] = _module_use_name(ctx["mpi_provider"], mpi_version)
+    ctx["hdf5_mpi_module"] = _root_module_example(ctx["expanded_spack_specs"], "hdf5", "-mpi")
+    ctx["netcdf_fortran_mpi_module"] = _root_module_example(
+        ctx["expanded_spack_specs"], "netcdf-fortran", "-mpi"
+    )
     public_modules = _root_public_modules(ctx["expanded_spack_specs"])
     ctx["public_module_include_specs"] = list(
         dict.fromkeys(item["name"] for item in public_modules)
