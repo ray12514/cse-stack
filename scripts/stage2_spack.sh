@@ -73,6 +73,21 @@ _find_installed_gcc_bin() {
     find "${SPACK_SITE}/opt" -path "*/gcc-${GCC_VERSION}*/bin/gcc" 2>/dev/null | head -1
 }
 
+# Walk PATH for the highest-versioned GCC available (used in both live and dry-run).
+_find_newest_gcc() {
+    local best="" best_ver=0
+    local dir bin ver
+    for dir in $(echo "$PATH" | tr ':' ' '); do
+        for bin in "$dir"/gcc "$dir"/gcc-[0-9]*; do
+            [[ -x "$bin" ]] || continue
+            ver=$("$bin" -dumpversion 2>/dev/null | cut -d. -f1)
+            [[ "$ver" =~ ^[0-9]+$ ]] || continue
+            (( ver > best_ver )) && { best_ver=$ver; best=$bin; }
+        done
+    done
+    echo "$best"
+}
+
 _publish_compiler_view() {
     local gcc_prefix="$1" gcc_version="$2"
     local clean_prefix="${COMPILER_VIEW_ROOT}/${gcc_version}"
@@ -159,10 +174,20 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     if [[ -n "${BUILDCACHE_URI:-}" ]]; then
         echo "[dry-run] Stage 2: would configure build cache ${BUILDCACHE_URI}"
     fi
-    echo "[dry-run] Stage 2: would register system GCC in ${SPACK_SITE}/etc/spack/compilers.yaml"
-    if [[ "${USE_SYSTEM_GCC}" == "1" ]]; then
-        echo "[dry-run] Stage 2: would skip GCC bootstrap and use the detected system compiler as CSE GCC"
+    _DRY_SYS_GCC=$(_find_newest_gcc)
+    if [[ -n "${_DRY_SYS_GCC}" ]]; then
+        _DRY_GCC_VER="$("${_DRY_SYS_GCC}" -dumpversion)"
+        if [[ "${USE_SYSTEM_GCC}" == "1" ]]; then
+            echo "[dry-run] Stage 2: system GCC → ${_DRY_SYS_GCC} (${_DRY_GCC_VER})"
+            echo "[dry-run]           CSE_USE_SYSTEM_GCC=1 — this compiler becomes the CSE compiler (no bootstrap build)"
+        else
+            echo "[dry-run] Stage 2: system GCC → ${_DRY_SYS_GCC} (${_DRY_GCC_VER})"
+            echo "[dry-run]           bootstrap compiler only — used to build gcc@${GCC_VERSION}, then discarded"
+        fi
     else
+        echo "[dry-run] Stage 2: WARNING — no GCC found in PATH; real run would fail here"
+    fi
+    if [[ "${USE_SYSTEM_GCC}" != "1" ]]; then
         _DRY_RUN_INSTALL="spack install"
         if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
             _DRY_RUN_INSTALL="${_DRY_RUN_INSTALL} --cache-only"
@@ -211,23 +236,6 @@ EOF
     # Always use the architecture family (x86_64), NOT spack arch --target which
     # returns microarchitectures like "zen3" or "zen" that break compiler lookup.
     ARCH_SPACK="x86_64"
-
-    # ---- Find highest-versioned system GCC in PATH ----
-    # Walk PATH directly; prefer versioned binaries (gcc-13, gcc-12, …)
-    # over the plain gcc symlink so we pick the newest available.
-    _find_newest_gcc() {
-        local best="" best_ver=0
-        local dir bin ver
-        for dir in $(echo "$PATH" | tr ':' ' '); do
-            for bin in "$dir"/gcc "$dir"/gcc-[0-9]*; do
-                [[ -x "$bin" ]] || continue
-                ver=$("$bin" -dumpversion 2>/dev/null | cut -d. -f1)
-                [[ "$ver" =~ ^[0-9]+$ ]] || continue
-                (( ver > best_ver )) && { best_ver=$ver; best=$bin; }
-            done
-        done
-        echo "$best"
-    }
 
     SYS_GCC=$(_find_newest_gcc)
     if [[ -z "${SYS_GCC}" ]]; then
