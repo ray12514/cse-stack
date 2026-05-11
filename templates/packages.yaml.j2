@@ -3,8 +3,6 @@ packages:
     target: [{{ cpu_arch }}]
     providers:
       mpi: [{{ mpi_provider }}]
-    require:
-      - "%gcc@{{ gcc_version }}"
     permissions:
       read:  world
       write: group
