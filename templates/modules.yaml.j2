@@ -1,18 +1,4 @@
 modules:
-  prefix_inspections:
-    bin:
-      - PATH
-    lib/pkgconfig:
-      - PKG_CONFIG_PATH
-    lib64/pkgconfig:
-      - PKG_CONFIG_PATH
-    share/man:
-      - MANPATH
-    share/pkgconfig:
-      - PKG_CONFIG_PATH
-    .:
-      - CMAKE_PREFIX_PATH
-
   default:
     enable:
       - {{ module_system }}
