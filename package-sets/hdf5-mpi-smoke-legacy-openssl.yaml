@@ -15,7 +15,7 @@ variants:
     mpi_provider: mpich
     specs:
       - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix ~hydra +slurm"
-      - "hdf5@1.14.4 +mpi  +fortran +cxx +hl ^mpich"
+      - "hdf5@1.14.4 +mpi  +fortran +cxx +hl ^mpich@{mpich_version}"
     views:
       mpi:
         - "+mpi"

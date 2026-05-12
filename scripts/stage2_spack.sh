@@ -198,6 +198,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo "[dry-run] Stage 2: would run: ${_DRY_RUN_INSTALL} --deprecated --concurrent-packages ${SPACK_INSTALL_JOBS:-4} --jobs ${SPACK_MAKE_JOBS:-16} --no-checksum gcc@${GCC_VERSION} ~bootstrap +binutils target=${SPACK_TARGET}"
     fi
     echo "[dry-run] Stage 2: would write ${GCC_BOOTSTRAP_YAML}"
+    echo "[dry-run] Stage 2: would write ${VARIANT_DIR}/gcc-compilers.yaml (env-scoped, only gcc@${GCC_VERSION})"
     echo "[dry-run] Stage 2: would publish compiler view at ${COMPILER_VIEW_ROOT}/${GCC_VERSION}"
     echo "[dry-run] Stage 2: would remove temporary ${SPACK_SITE}/etc/spack/compilers.yaml"
 else
@@ -323,11 +324,35 @@ packages:
     buildable: false
 EOF
 
+    # ---- Write gcc-compilers.yaml (explicit compiler registration, env-scoped) ----
+    # gcc-bootstrap.yaml registers the compiler via the packages mechanism, but
+    # Spack v1.0.x can still auto-detect and use system GCCs alongside it.
+    # An explicit compilers.yaml in the environment scope lists ONLY the chosen
+    # GCC, blocking any site or auto-detected compiler from leaking in.
+    GCC_COMPILERS_YAML="${VARIANT_DIR}/gcc-compilers.yaml"
+    echo "Stage 2: writing ${GCC_COMPILERS_YAML}..."
+    cat > "${GCC_COMPILERS_YAML}" <<EOF
+compilers:
+- compiler:
+    spec: gcc@${GCC_VERSION}
+    paths:
+      cc:  ${GCC_PREFIX}/bin/gcc
+      cxx: ${GCC_PREFIX}/bin/g++
+      f77: ${GCC_PREFIX}/bin/gfortran
+      fc:  ${GCC_PREFIX}/bin/gfortran
+    flags: {}
+    operating_system: ${OS_SPACK}
+    target: ${ARCH_SPACK}
+    modules: []
+    environment: {}
+    extra_rpaths: []
+EOF
+
     echo "Stage 2: publishing compiler view ${COMPILER_VIEW_ROOT}/${GCC_VERSION} -> ${GCC_PREFIX}"
     _publish_compiler_view "${GCC_PREFIX}" "${GCC_VERSION}"
 
     # The site compilers.yaml is only a temporary bootstrap aid. Stage 4 uses
-    # gcc-bootstrap.yaml so compiler registration has one source of truth.
+    # gcc-compilers.yaml (env-scoped) so compiler registration has one source of truth.
     rm -f "${SPACK_SITE}/etc/spack/compilers.yaml"
 
     echo "Stage 2: GCC bootstrap complete."
