@@ -60,13 +60,13 @@ variants:
     mpi_provider: mpich
     specs:
       - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix ~hydra +slurm"
-      - "hdf5@1.14.6 +mpi  +fortran +cxx +hl ^mpich"
+      - "hdf5@1.14.6 +mpi  +fortran +cxx +hl ^mpich@{mpich_version}"
       - "hdf5@1.14.6 ~mpi  +fortran +cxx +hl"
-      - "hdf5@1.14.5 +mpi  +fortran +cxx +hl ^mpich"
+      - "hdf5@1.14.5 +mpi  +fortran +cxx +hl ^mpich@{mpich_version}"
       - "hdf5@1.14.5 ~mpi  +fortran +cxx +hl"
-      - "netcdf-c@4.9.3 +mpi  +parallel-netcdf  ^hdf5@1.14.6+mpi  ^mpich"
+      - "netcdf-c@4.9.3 +mpi  +parallel-netcdf  ^hdf5@1.14.6+mpi  ^mpich@{mpich_version}"
       - "netcdf-c@4.9.3 ~mpi                    ^hdf5@1.14.6~mpi"
-      - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.5+mpi  ^mpich"
+      - "netcdf-c@4.9.2 +mpi  +parallel-netcdf  ^hdf5@1.14.5+mpi  ^mpich@{mpich_version}"
       - "netcdf-c@4.9.2 ~mpi                    ^hdf5@1.14.5~mpi"
       - "netcdf-fortran@4.6.2                   ^netcdf-c@4.9.3+mpi"
       - "netcdf-fortran@4.6.2                   ^netcdf-c@4.9.3~mpi"
@@ -76,7 +76,7 @@ variants:
       - "netcdf-cxx4@4.3.1                      ^netcdf-c@4.9.3~mpi"
       - matrix:
         - ["fftw@3.3.10", "fftw@3.3.9"]
-        - ["+mpi ^mpich", "~mpi"]
+        - ["+mpi ^mpich@{mpich_version}", "~mpi"]
       - "openblas@0.3.30"
       - "openblas@0.3.29"
       - "gnuplot@6.0.0"
