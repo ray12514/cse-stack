@@ -119,6 +119,10 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo "[dry-run]   spack concretize --fresh"
     fi
     echo "[dry-run]   detect duplicate concrete name/version specs for hashed view fallback"
+    if [[ "${CSE_FETCH_PREFLIGHT:-0}" == "1" ]]; then
+        echo "[dry-run]   spack python ${REPO_ROOT}/scripts/lib/fetch_preflight.py --timeout ${CSE_PREFLIGHT_TIMEOUT:-5}${CSE_PREFLIGHT_STRICT:+ --strict}"
+        echo "[dry-run]   (preflight: HEAD-check all source URLs; unreachable = warning${CSE_PREFLIGHT_STRICT:+, or error with --preflight-strict})"
+    fi
     if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
         echo "[dry-run]   spack mirror list"
     fi
@@ -252,6 +256,13 @@ else
 fi
 
 report_duplicate_name_versions
+
+if [[ "${CSE_FETCH_PREFLIGHT:-0}" == "1" ]]; then
+    echo "Stage 4: running fetch preflight (HEAD-checking all source URLs)..."
+    _PREFLIGHT_ARGS=(--timeout "${CSE_PREFLIGHT_TIMEOUT:-5}")
+    [[ "${CSE_PREFLIGHT_STRICT:-0}" == "1" ]] && _PREFLIGHT_ARGS+=(--strict)
+    spack python "${REPO_ROOT}/scripts/lib/fetch_preflight.py" "${_PREFLIGHT_ARGS[@]}"
+fi
 
 echo "Stage 4: installing (this will take a while on first run)..."
 reset_spack_views

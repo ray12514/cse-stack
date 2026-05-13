@@ -25,7 +25,10 @@
 #                       [--spack-seed <path>]      \
 #                       [--bootstrap-bundle <path>] \
 #                       [--lockfile <path>]        \
-#                       [--module-system {lmod|tcl}]
+#                       [--module-system {lmod|tcl}]   \
+#                       [--preflight]              \
+#                       [--preflight-strict]       \
+#                       [--preflight-timeout N]
 #
 # Options:
 #   --variant         Required. Deployment variant: v1-openmpi or v2-mpich.
@@ -71,6 +74,11 @@
 #                     target without re-concretizing. Required for restricted
 #                     and air-gapped deploys.
 #   --module-system   Override auto-detected module system (lmod or tcl).
+#   --preflight       HEAD-check every source tarball URL after concretize and
+#                     before install.  Warns on unreachable URLs; build continues.
+#   --preflight-strict  Same as --preflight but abort the build if any URL is
+#                     unreachable.  Implies --preflight.
+#   --preflight-timeout N  Per-URL connect timeout in seconds (default: 5).
 #   --mock-profile    Path to a mock Cluster Inspector YAML profile.
 #                     Useful for testing v2-mpich on a non-Cray host.
 set -euo pipefail
@@ -109,6 +117,9 @@ ARTIFACT_MANIFEST="${CSE_ARTIFACT_MANIFEST:-}"
 MODULE_SYSTEM_OVERRIDE=""
 MOCK_PROFILE=""
 SPACK_VERSION_OVERRIDE=""
+CSE_FETCH_PREFLIGHT=0
+CSE_PREFLIGHT_STRICT=0
+CSE_PREFLIGHT_TIMEOUT=5
 
 require_arg_value() {
     local opt="$1"
@@ -146,6 +157,9 @@ while [[ $# -gt 0 ]]; do
         --module-system)  require_arg_value "$1" "${2:-}"; MODULE_SYSTEM_OVERRIDE="$2"; shift 2 ;;
         --mock-profile)   require_arg_value "$1" "${2:-}"; MOCK_PROFILE="$2";           shift 2 ;;
         --spack-version)  require_arg_value "$1" "${2:-}"; SPACK_VERSION_OVERRIDE="$2"; shift 2 ;;
+        --preflight)        CSE_FETCH_PREFLIGHT=1;                               shift   ;;
+        --preflight-strict) CSE_FETCH_PREFLIGHT=1; CSE_PREFLIGHT_STRICT=1;      shift   ;;
+        --preflight-timeout) require_arg_value "$1" "${2:-}"; CSE_PREFLIGHT_TIMEOUT="$2"; shift 2 ;;
         -h|--help)
             sed -n '3,49p' "${BASH_SOURCE[0]}"
             exit 0
@@ -231,6 +245,9 @@ export CSE_VARIANT="${VARIANT}"
 export DRY_RUN
 export MOCK_PROFILE
 export CSE_NETWORK_MODE="${NETWORK_MODE}"
+export CSE_FETCH_PREFLIGHT
+export CSE_PREFLIGHT_STRICT
+export CSE_PREFLIGHT_TIMEOUT
 # MIRROR_PATH: if set, stage 4 writes mirrors.yaml so Spack fetches from here
 # instead of the internet.  Accepts a filesystem path or file:// / http:// URL.
 export MIRROR_PATH
