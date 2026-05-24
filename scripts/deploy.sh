@@ -5,7 +5,7 @@
 # this script just composes them and manages shared environment variables.
 #
 # Usage:
-#   ./scripts/deploy.sh --variant {v1-openmpi|v2-mpich} \
+#   ./scripts/deploy.sh --variant <compiler>-<mpi> \
 #                       --release <tag>            \
 #                       --shared-path <path>       \
 #                       [--network-mode <mode>]    \
@@ -28,10 +28,16 @@
 #                       [--module-system {lmod|tcl}]   \
 #                       [--preflight]              \
 #                       [--preflight-strict]       \
-#                       [--preflight-timeout N]
+#                       [--preflight-timeout N]    \
+#                       [--render-only]            \
+#                       [--skip-render]            \
+#                       [--fetch]                  \
+#                       [--build]
 #
 # Options:
-#   --variant         Required. Deployment variant: v1-openmpi or v2-mpich.
+#   --variant         Required. Variant slug: <compiler>-<mpi> or <compiler>-serial.
+#                     Examples: gcc-openmpi, gcc-mpich, cce-craympich, aocc-openmpi.
+#                     Legacy: v1-openmpi (=gcc-openmpi), v2-mpich (=gcc-mpich).
 #   --release         Required. Release tag (e.g. 2026_04).
 #   --shared-path     Required. Path to the shared CSE filesystem root.
 #   --network-mode    Deployment network policy: online, restricted, or
@@ -79,6 +85,17 @@
 #   --preflight-strict  Same as --preflight but abort the build if any URL is
 #                     unreachable.  Implies --preflight.
 #   --preflight-timeout N  Per-URL connect timeout in seconds (default: 5).
+#   --render-only     Run stages 1+3 and render all remaining templates (config,
+#                     modules, spack YAML), then exit without calling any spack
+#                     command.  Lets a human take over with raw `spack -e` commands.
+#   --skip-render     Skip stages 1-3; assume env YAML files already exist.
+#                     Jump directly to spack concretize+install in stage 4.
+#   --fetch           (passed to stage 4) Login-node step: concretize + spack fetch
+#                     only.  No spack install.  Combine with --skip-render for
+#                     compute-only installs later.
+#   --build           (passed to stage 4) Compute-node step: spack install using the
+#                     existing spack.lock; skip concretize and fetch.  Requires
+#                     --fetch to have been run first.
 #   --mock-profile    Path to a mock Cluster Inspector YAML profile.
 #                     Useful for testing v2-mpich on a non-Cray host.
 set -euo pipefail
@@ -120,6 +137,9 @@ SPACK_VERSION_OVERRIDE=""
 CSE_FETCH_PREFLIGHT=0
 CSE_PREFLIGHT_STRICT=0
 CSE_PREFLIGHT_TIMEOUT=5
+RENDER_ONLY=0
+SKIP_RENDER=0
+STAGE4_BUILD_MODE="full"
 
 require_arg_value() {
     local opt="$1"
@@ -160,6 +180,10 @@ while [[ $# -gt 0 ]]; do
         --preflight)        CSE_FETCH_PREFLIGHT=1;                               shift   ;;
         --preflight-strict) CSE_FETCH_PREFLIGHT=1; CSE_PREFLIGHT_STRICT=1;      shift   ;;
         --preflight-timeout) require_arg_value "$1" "${2:-}"; CSE_PREFLIGHT_TIMEOUT="$2"; shift 2 ;;
+        --render-only)      RENDER_ONLY=1;                                       shift   ;;
+        --skip-render)      SKIP_RENDER=1;                                       shift   ;;
+        --fetch)            STAGE4_BUILD_MODE="fetch";                           shift   ;;
+        --build)            STAGE4_BUILD_MODE="build";                           shift   ;;
         -h|--help)
             sed -n '3,49p' "${BASH_SOURCE[0]}"
             exit 0
@@ -176,7 +200,7 @@ done
 # ------------------------------------------------------------------
 errors=0
 if [[ -z "${VARIANT}" ]]; then
-    echo "ERROR: --variant is required (v1-openmpi | v2-mpich)" >&2
+    echo "ERROR: --variant is required (e.g. gcc-openmpi, gcc-mpich, cce-craympich)" >&2
     errors=1
 fi
 if [[ -z "${RELEASE}" ]]; then
@@ -187,8 +211,14 @@ if [[ -z "${SHARED_PATH}" ]]; then
     echo "ERROR: --shared-path is required" >&2
     errors=1
 fi
-if [[ "${VARIANT}" != "v1-openmpi" && "${VARIANT}" != "v2-mpich" ]]; then
-    echo "ERROR: --variant must be v1-openmpi or v2-mpich" >&2
+if [[ "${VARIANT}" == "v1-openmpi" ]]; then
+    echo "WARNING: --variant v1-openmpi is deprecated; use gcc-openmpi" >&2
+    VARIANT="gcc-openmpi"
+elif [[ "${VARIANT}" == "v2-mpich" ]]; then
+    echo "WARNING: --variant v2-mpich is deprecated; use gcc-mpich" >&2
+    VARIANT="gcc-mpich"
+elif [[ "${VARIANT}" != *-* ]]; then
+    echo "ERROR: --variant must be <compiler>-<mpi> (e.g. gcc-openmpi, cce-craympich)" >&2
     errors=1
 fi
 if [[ -n "${PACKAGE_SET_OVERRIDE}" && ! -f "${REPO_ROOT}/package-sets/${PACKAGE_SET_OVERRIDE}.yaml" ]]; then
@@ -224,6 +254,14 @@ if [[ "${SPACK_CACHE_ONLY}" == "1" && -z "${BUILDCACHE_URI}" ]]; then
 fi
 if [[ "${FROM_STAGE}" -lt 1 || "${FROM_STAGE}" -gt 5 ]]; then
     echo "ERROR: --from-stage must be between 1 and 5" >&2
+    errors=1
+fi
+if [[ "${RENDER_ONLY}" == "1" && "${SKIP_RENDER}" == "1" ]]; then
+    echo "ERROR: --render-only and --skip-render are mutually exclusive" >&2
+    errors=1
+fi
+if [[ "${STAGE4_BUILD_MODE}" == "fetch" && "${STAGE4_BUILD_MODE}" == "build" ]]; then
+    echo "ERROR: --fetch and --build are mutually exclusive" >&2
     errors=1
 fi
 if [[ "${RESTART_RELEASE}" == "1" && "${FROM_STAGE}" -gt 3 ]]; then
@@ -293,6 +331,9 @@ export CSE_GROUP="${CSE_GROUP_OVERRIDE:-${CSE_GROUP:-$(id -gn)}}"
 # (wrong compiler constraints, old versions, etc.) silently override the
 # environment's authoritative packages.yaml.
 export SPACK_DISABLE_LOCAL_CONFIG=1
+export RENDER_ONLY
+export SKIP_RENDER
+export STAGE4_BUILD_MODE
 
 # ------------------------------------------------------------------
 # Auto-detect module system (or use override)
@@ -522,11 +563,52 @@ run_stage() {
     echo ""
 }
 
+if [[ "${SKIP_RENDER}" == "1" && "${FROM_STAGE}" -lt 4 ]]; then
+    FROM_STAGE=4
+fi
+
 run_stage 1 stage1_profile.sh
 run_stage 2 stage2_spack.sh
 run_stage 3 stage3_externals.sh
-run_stage 4 stage4_build.sh
-run_stage 5 stage5_modules.sh
+
+if [[ "${RENDER_ONLY}" == "1" ]]; then
+    # Render config.yaml, modules.yaml, spack.yaml without calling spack
+    echo "--- render-only: rendering config.yaml, modules.yaml, spack.yaml..."
+    _RENDER_ARGS=(
+        --variant   "${VARIANT}"
+        --shared-path "${SHARED_PATH}"
+        --release   "${RELEASE}"
+    )
+    if [[ -n "${PROFILE_FILE:-}" && -f "${PROFILE_FILE}" ]]; then
+        _RENDER_ARGS+=(--profile "${PROFILE_FILE}")
+    fi
+    _VARIANT_ENV_DIR="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/env"
+    if [[ "${DRY_RUN}" == "1" ]]; then
+        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
+            --template "${REPO_ROOT}/templates/config.yaml.j2"  --dry-run
+        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
+            --template "${REPO_ROOT}/templates/modules.yaml.j2" --dry-run
+        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
+            --template "${REPO_ROOT}/templates/spack.yaml.j2"   --dry-run
+    else
+        umask 002
+        mkdir -p "${_VARIANT_ENV_DIR}"
+        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
+            --template "${REPO_ROOT}/templates/config.yaml.j2" \
+            --output "${_VARIANT_ENV_DIR}/config.yaml"
+        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
+            --template "${REPO_ROOT}/templates/modules.yaml.j2" \
+            --output "${_VARIANT_ENV_DIR}/modules.yaml"
+        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
+            --template "${REPO_ROOT}/templates/spack.yaml.j2" \
+            --output "${_VARIANT_ENV_DIR}/spack.yaml"
+        echo "--- render-only: all YAML written to ${_VARIANT_ENV_DIR}"
+        echo "--- render-only: run  spack -e ${_VARIANT_ENV_DIR} concretize  to continue"
+    fi
+else
+    run_stage 4 stage4_build.sh
+    run_stage 5 stage5_modules.sh
+fi
 
 echo "========================================================"
 if [[ ${DRY_RUN} == 1 ]]; then

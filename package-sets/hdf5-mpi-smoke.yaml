@@ -4,7 +4,7 @@ openssl:
   recommended_package_set: "hdf5-mpi-smoke-legacy-openssl"
   reason: "The reduced MPI smoke path still uses the default PMIx-based stacks."
 variants:
-  v1-openmpi:
+  gcc-openmpi:
     mpi_provider: openmpi
     specs:
       - "openmpi@5.0.5 fabrics=auto"
@@ -13,7 +13,7 @@ variants:
       mpi:
         - "+mpi"
         - "openmpi"
-  v2-mpich:
+  gcc-mpich:
     mpi_provider: mpich
     specs:
       - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix ~hydra +slurm"
@@ -22,3 +22,11 @@ variants:
       mpi:
         - "+mpi"
         - "mpich"
+  cce-craympich:
+    mpi_provider: cray-mpich
+    specs:
+      - "hdf5@1.14.4 +mpi +fortran +cxx +hl"
+    views:
+      mpi:
+        - "+mpi"
+        - "cray-mpich"

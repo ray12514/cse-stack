@@ -2,7 +2,7 @@ description: Expanded science package set for sites whose external OpenSSL is ol
 openssl:
   min_version: "1.1.1"
 variants:
-  v1-openmpi:
+  gcc-openmpi:
     mpi_provider: openmpi
     specs:
       - "openmpi@4.1.6 fabrics=auto"
@@ -56,7 +56,7 @@ variants:
         - "python"
         - "py-numpy"
         - "miniforge3"
-  v2-mpich:
+  gcc-mpich:
     mpi_provider: mpich
     specs:
       - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix ~hydra +slurm"

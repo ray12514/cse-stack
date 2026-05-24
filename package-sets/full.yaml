@@ -4,7 +4,7 @@ openssl:
   recommended_package_set: "full-legacy-openssl"
   reason: "The default MPI/PMIx stack expects a site OpenSSL 3.x line."
 variants:
-  v1-openmpi:
+  gcc-openmpi:
     mpi_provider: openmpi
     specs:
       - "openmpi@5.0.5 fabrics=auto"
@@ -25,7 +25,7 @@ variants:
         - "netcdf-c~mpi"
         - "netcdf-fortran ^netcdf-c~mpi"
         - "netcdf-cxx4 ^netcdf-c~mpi"
-  v2-mpich:
+  gcc-mpich:
     mpi_provider: mpich
     specs:
       - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix ~hydra +slurm"

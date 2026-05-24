@@ -302,21 +302,31 @@ class SystemProfile:
         return f"/opt/cray/pe/gcc/{ver}/snos"  # TODO: confirm path
 
     def cray_mpich_version(self) -> str:
-        # TODO: confirm version from actual Cray system (filled in by Stage 1)
+        override = self._env_first("CSE_CRAY_MPICH_VERSION_OVERRIDE")
+        if override:
+            return override
+        ext = self._compiler_external("craympich", "version")
+        if ext:
+            return ext
         mpi_mod = self._get("vendor_substrate", "mpi_module", default="")
         if mpi_mod:
             return self._version_from_module_string(mpi_mod)
-        ver = self._loaded_module_version("cray-mpich/")
-        return ver or "8.1.30"  # TODO: placeholder
+        return self._loaded_module_version("cray-mpich/") or ""
 
     def cray_mpich_prefix(self) -> str:
-        ver = self.cray_mpich_version()
+        override = self._env_first("CSE_CRAY_MPICH_PREFIX_OVERRIDE")
+        if override:
+            return override
+        ext = self._compiler_external("craympich", "prefix")
+        if ext:
+            return ext
         prefix = self._loaded_module_prefix("cray-mpich/")
         if prefix:
             return prefix
+        ver = self.cray_mpich_version()
         gcc_ver = self.prgenv_gcc_version()
         gcc_major = gcc_ver.split(".")[0]
-        return f"/opt/cray/pe/mpich/{ver}/ofi/gnu/{gcc_major}.{gcc_ver.split('.')[1]}"  # TODO: confirm
+        return f"/opt/cray/pe/mpich/{ver}/ofi/gnu/{gcc_major}.{gcc_ver.split('.')[1]}" if ver else ""
 
     def cray_libsci_version(self) -> str:
         # TODO: confirm version from actual Cray system
@@ -463,3 +473,44 @@ class SystemProfile:
         if arch in ("x86_64", "x86_64_v3", "unknown"):
             return "zen3"  # TODO: confirm against actual Cray node CPU
         return arch
+
+    # ------------------------------------------------------------------
+    # Non-GCC compiler externals (CCE, AOCC, NVHPC, ROCmCC, Intel)
+    # Populated by clusterinspector when the relevant PrgEnv/module is loaded.
+    # All accessors check an override env var first, then the profile, then "".
+    # ------------------------------------------------------------------
+
+    def _compiler_external(self, key: str, field: str) -> str:
+        return (
+            self._get("vendor_substrate", "compiler_externals", key, field, default="") or ""
+        )
+
+    def cce_version(self) -> str:
+        return self._env_first("CSE_CCE_VERSION_OVERRIDE") or self._compiler_external("cce", "version")
+
+    def cce_prefix(self) -> str:
+        return self._env_first("CSE_CCE_PREFIX_OVERRIDE") or self._compiler_external("cce", "prefix")
+
+    def aocc_version(self) -> str:
+        return self._env_first("CSE_AOCC_VERSION_OVERRIDE") or self._compiler_external("aocc", "version")
+
+    def aocc_prefix(self) -> str:
+        return self._env_first("CSE_AOCC_PREFIX_OVERRIDE") or self._compiler_external("aocc", "prefix")
+
+    def nvhpc_version(self) -> str:
+        return self._env_first("CSE_NVHPC_VERSION_OVERRIDE") or self._compiler_external("nvhpc", "version")
+
+    def nvhpc_prefix(self) -> str:
+        return self._env_first("CSE_NVHPC_PREFIX_OVERRIDE") or self._compiler_external("nvhpc", "prefix")
+
+    def rocmcc_version(self) -> str:
+        return self._env_first("CSE_ROCMCC_VERSION_OVERRIDE") or self._compiler_external("rocmcc", "version")
+
+    def rocmcc_prefix(self) -> str:
+        return self._env_first("CSE_ROCMCC_PREFIX_OVERRIDE") or self._compiler_external("rocmcc", "prefix")
+
+    def intel_version(self) -> str:
+        return self._env_first("CSE_INTEL_VERSION_OVERRIDE") or self._compiler_external("intel", "version")
+
+    def intel_prefix(self) -> str:
+        return self._env_first("CSE_INTEL_PREFIX_OVERRIDE") or self._compiler_external("intel", "prefix")

@@ -93,7 +93,9 @@ def load_package_set(repo_root: Path, package_set: str, variant: str, ctx: dict[
     selected = _format_value(variants[variant], ctx)
     selected["name"] = package_set
     selected["description"] = data.get("description", "")
-    selected["openssl_policy"] = _format_value(data.get("openssl", {}), ctx)
+    openssl_data = _format_value(data.get("openssl", {}), ctx)
+    selected["openssl_policy"] = openssl_data
+    selected["openssl_mode"] = str(openssl_data.get("mode", "external")).strip()
     return selected
 
 
@@ -107,6 +109,8 @@ def validate_openssl_policy(
         "mpich_version": mpich_version or os.environ.get("MPICH_VERSION", "4.2.2"),
     }
     selected = load_package_set(repo_root, package_set, variant, ctx)
+    if selected.get("openssl_mode") == "spack":
+        return (True, f"OpenSSL preflight skipped: package set {package_set!r} uses Spack-built OpenSSL")
     openssl_version, openssl_prefix = detect_system_openssl()
     if not openssl_version:
         return (
@@ -143,7 +147,8 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate cse-stack package-set compatibility")
     parser.add_argument("--repo-root", required=True, dest="repo_root")
     parser.add_argument("--package-set", required=True, dest="package_set")
-    parser.add_argument("--variant", required=True, choices=["v1-openmpi", "v2-mpich"])
+    parser.add_argument("--variant", required=True,
+                        help="Variant slug: <compiler>-<mpi> (e.g. gcc-openmpi, cce-craympich)")
     parser.add_argument("--mpich-version", default="")
     return parser.parse_args()
 

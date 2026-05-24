@@ -1,8 +1,12 @@
 spack:
+  include:: []
   include:
     - ./packages.yaml
     - ./config.yaml
     - ./modules.yaml
+{% if toolchains_yaml_exists %}
+    - ./toolchains.yaml
+{% endif %}
 {% if mirrors_yaml_enabled %}
     # Written by stage 4 when --mirror-path or --buildcache-uri is set.
     - ./mirrors.yaml

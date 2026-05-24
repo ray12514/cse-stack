@@ -1,16 +1,16 @@
--- cse-init/{{ "openmpi" if is_openmpi else "mpich" }}.lua
--- Activation module for the CSE {{ "OpenMPI" if is_openmpi else "MPICH" }} variant.
+-- cse-init/{{ mpi_lane }}.lua
+-- Activation module for the CSE {{ compiler_upper }}/{{ mpi_label }} variant.
 -- Rendered by Stage 5 with literal install paths.
 
 help([[
-The CSE {{ "OpenMPI" if is_openmpi else "MPICH" }} variant ({{ variant }}).
+CSE {{ compiler_upper }}/{{ mpi_label }} variant ({{ variant }}).
 After loading this module, packages are available under the cse/* namespace.
 Try:  module avail cse
       module load {{ mpi_module }} {{ hdf5_mpi_module }} {{ netcdf_fortran_mpi_module }}
 ]])
 
-whatis("Name        : cse-init/{{ "openmpi" if is_openmpi else "mpich" }}")
-whatis("Description : Activates the CSE {{ "OpenMPI" if is_openmpi else "MPICH" }} variant for release {{ CSE_RELEASE }}")
+whatis("Name        : cse-init/{{ mpi_lane }}")
+whatis("Description : Activates the CSE {{ compiler_upper }}/{{ mpi_label }} variant for release {{ CSE_RELEASE }}")
 
 family("cse_init")
 
@@ -23,6 +23,7 @@ local gcc_root    = "{{ cse_gcc_root }}"
 
 setenv("CSE_RELEASE", cse_release)
 setenv("CSE_VARIANT", variant)
+setenv("CSE_COMPILER", "{{ compiler_upper }}")
 setenv("CSE_MPI", "{{ mpi_provider }}")
 setenv("CSE_ROOT", cse_root)
 setenv("CSE_GCC_ROOT", gcc_root)

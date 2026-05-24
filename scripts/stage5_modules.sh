@@ -22,6 +22,7 @@ SITE_MODULE_PATH="${SITE_MODULE_PATH:-${SHARED_PATH}/cse/modulefiles}"
 export SPACK_DISABLE_LOCAL_CONFIG=1
 export SPACK_USER_CACHE_PATH="${SHARED_PATH}/cse/cache/spack"
 export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
+export SPACK_USER_CONFIG_PATH="/dev/null"
 
 render_stage5_template() {
     local tpl="$1" out="$2"

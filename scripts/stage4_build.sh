@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Stage 4: Render remaining templates and run spack concretize + install.
 #
+# Modes (mutually exclusive):
+#   (default)  concretize + fetch + install in one shot (original behaviour)
+#   --fetch    login-node step: concretize + spack fetch only; no spack install
+#   --build    compute-node step: install only using the existing spack.lock;
+#              skips concretize and fetch; requires --fetch to have run first
+#
 # Environment:
 #   SHARED_PATH, CSE_RELEASE, CSE_VARIANT  — set by deploy.sh / activate.sh
 #   CSE_GROUP                              — owning group for install tree (default: caller's primary group)
@@ -8,6 +14,35 @@
 #   SPACK_ROOT                             — set by Stage 2
 #   DRY_RUN                                — "1" for dry-run
 set -euo pipefail
+
+# Resolve build mode: prefer explicit env var (set by deploy.sh --fetch/--build),
+# then fall back to parsing script's own positional args (direct invocation).
+if [[ -n "${STAGE4_BUILD_MODE:-}" ]]; then
+    BUILD_MODE="${STAGE4_BUILD_MODE}"
+else
+    _want_fetch=0
+    _want_build=0
+    _remaining=()
+    for _arg in "$@"; do
+        case "${_arg}" in
+            --fetch) _want_fetch=1 ;;
+            --build) _want_build=1 ;;
+            *)       _remaining+=("${_arg}") ;;
+        esac
+    done
+    set -- "${_remaining[@]+"${_remaining[@]}"}"
+    if [[ "${_want_fetch}" == "1" && "${_want_build}" == "1" ]]; then
+        echo "ERROR: --fetch and --build are mutually exclusive" >&2
+        exit 1
+    fi
+    if [[ "${_want_fetch}" == "1" ]]; then
+        BUILD_MODE="fetch"
+    elif [[ "${_want_build}" == "1" ]]; then
+        BUILD_MODE="build"
+    else
+        BUILD_MODE="full"
+    fi
+fi
 
 : "${SHARED_PATH:?}"
 : "${CSE_RELEASE:?}"
@@ -24,6 +59,7 @@ LOCKFILE_PATH="${AUTHORITATIVE_LOCKFILE:-}"
 export SPACK_DISABLE_LOCAL_CONFIG=1
 export SPACK_USER_CACHE_PATH="${SHARED_PATH}/cse/cache/spack"
 export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
+export SPACK_USER_CONFIG_PATH="/dev/null"
 
 _render() {
     local tpl="$1" out="$2"
@@ -99,7 +135,7 @@ if len(duplicates) > 20:
 }
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    echo "[dry-run] Stage 4: would render config.yaml, modules.yaml, spack.yaml"
+    echo "[dry-run] Stage 4 (mode=${BUILD_MODE}): would render config.yaml, modules.yaml, spack.yaml"
     _render "config.yaml.j2"  "${VARIANT_ENV_DIR}/config.yaml"
     _render "modules.yaml.j2" "${VARIANT_ENV_DIR}/modules.yaml"
     _render "spack.yaml.j2"   "${VARIANT_ENV_DIR}/spack.yaml"
@@ -111,20 +147,26 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     fi
     echo "[dry-run] Stage 4: would run:"
     echo "[dry-run]   spack env activate -d ${VARIANT_ENV_DIR}"
-    if [[ -n "${LOCKFILE_PATH}" ]]; then
-        echo "[dry-run]   cp ${LOCKFILE_PATH} ${VARIANT_ENV_DIR}/spack.lock"
-        echo "[dry-run]   # authoritative lockfile present; skip concretize"
-    else
-        echo "[dry-run]   remove stale Spack views under ${VARIANT_DIR}/views/{modules,mpi,serial}"
-        echo "[dry-run]   spack concretize --fresh"
-    fi
-    echo "[dry-run]   detect duplicate concrete name/version specs for hashed view fallback"
-    if [[ "${CSE_FETCH_PREFLIGHT:-0}" == "1" ]]; then
-        echo "[dry-run]   spack python ${REPO_ROOT}/scripts/lib/fetch_preflight.py --timeout ${CSE_PREFLIGHT_TIMEOUT:-5}${CSE_PREFLIGHT_STRICT:+ --strict}"
-        echo "[dry-run]   (preflight: HEAD-check all source URLs; unreachable = warning${CSE_PREFLIGHT_STRICT:+, or error with --preflight-strict})"
-    fi
-    if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
-        echo "[dry-run]   spack mirror list"
+    if [[ "${BUILD_MODE}" != "build" ]]; then
+        if [[ -n "${LOCKFILE_PATH}" ]]; then
+            echo "[dry-run]   cp ${LOCKFILE_PATH} ${VARIANT_ENV_DIR}/spack.lock"
+            echo "[dry-run]   # authoritative lockfile present; skip concretize"
+        else
+            echo "[dry-run]   remove stale Spack views under ${VARIANT_DIR}/views/{modules,mpi,serial}"
+            echo "[dry-run]   spack concretize --fresh"
+        fi
+        echo "[dry-run]   detect duplicate concrete name/version specs for hashed view fallback"
+        if [[ "${CSE_FETCH_PREFLIGHT:-0}" == "1" ]]; then
+            echo "[dry-run]   spack python ${REPO_ROOT}/scripts/lib/fetch_preflight.py --timeout ${CSE_PREFLIGHT_TIMEOUT:-5}${CSE_PREFLIGHT_STRICT:+ --strict}"
+            echo "[dry-run]   (preflight: HEAD-check all source URLs; unreachable = warning${CSE_PREFLIGHT_STRICT:+, or error with --preflight-strict})"
+        fi
+        if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
+            echo "[dry-run]   spack mirror list"
+        fi
+        if [[ "${BUILD_MODE}" == "fetch" ]]; then
+            echo "[dry-run]   spack fetch -D  # --fetch mode: stop here, no install"
+            return 0 2>/dev/null || exit 0
+        fi
     fi
     echo "[dry-run]   remove stale Spack views under ${VARIANT_DIR}/views/{modules,mpi,serial}"
     if [[ "${SPACK_CACHE_ONLY:-0}" == "1" ]]; then
@@ -182,23 +224,25 @@ variant: ${CSE_VARIANT}
 release: ${CSE_RELEASE}
 EOF
 
-echo "Stage 4: rendering config.yaml, modules.yaml, spack.yaml..."
+echo "Stage 4 (mode=${BUILD_MODE}): rendering config.yaml, modules.yaml, spack.yaml..."
 _render "config.yaml.j2"  "${VARIANT_ENV_DIR}/config.yaml"
 _render "modules.yaml.j2" "${VARIANT_ENV_DIR}/modules.yaml"
 
-if [[ ! -f "${GCC_BOOTSTRAP_YAML}" ]]; then
-    echo "ERROR: missing ${GCC_BOOTSTRAP_YAML}." >&2
-    echo "       Stage 2 must complete successfully before Stage 4 can concretize." >&2
-    exit 1
-fi
+if [[ "${BUILD_MODE}" != "build" ]]; then
+    if [[ ! -f "${GCC_BOOTSTRAP_YAML}" ]]; then
+        echo "ERROR: missing ${GCC_BOOTSTRAP_YAML}." >&2
+        echo "       Stage 2 must complete successfully before Stage 4 can concretize." >&2
+        exit 1
+    fi
 
-if [[ "${NETWORK_MODE}" != "online" && -z "${MIRROR_PATH:-}" ]]; then
-    echo "ERROR: network mode ${NETWORK_MODE} requires a local source mirror." >&2
-    exit 1
-fi
-if [[ "${NETWORK_MODE}" != "online" && -z "${LOCKFILE_PATH}" ]]; then
-    echo "ERROR: network mode ${NETWORK_MODE} requires an authoritative lockfile." >&2
-    exit 1
+    if [[ "${NETWORK_MODE}" != "online" && -z "${MIRROR_PATH:-}" ]]; then
+        echo "ERROR: network mode ${NETWORK_MODE} requires a local source mirror." >&2
+        exit 1
+    fi
+    if [[ "${NETWORK_MODE}" != "online" && -z "${LOCKFILE_PATH}" ]]; then
+        echo "ERROR: network mode ${NETWORK_MODE} requires an authoritative lockfile." >&2
+        exit 1
+    fi
 fi
 
 # Write mirrors.yaml if a source mirror or build cache was provided
@@ -221,7 +265,7 @@ if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
 fi
 _render "spack.yaml.j2"   "${VARIANT_ENV_DIR}/spack.yaml"
 
-# Activate Spack — both variants use the shared site Spack instance.
+# Activate Spack — all variants use the shared site Spack instance.
 if [[ -z "${SPACK_ROOT:-}" ]]; then
     SPACK_ROOT="${SHARED_PATH}/cse/spack-site"
 fi
@@ -242,26 +286,45 @@ if [[ -n "${MIRROR_PATH:-}" || -n "${BUILDCACHE_URI:-}" ]]; then
     echo "Stage 4: active Spack mirrors:"
     spack mirror list || true
 fi
-reset_spack_views
 
-if [[ -n "${LOCKFILE_PATH}" ]]; then
-    echo "Stage 4: reusing authoritative lockfile ${LOCKFILE_PATH}..."
-    cp "${LOCKFILE_PATH}" "${VARIANT_ENV_DIR}/spack.lock"
-else
-    if [[ -f "${VARIANT_ENV_DIR}/spack.lock" ]]; then
-        rm -f "${VARIANT_ENV_DIR}/spack.lock"
+if [[ "${BUILD_MODE}" != "build" ]]; then
+    reset_spack_views
+
+    if [[ -n "${LOCKFILE_PATH}" ]]; then
+        echo "Stage 4: reusing authoritative lockfile ${LOCKFILE_PATH}..."
+        cp "${LOCKFILE_PATH}" "${VARIANT_ENV_DIR}/spack.lock"
+    else
+        if [[ -f "${VARIANT_ENV_DIR}/spack.lock" ]]; then
+            rm -f "${VARIANT_ENV_DIR}/spack.lock"
+        fi
+        echo "Stage 4: concretizing..."
+        spack concretize --fresh
     fi
-    echo "Stage 4: concretizing..."
-    spack concretize --fresh
+
+    report_duplicate_name_versions
+
+    if [[ "${CSE_FETCH_PREFLIGHT:-0}" == "1" ]]; then
+        echo "Stage 4: running fetch preflight (HEAD-checking all source URLs)..."
+        _PREFLIGHT_ARGS=(--timeout "${CSE_PREFLIGHT_TIMEOUT:-5}")
+        [[ "${CSE_PREFLIGHT_STRICT:-0}" == "1" ]] && _PREFLIGHT_ARGS+=(--strict)
+        spack python "${REPO_ROOT}/scripts/lib/fetch_preflight.py" "${_PREFLIGHT_ARGS[@]}"
+    fi
+
+    if [[ "${BUILD_MODE}" == "fetch" ]]; then
+        echo "Stage 4 (--fetch): fetching all sources to local cache..."
+        spack fetch -D
+        echo "Stage 4 (--fetch): done. Run with --build on a compute node to install."
+        exit 0
+    fi
 fi
 
-report_duplicate_name_versions
-
-if [[ "${CSE_FETCH_PREFLIGHT:-0}" == "1" ]]; then
-    echo "Stage 4: running fetch preflight (HEAD-checking all source URLs)..."
-    _PREFLIGHT_ARGS=(--timeout "${CSE_PREFLIGHT_TIMEOUT:-5}")
-    [[ "${CSE_PREFLIGHT_STRICT:-0}" == "1" ]] && _PREFLIGHT_ARGS+=(--strict)
-    spack python "${REPO_ROOT}/scripts/lib/fetch_preflight.py" "${_PREFLIGHT_ARGS[@]}"
+if [[ "${BUILD_MODE}" == "build" ]]; then
+    if [[ ! -f "${VARIANT_ENV_DIR}/spack.lock" ]]; then
+        echo "ERROR: --build mode requires an existing spack.lock in ${VARIANT_ENV_DIR}." >&2
+        echo "       Run stage4_build.sh --fetch first (on a login node with internet access)." >&2
+        exit 1
+    fi
+    echo "Stage 4 (--build): using existing lockfile ${VARIANT_ENV_DIR}/spack.lock"
 fi
 
 echo "Stage 4: installing (this will take a while on first run)..."

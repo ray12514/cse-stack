@@ -1,0 +1,35 @@
+# Toolchain policy: {{ compiler_family }}-{{ mpi_lane }}
+# Rendered by cse-stack for {{ CSE_RELEASE }}/{{ variant }}.
+# Included by spack.yaml via include:; do not edit by hand.
+#
+# Purpose: pins compiler + MPI constraints for non-GCC PE compilers so that
+# Spack concretization selects the correct external. GCC is resolved via
+# gcc-compilers.yaml (written by stage 2); no require: needed for GCC.
+packages:
+  all:
+{% if is_cce and cce_version %}
+    require:
+      - "%cce@{{ cce_version }}"
+{% elif is_aocc and aocc_version %}
+    require:
+      - "%aocc@{{ aocc_version }}"
+{% elif is_nvhpc and nvhpc_version %}
+    require:
+      - "%nvhpc@{{ nvhpc_version }}"
+{% elif is_rocmcc and rocmcc_version %}
+    require:
+      - "%rocmcc@{{ rocmcc_version }}"
+{% elif is_intel and intel_version %}
+    require:
+      - "%intel-oneapi-compilers@{{ intel_version }}"
+{% endif %}
+{% if not is_serial %}
+    providers:
+      mpi: [{{ mpi_provider }}]
+{% endif %}
+{% if is_craympich and cray_mpich_version %}
+  cray-mpich:
+    buildable: false
+    require:
+      - "cray-mpich@{{ cray_mpich_version }}"
+{% endif %}

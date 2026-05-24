@@ -1,0 +1,25 @@
+description: Reduced HDF5+MPI smoke set where Spack builds its own OpenSSL.
+# Use when the site OpenSSL is too old or unsuitable (e.g. forces an undesirable
+# OpenMPI version). Setting openssl.mode: spack bypasses the forced external and
+# lets Spack resolve OpenSSL from source as a normal dependency.
+openssl:
+  mode: spack
+variants:
+  gcc-openmpi:
+    mpi_provider: openmpi
+    specs:
+      - "openmpi@5.0.5 fabrics=auto"
+      - "hdf5@1.14.4 +mpi +fortran +cxx +hl"
+    views:
+      mpi:
+        - "+mpi"
+        - "openmpi"
+  gcc-mpich:
+    mpi_provider: mpich
+    specs:
+      - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix ~hydra +slurm"
+      - "hdf5@1.14.4 +mpi +fortran +cxx +hl ^mpich@{mpich_version}"
+    views:
+      mpi:
+        - "+mpi"
+        - "mpich"

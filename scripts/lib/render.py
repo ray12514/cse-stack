@@ -38,6 +38,44 @@ import yaml  # noqa: E402
 
 _SYSTEM_PREFIXES = ("/usr", "/usr/local")
 
+_KNOWN_COMPILERS = frozenset({"gcc", "cce", "aocc", "nvhpc", "rocmcc", "intel"})
+_KNOWN_MPI_LANES = frozenset({"openmpi", "mpich", "craympich", "impi", "sitempi", "serial"})
+_LEGACY_ALIASES: dict[str, str] = {
+    "v1-openmpi": "gcc-openmpi",
+    "v2-mpich":   "gcc-mpich",
+}
+_MPI_PROVIDER_DEFAULTS: dict[str, str] = {
+    "openmpi":   "openmpi",
+    "mpich":     "mpich",
+    "craympich": "cray-mpich",
+    "impi":      "intel-mpi",
+    "sitempi":   "openmpi",
+    "serial":    "",
+}
+
+
+def _parse_variant(variant: str) -> tuple[str, str]:
+    """Split a variant slug into (compiler_family, mpi_lane).
+
+    "gcc-openmpi"   → ("gcc",  "openmpi")
+    "cce-craympich" → ("cce",  "craympich")
+    "gcc-serial"    → ("gcc",  "serial")
+    """
+    parts = variant.split("-", 1)
+    return parts[0].lower(), (parts[1].lower() if len(parts) > 1 else "serial")
+
+
+def _resolve_variant(variant: str) -> str:
+    """Map legacy variant names to their canonical equivalents."""
+    if variant in _LEGACY_ALIASES:
+        new_name = _LEGACY_ALIASES[variant]
+        print(
+            f"WARNING: --variant {variant!r} is deprecated; use {new_name!r}.",
+            file=sys.stderr,
+        )
+        return new_name
+    return variant
+
 
 def _query_cmd(*cmd) -> str:
     try:
@@ -342,7 +380,7 @@ def _build_module_load_rules(
 
 def _validate_v2_mpich_slurm_externals(ctx: dict) -> None:
     """Fail before concretization when Slurm MPICH needs site externals."""
-    if not ctx.get("is_mpich") or ctx.get("scheduler_type") != "slurm":
+    if ctx.get("mpi_lane") != "mpich" or ctx.get("scheduler_type") != "slurm":
         return
     if not _root_specs(ctx.get("expanded_spack_specs", []), "mpich"):
         return
@@ -398,12 +436,27 @@ def _build_context(profile: SystemProfile, variant: str,
     _curl_ver, _curl_prefix = _detect_curl()
     _perl_ver, _perl_prefix = _detect_perl()
     _python_ver, _python_prefix = _detect_python()
+    compiler_family, mpi_lane = _parse_variant(variant)
     ctx: dict = {
         "variant": variant,
         "SHARED_PATH": shared_path,
         "CSE_RELEASE": release,
-        "is_openmpi": variant == "v1-openmpi",
-        "is_mpich":   variant == "v2-mpich",
+        # Compiler and MPI identity — primary way to branch in templates
+        "compiler_family": compiler_family,
+        "mpi_lane":        mpi_lane,
+        "compiler_upper":  compiler_family.upper(),
+        "mpi_label":       mpi_lane if mpi_lane == "serial" else f"mpi-{mpi_lane}",
+        # Derived booleans — kept for template backward compatibility
+        "is_openmpi":  mpi_lane == "openmpi",
+        "is_mpich":    mpi_lane in ("mpich", "craympich"),
+        "is_craympich": mpi_lane == "craympich",
+        "is_serial":   mpi_lane == "serial",
+        "is_gcc":      compiler_family == "gcc",
+        "is_cce":      compiler_family == "cce",
+        "is_aocc":     compiler_family == "aocc",
+        "is_nvhpc":    compiler_family == "nvhpc",
+        "is_rocmcc":   compiler_family == "rocmcc",
+        "is_intel":    compiler_family == "intel",
         "openssl_version": _ssl_ver,   "openssl_prefix": _ssl_prefix,
         "curl_version":    _curl_ver,  "curl_prefix":    _curl_prefix,
         "perl_version":    _perl_ver,  "perl_prefix":    _perl_prefix,
@@ -443,6 +496,20 @@ def _build_context(profile: SystemProfile, variant: str,
         "pmix_version":      profile.pmix_version(),
         "pmix_prefix":       profile.pmix_prefix(),
         "pmix_module":       profile.pmix_module(),
+        # Non-GCC compiler externals — populated when PrgEnv module is loaded at Stage 1
+        "cce_version":    profile.cce_version(),
+        "cce_prefix":     profile.cce_prefix(),
+        "aocc_version":   profile.aocc_version(),
+        "aocc_prefix":    profile.aocc_prefix(),
+        "nvhpc_version":  profile.nvhpc_version(),
+        "nvhpc_prefix":   profile.nvhpc_prefix(),
+        "rocmcc_version": profile.rocmcc_version(),
+        "rocmcc_prefix":  profile.rocmcc_prefix(),
+        "intel_version":  profile.intel_version(),
+        "intel_prefix":   profile.intel_prefix(),
+        # cray-mpich external (also used by gcc-craympich, nvhpc-craympich, etc.)
+        "cray_mpich_version": profile.cray_mpich_version(),
+        "cray_mpich_prefix":  profile.cray_mpich_prefix(),
     }
     # variant_slug == variant name — no shortening needed
     ctx["variant_slug"] = variant
@@ -465,6 +532,9 @@ def _build_context(profile: SystemProfile, variant: str,
     ctx["gcc_compilers_yaml_exists"] = os.path.exists(
         os.path.join(variant_dir, "gcc-compilers.yaml")
     )
+    ctx["toolchains_yaml_exists"] = os.path.exists(
+        os.path.join(variant_dir, "env", "toolchains.yaml")
+    )
     ctx["mirrors_yaml_enabled"] = bool(
         os.environ.get("MIRROR_PATH")
         or os.environ.get("BUILDCACHE_URI")
@@ -475,8 +545,9 @@ def _build_context(profile: SystemProfile, variant: str,
     package_set_data = load_package_set(Path(__file__).parent.parent.parent, package_set, variant, ctx)
     ctx["package_set_data"] = package_set_data
     ctx["mpi_provider"] = package_set_data.get(
-        "mpi_provider", "openmpi" if variant == "v1-openmpi" else "mpich"
+        "mpi_provider", _MPI_PROVIDER_DEFAULTS.get(mpi_lane, "openmpi")
     )
+    ctx["openssl_mode"] = package_set_data.get("openssl_mode", "external")
     ctx["spack_specs"] = package_set_data.get("specs", [])
     ctx["spack_spec_entries"] = [
         _format_spack_spec_entry(spec)
@@ -560,8 +631,7 @@ def _load_profile(profile_path: Optional[str], variant: str) -> SystemProfile:
         "vendor_substrate": {"prgenv_module": "", "mpi_module": "",
                               "source": "unknown"},
     }
-    if variant == "v2-mpich":
-        # Inject Cray signals so the template gets plausible values.
+    if _parse_variant(variant)[1] == "craympich":
         stub["system"]["platform_class"] = "cray"
         stub["vendor_substrate"]["source"] = "cray"
     return SystemProfile(stub)
@@ -645,7 +715,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--output", default="", help="Output file path (omit to print to stdout)")
     p.add_argument("--profile", default="", help="Path to Cluster Inspector YAML profile")
     p.add_argument("--variant", required=True,
-                   choices=["v1-openmpi", "v2-mpich"])
+                   help="Variant slug: <compiler>-<mpi> or <compiler>-serial "
+                        "(e.g. gcc-openmpi, gcc-mpich, cce-craympich, aocc-openmpi). "
+                        "Legacy aliases: v1-openmpi=gcc-openmpi, v2-mpich=gcc-mpich.")
     p.add_argument("--shared-path", required=True, dest="shared_path")
     p.add_argument("--release", required=True)
     p.add_argument("--dry-run", action="store_true", dest="dry_run")
@@ -660,6 +732,22 @@ def _parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args()
+    args.variant = _resolve_variant(args.variant)
+    _cf, _ml = _parse_variant(args.variant)
+    if _cf not in _KNOWN_COMPILERS:
+        print(
+            f"ERROR: unknown compiler in --variant {args.variant!r}: {_cf!r}. "
+            f"Known: {', '.join(sorted(_KNOWN_COMPILERS))}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if _ml not in _KNOWN_MPI_LANES:
+        print(
+            f"ERROR: unknown MPI lane in --variant {args.variant!r}: {_ml!r}. "
+            f"Known: {', '.join(sorted(_KNOWN_MPI_LANES))}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     if args.list:
         sys.exit(emit_context_list(
             list_name=args.list,

@@ -8,6 +8,7 @@ packages:
       write: group
       group: {{ cse_group }}
 
+{% if openssl_mode == "external" %}
   # OS-level OpenSSL is always site-managed. Deploy preflight validates that
   # the detected version satisfies the selected package set before concretize.
   openssl:
@@ -16,6 +17,7 @@ packages:
     externals:
       - spec: openssl@{{ openssl_version }}
         prefix: {{ openssl_prefix }}
+{% endif %}
 {% endif %}
   curl:
     buildable: true
@@ -79,6 +81,60 @@ packages:
 {% if pmix_module %}
         modules: [{{ pmix_module }}]
 {% endif %}
+{% endif %}
+
+{% if is_cce and cce_version %}
+  # CCE — detected from CRAY_CC_VERSION / CRAY_PE_CCE_FIXUP_PREFIX set by PrgEnv-cray.
+  cce:
+    buildable: false
+    externals:
+      - spec: cce@{{ cce_version }} languages='c,c++,fortran'
+        prefix: {{ cce_prefix }}
+{% endif %}
+
+{% if is_craympich and cray_mpich_version %}
+  # cray-mpich — always external; performance depends on Cray Slingshot HSN.
+  cray-mpich:
+    buildable: false
+    externals:
+      - spec: cray-mpich@{{ cray_mpich_version }}
+        prefix: {{ cray_mpich_prefix }}
+{% endif %}
+
+{% if is_aocc and aocc_version %}
+  # AOCC — detected from AOCC_VERSION / AOCC_HOME set by PrgEnv-aocc or module load aocc.
+  aocc:
+    buildable: false
+    externals:
+      - spec: aocc@{{ aocc_version }} languages='c,c++,fortran'
+        prefix: {{ aocc_prefix }}
+{% endif %}
+
+{% if is_nvhpc and nvhpc_version %}
+  # NVHPC — detected from NVHPC_VERSION / NVHPC_ROOT set by module load nvhpc.
+  nvhpc:
+    buildable: false
+    externals:
+      - spec: nvhpc@{{ nvhpc_version }} languages='c,c++,fortran,cuda'
+        prefix: {{ nvhpc_prefix }}
+{% endif %}
+
+{% if is_rocmcc and rocmcc_version %}
+  # ROCmCC — detected from ROCM_VERSION / ROCM_PATH set by module load rocm.
+  rocmcc:
+    buildable: false
+    externals:
+      - spec: rocmcc@{{ rocmcc_version }} languages='c,c++,fortran'
+        prefix: {{ rocmcc_prefix }}
+{% endif %}
+
+{% if is_intel and intel_version %}
+  # Intel oneAPI — detected from ONEAPI_ROOT set by setvars.sh or module load intel.
+  intel-oneapi-compilers:
+    buildable: false
+    externals:
+      - spec: intel-oneapi-compilers@{{ intel_version }}
+        prefix: {{ intel_prefix }}
 {% endif %}
 
 {% if is_mpich and has_cray_pals %}

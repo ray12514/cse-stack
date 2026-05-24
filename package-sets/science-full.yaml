@@ -4,7 +4,7 @@ openssl:
   recommended_package_set: "science-full-legacy-openssl"
   reason: "The expanded science stack follows the default modern MPI/PMIx policy."
 variants:
-  v1-openmpi:
+  gcc-openmpi:
     mpi_provider: openmpi
     specs:
       - "openmpi@5.0.8 fabrics=auto"
@@ -58,7 +58,7 @@ variants:
         - "python"
         - "py-numpy"
         - "miniforge3"
-  v2-mpich:
+  gcc-mpich:
     mpi_provider: mpich
     specs:
       - "mpich@4.3.2 device=ch4 netmod=ofi pmi=pmix ~hydra +slurm"

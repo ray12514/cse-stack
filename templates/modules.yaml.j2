@@ -69,10 +69,7 @@ modules:
 
 {% endfor %}
 
-{% if is_openmpi %}
-      openmpi:
-        autoload: none
-{% else %}
-      mpich:
+{% if mpi_provider %}
+      {{ mpi_provider }}:
         autoload: none
 {% endif %}

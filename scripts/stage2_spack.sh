@@ -111,6 +111,7 @@ _publish_compiler_view() {
 export SPACK_DISABLE_LOCAL_CONFIG=1
 export SPACK_USER_CACHE_PATH="${BOOTSTRAP_ROOT}"
 export SPACK_SYSTEM_CONFIG_PATH="/dev/null"
+export SPACK_USER_CONFIG_PATH="/dev/null"
 
 _run() {
     if [[ "${DRY_RUN:-0}" == "1" ]]; then

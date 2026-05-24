@@ -1,20 +1,19 @@
 #%Module1.0
-# cse-init/{{ "openmpi" if is_openmpi else "mpich" }}
-# Activation module for the CSE {{ "OpenMPI" if is_openmpi else "MPICH" }} variant.
+# cse-init/{{ mpi_lane }}
+# Activation module for the CSE {{ compiler_upper }}/{{ mpi_label }} variant.
 # Rendered by Stage 5 with literal install paths.
 
 proc ModulesHelp {} {
-    puts stderr "The CSE {{ "OpenMPI" if is_openmpi else "MPICH" }} variant ({{ variant }})."
+    puts stderr "CSE {{ compiler_upper }}/{{ mpi_label }} variant ({{ variant }})."
     puts stderr "After loading this module, packages are available under the cse/* namespace."
     puts stderr "Try:  module avail cse"
     puts stderr "      module load {{ mpi_module }} {{ hdf5_mpi_module }} {{ netcdf_fortran_mpi_module }}"
 }
 
-module-whatis "Name        : cse-init/{{ "openmpi" if is_openmpi else "mpich" }}"
-module-whatis "Description : Activates the CSE {{ "OpenMPI" if is_openmpi else "MPICH" }} variant for release {{ CSE_RELEASE }}"
+module-whatis "Name        : cse-init/{{ mpi_lane }}"
+module-whatis "Description : Activates the CSE {{ compiler_upper }}/{{ mpi_label }} variant for release {{ CSE_RELEASE }}"
 
-conflict cse-init/openmpi
-conflict cse-init/mpich
+conflict cse-init
 
 set cse_release "{{ CSE_RELEASE }}"
 set shared_path "{{ SHARED_PATH }}"
@@ -25,6 +24,7 @@ set gcc_root    "{{ cse_gcc_root }}"
 
 setenv CSE_RELEASE  $cse_release
 setenv CSE_VARIANT  $variant
+setenv CSE_COMPILER {{ compiler_upper }}
 setenv CSE_MPI      {{ mpi_provider }}
 setenv CSE_ROOT     $cse_root
 setenv CSE_GCC_ROOT $gcc_root
