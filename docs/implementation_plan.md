@@ -28,37 +28,64 @@ whose external OpenSSL is older than 3.x.
   `${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/env`.
 - Stage 2 bootstraps `gcc@13.3.0` into the Spack store and writes
   `gcc-bootstrap.yaml` next to the environment.
+- Stage 3 renders `packages.yaml` (externals) and `toolchains.yaml` (compiler
+  `require:` constraints for non-GCC PE variants). `spack.yaml` includes
+  `toolchains.yaml` when the file is present.
 - Stage 4 includes `gcc-bootstrap.yaml`; no rendered `packages.yaml` GCC block
   and no legacy `gcc-compilers.yaml` are used.
 - Compiler selection relies entirely on environment isolation:
-  `SPACK_DISABLE_LOCAL_CONFIG=1` and `SPACK_SYSTEM_CONFIG_PATH=/dev/null` prevent
-  user and system compiler configs from leaking in, so `gcc-bootstrap.yaml` is the
-  only compiler source Spack can see. With exactly one registered compiler, the
-  concretizer uses it for every buildable package without any preference directive.
-  `packages:all:compiler:` was tried but is deprecated in Spack v1.0.x and emits
-  warnings; `packages:all:require:` is a hard constraint that breaks noarch
-  packages such as `miniforge3`. Environment isolation is the correct approach for
-  a self-contained Spack deployment.
+  `SPACK_DISABLE_LOCAL_CONFIG=1`, `SPACK_SYSTEM_CONFIG_PATH=/dev/null`, and
+  `SPACK_USER_CONFIG_PATH=/dev/null` prevent system and user compiler configs
+  from leaking in, so `gcc-bootstrap.yaml` is the only compiler source Spack
+  can see for `gcc-*` variants. For non-GCC PE variants, `toolchains.yaml`
+  expresses the compiler constraint via `packages:all:require:`.
+  `packages:all:compiler:` was tried but is deprecated in Spack v1.0.x;
+  `packages:all:require:` on noarch packages causes concretization failures
+  (e.g. `miniforge3`), so the compiler `require:` in `toolchains.yaml` is
+  scoped carefully to only apply where correct.
 - Stage 5 refreshes Spack modules and renders the `cse-init` module with
-  literal release, shared path, module root, and GCC prefix values.
+  literal release, shared path, module root, and compiler prefix values.
 
 ## Variants
 
-| Variant | MPI | Notes |
-|---|---|---|
-| `v1-openmpi` | OpenMPI built by Spack | Generic Linux path |
-| `v2-mpich` | MPICH built by Spack | Uses `device=ch4 netmod=ofi`; Cray libfabric/cray-pals externals are detected from the profile |
+Variants use the `<compiler>-<mpi>` slug format. The compiler token encodes
+which toolchain drives the build; the MPI token encodes the MPI implementation.
 
-The old `v2-cray-integrated` design that used external `cray-mpich` and
-`cray-libsci` is superseded. `CSE_MPICH_SPLICE=1` remains a deferred Phase 2
-idea, not part of the current build path.
+| Variant slug | Compiler | MPI | Notes |
+|---|---|---|---|
+| `gcc-openmpi` | Spack GCC 13 | OpenMPI (Spack-built) | Generic Linux default |
+| `gcc-mpich` | Spack GCC 13 | MPICH (Spack-built) | `device=ch4 netmod=ofi`; Cray libfabric/cray-pals externals detected from profile |
+| `gcc-craympich` | Spack GCC 13 | cray-mpich (external) | Cray PE with GNU compiler |
+| `gcc-serial` | Spack GCC 13 | none | Serial-only lane |
+| `cce-craympich` | CCE (external) | cray-mpich (external) | Cray PE native; requires `PrgEnv-cray` loaded before Stage 1 |
+| `cce-serial` | CCE (external) | none | |
+| `aocc-openmpi` | AOCC (external) | OpenMPI (Spack-built) | AMD CPU clusters; requires `PrgEnv-aocc` or standalone `aocc` module |
+| `nvhpc-openmpi` | NVHPC (external) | OpenMPI (Spack-built) | NVIDIA GPU nodes |
+| `nvhpc-craympich` | NVHPC (external) | cray-mpich (external) | |
+| `rocmcc-craympich` | ROCmCC (external) | cray-mpich (external) | AMD GPU nodes |
+| `intel-impi` | Intel oneAPI (external) | Intel MPI (external) | |
+
+The old `v1-openmpi` and `v2-mpich` slugs are accepted as deprecated aliases
+that print a warning and redirect to `gcc-openmpi` and `gcc-mpich` respectively.
+
+Non-GCC PE variants require the relevant `PrgEnv-*` or compiler module to be
+loaded before Stage 1. The module sets the env vars (`CRAY_CC_VERSION`,
+`AOCC_HOME`, `NVHPC_ROOT`, etc.) that the Cluster Inspector compiler probe
+captures as `vendor_substrate.compiler_externals`. Without those vars the
+render falls back to operator override env vars (`CSE_CCE_VERSION_OVERRIDE`,
+`CSE_CRAY_MPICH_VERSION_OVERRIDE`, etc.).
+
+`CSE_MPICH_SPLICE=1` (optional cray-mpich runtime splice) remains deferred.
 
 ## Module Loading
 
 The module design keeps package modules first class while avoiding raw store
 paths and Tcl-only module features:
 
-- `cse-init/<mpi>` prepends the generated module tree and exposes CSE GCC.
+- `cse-init/<COMPILER_UPPER>/<mpi_label>` prepends the generated module tree
+  and exposes the CSE compiler baseline. Examples:
+  `cse-init/GCC/mpi-openmpi`, `cse-init/GCC/mpi-mpich`,
+  `cse-init/CCE/mpi-craympich`, `cse-init/GCC/serial`.
 - Package dependencies are loaded by Spack-generated modules, not by `cse-init`.
 - Broad dependency autoload is disabled.
 - HDF5 MPI modules load the MPI provider module.
@@ -74,7 +101,7 @@ paths and Tcl-only module features:
 Expected user flow:
 
 ```bash
-module load cse-init/openmpi
+module load cse-init/GCC/mpi-openmpi
 module load cse/netcdf-fortran/4.6.1-mpi
 ```
 
@@ -123,10 +150,15 @@ Use optimized targets only as explicit site-specific layers:
 - `bash -n scripts/*.sh`
 - `bash -n scripts/lib/*.sh`
 - Python syntax/import validation for `scripts/lib/*.py`
-- Dry-run both variants.
+- Dry-run `gcc-openmpi` and `gcc-mpich` variants.
+- Dry-run `cce-craympich` with a mock Cray profile to verify `toolchains.yaml`
+  emits `require: ["%cce@<version>"]` and `cray-mpich` external block.
 - Dry-run `network_prepare_request.sh`, `network_fulfill_request.sh`, and
   `network_deploy.sh` with representative artifacts.
-- Inspect rendered YAML for one compiler handoff source.
+- Verify `deploy.sh --render-only` produces all YAML without calling Spack.
+- Verify `deploy.sh --fetch` exits after `spack fetch` without calling install.
+- Inspect rendered `packages.yaml`: no `openssl:` block when package set uses
+  `openssl.mode: spack`.
 - Inspect rendered module YAML for root-spec-derived public `include` plus
   `exclude: ["*"]`.
 - Inspect generated modulefiles for curated module load/depends-on statements.

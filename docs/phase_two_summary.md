@@ -9,9 +9,14 @@ The Computational Software Environment (CSE) is a site-managed software stack th
 The CSE is built and managed using Spack, the package manager already used in the broader HPC community. Users do not interact with Spack directly. They interact with environment modules, which is the mechanism users on these systems already know. From a user's perspective, loading the CSE looks the same as loading any other module:
 
 ```
-module load cse-init/<mpi>
+module load cse-init/GCC/mpi-openmpi
 module load cse/netcdf-fortran/4.6.1-mpi
 ```
+
+The `cse-init` module name encodes the compiler family and MPI lane
+(`cse-init/<COMPILER_UPPER>/<mpi_label>`). Common examples:
+`cse-init/GCC/mpi-openmpi`, `cse-init/GCC/mpi-mpich`,
+`cse-init/CCE/mpi-craympich`, `cse-init/GCC/serial`.
 
 After those two commands, the user has the compilers, the MPI launcher, and the NetCDF libraries available, with all the environment variables expected by standard build tools already set.
 
@@ -27,15 +32,30 @@ The implementation has three layers, with clean ownership boundaries:
 
 Each CSE release is captured as a Spack environment with a lockfile that pins every dependency, compiler, and build flag. The maintainers tag the release in version control, build it on the target system, and publish the resulting modules to a shared filesystem visible from login, build, and compute nodes. Users see a stable namespace of `cse/<package>` modules that does not change until the next release. Newer releases are deployed alongside older ones so users can move forward on their own schedule.
 
-## Two Implementation Variants
+## Variant Naming
 
-The plan proposes two variants. Both deliver the same user-facing modules and the same package set. They differ in how much of the system Spack treats as a given.
+Variants use a `<compiler>-<mpi>` slug that encodes the toolchain identity
+directly in the name. Examples: `gcc-openmpi`, `gcc-mpich`, `cce-craympich`,
+`nvhpc-craympich`, `aocc-openmpi`. Each variant produces its own release with
+its own modules, but the user-facing `cse/<package>` module names are the same
+across all variants so users do not have to relearn the module namespace when
+moving between systems.
 
-**Variant A: Minimal externals.** Spack treats only the operating system as a given (OpenSSL, glibc, Perl, Python, curl). It builds its own compiler and its own MPI implementation (Open MPI), then builds the rest of the stack on top of that compiler and MPI. The advantage is portability: the same approach works on any Linux system, including future systems that do not have a vendor-supplied programming environment. The cost is build time, since the compiler is built from source as part of every release.
+**`gcc-*` variants** (generic Linux): Spack treats only the operating system as
+a given (OpenSSL, glibc, Perl, Python, curl). It builds its own GCC and its own
+MPI, then builds the rest of the stack on top. Portable across any Linux system.
 
-**Variant B: Cray-integrated.** On Cray systems, Spack additionally treats the Cray programming environment (the GCC inside PrgEnv-gnu, cray-mpich, and cray-libsci) as a given. It does not rebuild any of those. The advantage is that the resulting binaries link against vendor-validated MPI and BLAS/LAPACK libraries, which is the supported configuration for high-performance interconnects on these systems. The cost is that this variant is Cray-specific and does not apply to systems without a vendor programming environment.
+**PE variants** (`cce-*`, `aocc-*`, `nvhpc-*`, `rocmcc-*`): On systems with a
+vendor programming environment, Spack treats the PE compiler, cray-mpich, and
+related vendor libraries as externals. The resulting binaries link against
+vendor-validated MPI and interconnect libraries, which is the supported
+configuration for high-performance fabrics. Requires the relevant `PrgEnv-*`
+module to be loaded before Stage 1 so the Cluster Inspector compiler probe can
+capture the external versions and install prefixes.
 
-A first-draft recommendation is to operate both variants in parallel: Variant A as the default on commodity Linux systems, Variant B as the default on Cray systems. Each variant is a separate release with its own modules, but the user-facing module names are identical, so a user who moves between systems does not have to relearn anything.
+The default on commodity Linux systems is `gcc-openmpi`. The default on Cray
+systems is typically `cce-craympich` or `gcc-craympich` depending on whether
+CCE or GCC is the preferred compiler.
 
 ## What Success Looks Like
 

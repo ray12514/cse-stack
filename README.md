@@ -4,36 +4,57 @@
 Environment (CSE): a small, reproducible HPC software stack exposed through a
 stable `cse/*` module namespace.
 
-The current proof-of-concept supports two variants:
+Variants follow a `<compiler>-<mpi>` slug that encodes the stack identity and
+maps to user-facing modules like `CSE/GCC/mpi-openmpi`:
 
-| Variant | MPI | Target |
-|---|---|---|
-| `v1-openmpi` | Spack-built OpenMPI | Generic Linux test systems and non-Cray clusters |
-| `v2-mpich` | Spack-built MPICH with OFI | Generic Linux plus Cray/Slingshot when libfabric is detected |
+| Variant | Compiler | MPI | Target |
+|---|---|---|---|
+| `gcc-openmpi` | Spack GCC 13.3.0 | Spack-built OpenMPI | Generic Linux, non-Cray clusters |
+| `gcc-mpich` | Spack GCC 13.3.0 | Spack-built MPICH with OFI | Generic Linux + Cray/Slingshot |
+| `gcc-craympich` | Spack GCC 13.3.0 | External cray-mpich | Cray PE (PrgEnv-gnu) |
+| `gcc-serial` | Spack GCC 13.3.0 | none | Serial-only lane |
+| `cce-craympich` | External CCE | External cray-mpich | Cray PE (PrgEnv-cray) |
+| `aocc-openmpi` | External AOCC | Spack-built OpenMPI | AMD CPU clusters |
+| `aocc-sitempi` | External AOCC | Site MPI | AMD CPU + site MPI |
+| `nvhpc-openmpi` | External NVHPC | Spack-built OpenMPI | NVIDIA GPU nodes |
+| `nvhpc-craympich` | External NVHPC | External cray-mpich | Cray PE + NVIDIA GPU |
+| `rocmcc-craympich` | External ROCmCC | External cray-mpich | Cray PE + AMD GPU |
+| `intel-impi` | External Intel oneAPI | External Intel MPI | Intel oneAPI clusters |
 
-Both variants bootstrap `gcc@13.3.0` with Spack and use that compiler for the
-stack. `gcc@13.2.0` is deprecated upstream and is no longer the default.
+Legacy aliases (`v1-openmpi` → `gcc-openmpi`, `v2-mpich` → `gcc-mpich`) are
+accepted with a deprecation warning and will be removed in a future release.
+
+Non-GCC compilers (`cce`, `aocc`, `nvhpc`, `rocmcc`, `intel`) are always
+treated as external. The correct `PrgEnv-*` or compiler module **must be loaded
+before Stage 1** so Cluster Inspector can detect the version and prefix from the
+environment variables the module sets.
 
 ## OpenSSL Policy
 
-OpenSSL is always treated as a site external and is never built by Spack in
-this stack. That keeps the deploy aligned with the site-managed trust and patch
-policy.
+By default OpenSSL is treated as a site external — Spack will not build it from
+source. This keeps the deploy aligned with the site-managed trust and patch
+policy. If the site OpenSSL is too old for the selected package set, deploy
+fails before concretization with a recommended alternate package set.
 
-The consequence is explicit: if the site OpenSSL is too old for the selected
-MPI/PMIx package set, deploy fails before concretization with a recommended
-alternate package set.
+When the site OpenSSL forces an undesirable dependency version (e.g. an older
+OpenMPI), use a package set with `openssl.mode: spack` to let Spack resolve
+OpenSSL from source instead:
+
+```bash
+./scripts/deploy.sh --variant gcc-openmpi --release test \
+  --shared-path /tmp/cse-test \
+  --package-set hdf5-mpi-smoke-spack-openssl
+```
 
 Current supported package-set names include:
 
 - `full`: preferred default stack, expects external OpenSSL 3.x
-- `science-full`: expanded two-version science stack, with latest-only
-  Miniforge
-- `science-full-legacy-openssl`: expanded two-version science stack for older
-  site OpenSSL
+- `science-full`: expanded two-version science stack, with latest-only Miniforge
+- `science-full-legacy-openssl`: expanded two-version science stack for older site OpenSSL
 - `full-legacy-openssl`: legacy-compatible full stack for older site OpenSSL
-- `hdf5-mpi-smoke`: reduced MPI smoke stack, also expects external OpenSSL 3.x
+- `hdf5-mpi-smoke`: reduced MPI smoke stack, expects external OpenSSL 3.x
 - `hdf5-mpi-smoke-legacy-openssl`: reduced MPI smoke stack for older site OpenSSL
+- `hdf5-mpi-smoke-spack-openssl`: reduced MPI smoke stack, Spack-built OpenSSL (proof-of-concept)
 - `public-buildcache-smoke`: minimal single-package smoke set
 
 ## Network Modes
@@ -61,20 +82,21 @@ Users load one front-door module, then load the package they need. The stable
 front door points at the current promoted release:
 
 ```bash
-module load cse-init/openmpi
+module load cse-init/GCC/mpi-openmpi
 module load cse/netcdf-fortran/4.6.1-mpi
 ```
 
 Users can also pin themselves to a completed release:
 
 ```bash
-module load cse-init/20260508/openmpi
+module load cse-init/20260508/GCC/mpi-openmpi
 module load cse/netcdf-fortran/4.6.1-mpi
 ```
 
-`cse-init/<mpi>` exposes the CSE compiler baseline and selected module tree for
-the current promoted release. `cse-init/<release>/<mpi>` exposes the same
-interface for that exact release. Spack-generated package modules own
+`cse-init/<COMPILER>/<mpi-label>` exposes the CSE compiler baseline and selected
+module tree for the current promoted release. `cse-init/<release>/<COMPILER>/<mpi-label>`
+exposes the same interface for that exact release. The `mpi-label` is `mpi-openmpi`,
+`mpi-mpich`, `mpi-craympich`, etc., or `serial` for the serial-only lane. Spack-generated package modules own
 dependency loading through curated public module loads: HDF5 MPI modules load
 the MPI provider, NetCDF modules load the matching public HDF5 or NetCDF-C
 module, and MPI provider modules do not load their low-level implementation
@@ -97,7 +119,7 @@ A first build does not need a shared filesystem or a `cse` Unix group:
 
 ```bash
 ./scripts/deploy.sh \
-  --variant v1-openmpi \
+  --variant gcc-openmpi \
   --release test \
   --shared-path /tmp/cse-test
 ```
@@ -115,7 +137,7 @@ set explicitly:
 
 ```bash
 ./scripts/deploy.sh \
-  --variant v1-openmpi \
+  --variant gcc-openmpi \
   --release test \
   --shared-path /tmp/cse-test \
   --package-set full-legacy-openssl
@@ -129,7 +151,7 @@ connected build itself:
 ```bash
 ./scripts/network_prepare_request.sh \
   --request-dir /tmp/cse-request \
-  --variant v2-mpich \
+  --variant gcc-mpich \
   --release 2026_04 \
   --shared-path /shared/cse \
   --network-mode airgapped
@@ -185,7 +207,7 @@ Create a source mirror for the concretized package closure:
 ```bash
 ./scripts/mirror_fetch.sh \
   --mirror-path /tmp/cse-source-mirror \
-  --variant v1-openmpi \
+  --variant gcc-openmpi \
   --release test \
   --shared-path /tmp/cse-test
 ```
@@ -195,7 +217,7 @@ Create a binary buildcache from the installed packages:
 ```bash
 ./scripts/buildcache_push.sh \
   --cache-uri file:///tmp/cse-buildcache \
-  --variant v1-openmpi \
+  --variant gcc-openmpi \
   --release test \
   --shared-path /tmp/cse-test
 ```
@@ -211,7 +233,7 @@ before cleaning it up:
 ```bash
 ./scripts/buildcache_push.sh \
   --cache-uri file:///tmp/cse-buildcache \
-  --variant v1-openmpi \
+  --variant gcc-openmpi \
   --release test \
   --shared-path /tmp/cse-test \
   --allow-partial
@@ -228,7 +250,7 @@ before deleting the old release-local `env`, `store`, `views`, and `modules`:
 
 ```bash
 ./scripts/deploy.sh \
-  --variant v1-openmpi \
+  --variant gcc-openmpi \
   --release test \
   --shared-path /tmp/cse-test \
   --package-set science-full \
@@ -248,7 +270,7 @@ To test a cache-only install from a local buildcache:
 
 ```bash
 SPACK_NO_CHECK_SIGNATURE=1 ./scripts/deploy.sh \
-  --variant v1-openmpi \
+  --variant gcc-openmpi \
   --release test-cache \
   --shared-path /tmp/cse-cache-test \
   --package-set public-buildcache-smoke \
@@ -284,7 +306,7 @@ separately when needed:
 
 ```bash
 ./scripts/deploy.sh \
-  --variant v1-openmpi \
+  --variant gcc-openmpi \
   --release test-cache \
   --shared-path /tmp/cse-cache-test \
   --package-set science-full \
@@ -299,18 +321,65 @@ Dry-runs render the intended YAML/module content and execute no build:
 
 ```bash
 ./scripts/deploy.sh \
-  --variant v1-openmpi \
+  --variant gcc-openmpi \
   --release test \
   --shared-path /tmp/cse-test \
   --dry-run
 
 ./scripts/deploy.sh \
-  --variant v2-mpich \
+  --variant gcc-mpich \
   --release test \
   --shared-path /tmp/cse-test \
   --mock-profile profiles/mock-cray.yaml \
   --dry-run
 ```
+
+## Render-Only and Manual Mode
+
+`--render-only` runs stages 1 and 3, renders all remaining YAML files
+(config, modules, spack), and exits before calling any Spack command. Use
+this when you want to inspect or hand-edit the rendered environment before
+concretizing:
+
+```bash
+./scripts/deploy.sh --variant gcc-openmpi --release test \
+  --shared-path /tmp/cse-test --render-only
+
+# Then manually:
+spack -e /tmp/cse-test/cse/test/gcc-openmpi/env concretize
+spack -e /tmp/cse-test/cse/test/gcc-openmpi/env install
+```
+
+`--skip-render` jumps directly to Spack concretize+install, assuming the env
+YAML files already exist.  Combine with `--fetch` / `--build` for a
+login+compute split workflow.
+
+For environments pre-rendered by an operator, `scripts/spack_build.sh` is a
+standalone installer that needs only `--env-dir` and `--spack-root`:
+
+```bash
+./scripts/spack_build.sh \
+  --env-dir /shared/cse/2026_05/gcc-openmpi/env \
+  --spack-root /shared/cse/spack-site
+```
+
+## Login-Node Fetch / Compute-Node Build
+
+On clusters where internet access is login-only and large builds need a
+compute allocation, split stage 4 into two steps:
+
+```bash
+# Login node — concretize + fetch all sources:
+./scripts/deploy.sh --variant gcc-openmpi --release 2026_05 \
+  --shared-path /shared --from-stage 4 --fetch
+
+# Compute node (inside salloc / qsub) — build only:
+./scripts/deploy.sh --variant gcc-openmpi --release 2026_05 \
+  --shared-path /shared --skip-render --build
+```
+
+The `--fetch` step writes `spack.lock` and populates the source cache.
+The `--build` step reads the same lockfile and does not re-concretize.
 
 ## Stages
 
@@ -320,7 +389,7 @@ Dry-runs render the intended YAML/module content and execute no build:
 |---|---|---|
 | 1 | `stage1_profile.sh` | Capture a Cluster Inspector system profile |
 | 2 | `stage2_spack.sh` | Clone Spack to `${SHARED_PATH}/cse/spack-site` and bootstrap GCC |
-| 3 | `stage3_externals.sh` | Render `packages.yaml` |
+| 3 | `stage3_externals.sh` | Render `packages.yaml` and `toolchains.yaml` |
 | 4 | `stage4_build.sh` | Render remaining Spack config, concretize, and install |
 | 5 | `stage5_modules.sh` | Refresh Spack modules and render/install current and pinned `cse-init` gates |
 

@@ -30,7 +30,7 @@ cleaning the release-local store:
 ```bash
 ./scripts/buildcache_push.sh \
   --cache-uri file:///p/work1/ravonmv/cse/cache/buildcache \
-  --variant v1-openmpi \
+  --variant gcc-openmpi \
   --release 20260508 \
   --shared-path /p/work1/ravonmv \
   --allow-partial
@@ -40,7 +40,7 @@ To retry the same release name from a clean release-local store:
 
 ```bash
 SPACK_NO_CHECK_SIGNATURE=1 ./scripts/deploy.sh \
-  --variant v1-openmpi \
+  --variant gcc-openmpi \
   --release 20260508 \
   --shared-path /p/work1/ravonmv \
   --package-set science-full \
@@ -75,7 +75,7 @@ If Spack sees the mirror but still builds from source, compare concrete hashes:
 
 ```bash
 . /p/work1/ravonmv/cse/spack-site/share/spack/setup-env.sh
-spack env activate -d /p/work1/ravonmv/cse/20260508/v1-openmpi/env
+spack env activate -d /p/work1/ravonmv/cse/20260508/gcc-openmpi/env
 spack find -L -c pkgconf
 spack buildcache list -L pkgconf
 ```
@@ -230,20 +230,20 @@ Resolution:
 
 Policy:
 
-- `cse-init/<mpi>` is the stable front-door module for the current promoted
-  release.
-- `cse-init/<release>/<mpi>` is the pinned front-door module for one completed
-  release.
+- `cse-init/<COMPILER_UPPER>/<mpi_label>` is the stable front-door module for
+  the current promoted release (e.g. `cse-init/GCC/mpi-openmpi`).
+- `cse-init/<release>/<COMPILER_UPPER>/<mpi_label>` is the pinned front-door
+  module for one completed release (e.g. `cse-init/20260508/GCC/mpi-openmpi`).
 - Stage 5 is the promotion step. Running Stage 5 for a release refreshes the
   Spack module tree, writes that release's pinned gate, and repoints the stable
-  `cse-init/<mpi>` gate at the same release.
+  `cse-init/<COMPILER_UPPER>/<mpi_label>` gate at the same release.
 
 Implications:
 
-- Users who want the current site default load `cse-init/openmpi` or
-  `cse-init/mpich`.
+- Users who want the current site default load `cse-init/GCC/mpi-openmpi` or
+  `cse-init/GCC/mpi-mpich`.
 - Users who need repeatability load a pinned module such as
-  `cse-init/20260508/openmpi`.
+  `cse-init/20260508/GCC/mpi-openmpi`.
 - Operators can switch current back to an already-built release by rerunning
   Stage 5 with that release name.
 
@@ -259,12 +259,20 @@ The correct mechanism for a self-contained CSE Spack environment is isolation:
 
 - `SPACK_DISABLE_LOCAL_CONFIG=1` — no user `~/.spack/compilers.yaml` leaks in.
 - `SPACK_SYSTEM_CONFIG_PATH=/dev/null` — no site-level compiler config leaks in.
+- `SPACK_USER_CONFIG_PATH=/dev/null` — no user `~/.spack/` bleeds in.
 - `gcc-bootstrap.yaml` (written by stage 2, included by stage 4's `spack.yaml`)
-  is the **only** registered compiler.
+  is the **only** registered compiler for `gcc-*` variants.
 
 With exactly one compiler available, the CLINGO concretizer picks it for every
 buildable package. Externals and noarch packages are unaffected because Spack
 does not assign a compiler to them in the first place.
+
+For non-GCC PE variants (`cce-*`, `aocc-*`, etc.), `toolchains.yaml` is
+rendered by stage 3 and expresses the PE compiler as `packages:all:require:
+["%cce@<version>"]`. This is a hard constraint and is intentional — PE builds
+must use the vendor compiler. `toolchains.yaml` is a separate include file from
+`packages.yaml` so the `require:` is isolated and does not affect the scope of
+any noarch or external packages resolved before the toolchain include.
 
 ### Package-Set Matrix Entries: Only fftw Is 2D
 
