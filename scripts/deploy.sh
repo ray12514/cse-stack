@@ -37,7 +37,6 @@
 # Options:
 #   --variant         Required. Variant slug: <compiler>-<mpi> or <compiler>-serial.
 #                     Examples: gcc-openmpi, gcc-mpich, cce-craympich, aocc-openmpi.
-#                     Legacy: v1-openmpi (=gcc-openmpi), v2-mpich (=gcc-mpich).
 #   --release         Required. Release tag (e.g. 2026_04).
 #   --shared-path     Required. Path to the shared CSE filesystem root.
 #   --network-mode    Deployment network policy: online, restricted, or
@@ -51,7 +50,7 @@
 #   --gcc-version     Spack GCC version to bootstrap (default: 13.3.0).
 #                     gcc@13.2.0 is deprecated upstream; 13.3.0 is the current
 #                     supported 13.x release.
-#   --mpich-version   Override auto-detected MPICH version for v2-mpich.
+#   --mpich-version   Override auto-detected MPICH version for *-mpich variants.
 #                     Normally inferred from cray-mpich series via Cluster Inspector
 #                     (cray-mpich 8.x → 3.4.3; 9.x → 4.2.2).
 #   --jobs N          Number of packages to build in parallel (default: 4).
@@ -97,7 +96,7 @@
 #                     existing spack.lock; skip concretize and fetch.  Requires
 #                     --fetch to have been run first.
 #   --mock-profile    Path to a mock Cluster Inspector YAML profile.
-#                     Useful for testing v2-mpich on a non-Cray host.
+#                     Useful for testing Cray variants on a non-Cray host.
 set -euo pipefail
 
 # ------------------------------------------------------------------
@@ -182,8 +181,8 @@ while [[ $# -gt 0 ]]; do
         --preflight-timeout) require_arg_value "$1" "${2:-}"; CSE_PREFLIGHT_TIMEOUT="$2"; shift 2 ;;
         --render-only)      RENDER_ONLY=1;                                       shift   ;;
         --skip-render)      SKIP_RENDER=1;                                       shift   ;;
-        --fetch)            STAGE4_BUILD_MODE="fetch";                           shift   ;;
-        --build)            STAGE4_BUILD_MODE="build";                           shift   ;;
+        --fetch)            SAW_FETCH=1; STAGE4_BUILD_MODE="fetch";              shift   ;;
+        --build)            SAW_BUILD=1; STAGE4_BUILD_MODE="build";              shift   ;;
         -h|--help)
             sed -n '3,49p' "${BASH_SOURCE[0]}"
             exit 0
@@ -211,16 +210,12 @@ if [[ -z "${SHARED_PATH}" ]]; then
     echo "ERROR: --shared-path is required" >&2
     errors=1
 fi
-if [[ "${VARIANT}" == "v1-openmpi" ]]; then
-    echo "WARNING: --variant v1-openmpi is deprecated; use gcc-openmpi" >&2
-    VARIANT="gcc-openmpi"
-elif [[ "${VARIANT}" == "v2-mpich" ]]; then
-    echo "WARNING: --variant v2-mpich is deprecated; use gcc-mpich" >&2
-    VARIANT="gcc-mpich"
-elif [[ "${VARIANT}" != *-* ]]; then
+if [[ -n "${VARIANT}" && "${VARIANT}" != *-* ]]; then
     echo "ERROR: --variant must be <compiler>-<mpi> (e.g. gcc-openmpi, cce-craympich)" >&2
     errors=1
 fi
+VARIANT_COMPILER="${VARIANT%%-*}"
+VARIANT_MPI="${VARIANT#*-}"
 if [[ -n "${PACKAGE_SET_OVERRIDE}" && ! -f "${REPO_ROOT}/package-sets/${PACKAGE_SET_OVERRIDE}.yaml" ]]; then
     echo "ERROR: --package-set not found: ${PACKAGE_SET_OVERRIDE}" >&2
     echo "       Expected ${REPO_ROOT}/package-sets/${PACKAGE_SET_OVERRIDE}.yaml" >&2
@@ -260,7 +255,7 @@ if [[ "${RENDER_ONLY}" == "1" && "${SKIP_RENDER}" == "1" ]]; then
     echo "ERROR: --render-only and --skip-render are mutually exclusive" >&2
     errors=1
 fi
-if [[ "${STAGE4_BUILD_MODE}" == "fetch" && "${STAGE4_BUILD_MODE}" == "build" ]]; then
+if [[ "${SAW_FETCH:-0}" == "1" && "${SAW_BUILD:-0}" == "1" ]]; then
     echo "ERROR: --fetch and --build are mutually exclusive" >&2
     errors=1
 fi
@@ -301,7 +296,7 @@ export CSE_ARTIFACT_MANIFEST="${ARTIFACT_MANIFEST}"
 # Both variants now bootstrap GCC from Spack.
 export GCC_VERSION="${GCC_VERSION_OVERRIDE:-${GCC_VERSION:-13.3.0}}"
 export SPACK_VERSION="${SPACK_VERSION_OVERRIDE:-${SPACK_VERSION:-v1.1.1}}"
-# MPICH_VERSION: explicit override for v2-mpich; when unset render.py auto-detects
+# MPICH_VERSION: explicit override for *-mpich variants; when unset render.py auto-detects
 # from cray-mpich series via Cluster Inspector (8.x→3.4.3, 9.x→4.2.2).
 if [[ -n "${MPICH_VERSION_OVERRIDE}" ]]; then
     export MPICH_VERSION="${MPICH_VERSION_OVERRIDE}"
@@ -367,7 +362,7 @@ echo "  network mode : ${NETWORK_MODE}"
 echo "  group        : ${CSE_GROUP}"
 echo "  spack version: ${SPACK_VERSION}"
 echo "  gcc version  : ${GCC_VERSION}"
-if [[ "${VARIANT}" == "v2-mpich" ]]; then
+if [[ "${VARIANT_MPI}" == "mpich" ]]; then
     echo "  mpich version: ${MPICH_VERSION:-auto-detect from profile}"
 fi
 echo "  module system: ${MODULE_SYSTEM}"
@@ -557,6 +552,10 @@ run_stage() {
         echo "--- Stage ${n}: skipped (--from-stage ${FROM_STAGE})"
         return 0
     fi
+    if [[ "${RENDER_ONLY}" == "1" && "${n}" == "2" ]]; then
+        echo "--- Stage ${n}: skipped (--render-only does not bootstrap Spack/GCC)"
+        return 0
+    fi
     echo "--- Stage ${n}: ${script}"
     # shellcheck source=/dev/null
     source "${REPO_ROOT}/scripts/${script}"
@@ -617,13 +616,14 @@ else
     echo " Deploy complete."
     echo " Users can now load the CSE environment with:"
     echo "   module use ${SITE_MODULE_PATH}"
-    if [[ "${VARIANT}" == "v1-openmpi" ]]; then
-        echo "   module load cse-init/openmpi"
-        echo "   module load cse-init/${RELEASE}/openmpi"
+    _COMPILER_UPPER="$(echo "${VARIANT_COMPILER}" | tr '[:lower:]' '[:upper:]')"
+    if [[ "${VARIANT_MPI}" == "serial" ]]; then
+        _MPI_LABEL="serial"
     else
-        echo "   module load cse-init/mpich"
-        echo "   module load cse-init/${RELEASE}/mpich"
+        _MPI_LABEL="mpi-${VARIANT_MPI}"
     fi
+    echo "   module load cse-init/${_COMPILER_UPPER}/${_MPI_LABEL}"
+    echo "   module load cse-init/${RELEASE}/${_COMPILER_UPPER}/${_MPI_LABEL}"
     echo "   module avail cse"
 fi
 echo "========================================================"

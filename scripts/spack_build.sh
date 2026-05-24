@@ -88,14 +88,28 @@ export SPACK_USER_CONFIG_PATH="/dev/null"
 if [[ "${DRY_RUN}" == "1" ]]; then
     echo "[dry-run] spack_build.sh would run:"
     echo "[dry-run]   source ${SPACK_ROOT}/share/spack/setup-env.sh"
+    if [[ -n "${BUILDCACHE_URI}" ]]; then
+        echo "[dry-run]   spack mirror add cse-buildcache ${BUILDCACHE_URI}"
+    fi
     echo "[dry-run]   spack env activate -d ${ENV_DIR}"
-    _INSTALL="spack install${CACHE_ONLY:+ --cache-only}${NO_CHECK_SIG:+ --no-check-signature}"
+    _INSTALL="spack install"
+    [[ "${CACHE_ONLY}"   == "1" ]] && _INSTALL+=" --cache-only"
+    [[ "${NO_CHECK_SIG}" == "1" ]] && _INSTALL+=" --no-check-signature"
     echo "[dry-run]   ${_INSTALL} --concurrent-packages ${INSTALL_JOBS} --jobs ${MAKE_JOBS} --fail-fast"
     exit 0
 fi
 
 # shellcheck source=/dev/null
 . "${SPACK_ROOT}/share/spack/setup-env.sh"
+
+if [[ -n "${BUILDCACHE_URI}" ]]; then
+    # Register the buildcache as a Spack mirror so install can actually pull from it.
+    # `spack mirror add` errors if a mirror with the same name exists; fall back to
+    # `set --url` for that case, and tolerate older spacks where the verbs differ.
+    spack mirror add cse-buildcache "${BUILDCACHE_URI}" 2>/dev/null \
+        || spack mirror set --url "${BUILDCACHE_URI}" cse-buildcache 2>/dev/null \
+        || echo "spack_build.sh: warning: could not register ${BUILDCACHE_URI} as a mirror" >&2
+fi
 
 if [[ "${CACHE_ONLY}" == "1" && "${NO_CHECK_SIG}" != "1" && -n "${BUILDCACHE_URI}" ]]; then
     if command -v timeout >/dev/null 2>&1; then

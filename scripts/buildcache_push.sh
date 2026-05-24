@@ -8,7 +8,7 @@
 # Usage:
 #   ./scripts/buildcache_push.sh \
 #       --cache-uri file:///shared/cse-buildcache \
-#       --variant   v2-mpich                      \
+#       --variant   gcc-mpich                     \
 #       --release   2026_04                       \
 #       --shared-path /shared                     \
 #       [--allow-partial]

@@ -6,7 +6,7 @@ Usage (from stage scripts):
       --template templates/packages.yaml.j2 \
       --output /path/to/env/packages.yaml \
       --profile profiles/myhostname-20260401.yaml \
-      --variant v1-minimal-externals \
+      --variant gcc-openmpi \
       --shared-path /shared \
       --release 2026_04 \
       [--dry-run]
@@ -21,7 +21,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 try:
     from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateNotFound
@@ -40,11 +40,7 @@ _SYSTEM_PREFIXES = ("/usr", "/usr/local")
 
 _KNOWN_COMPILERS = frozenset({"gcc", "cce", "aocc", "nvhpc", "rocmcc", "intel"})
 _KNOWN_MPI_LANES = frozenset({"openmpi", "mpich", "craympich", "impi", "sitempi", "serial"})
-_LEGACY_ALIASES: dict[str, str] = {
-    "v1-openmpi": "gcc-openmpi",
-    "v2-mpich":   "gcc-mpich",
-}
-_MPI_PROVIDER_DEFAULTS: dict[str, str] = {
+_MPI_PROVIDER_DEFAULTS: Dict[str, str] = {
     "openmpi":   "openmpi",
     "mpich":     "mpich",
     "craympich": "cray-mpich",
@@ -54,7 +50,7 @@ _MPI_PROVIDER_DEFAULTS: dict[str, str] = {
 }
 
 
-def _parse_variant(variant: str) -> tuple[str, str]:
+def _parse_variant(variant: str) -> Tuple[str, str]:
     """Split a variant slug into (compiler_family, mpi_lane).
 
     "gcc-openmpi"   → ("gcc",  "openmpi")
@@ -63,18 +59,6 @@ def _parse_variant(variant: str) -> tuple[str, str]:
     """
     parts = variant.split("-", 1)
     return parts[0].lower(), (parts[1].lower() if len(parts) > 1 else "serial")
-
-
-def _resolve_variant(variant: str) -> str:
-    """Map legacy variant names to their canonical equivalents."""
-    if variant in _LEGACY_ALIASES:
-        new_name = _LEGACY_ALIASES[variant]
-        print(
-            f"WARNING: --variant {variant!r} is deprecated; use {new_name!r}.",
-            file=sys.stderr,
-        )
-        return new_name
-    return variant
 
 
 def _query_cmd(*cmd) -> str:
@@ -378,7 +362,7 @@ def _build_module_load_rules(
     return rules
 
 
-def _validate_v2_mpich_slurm_externals(ctx: dict) -> None:
+def _validate_mpich_slurm_externals(ctx: dict) -> None:
     """Fail before concretization when Slurm MPICH needs site externals."""
     if ctx.get("mpi_lane") != "mpich" or ctx.get("scheduler_type") != "slurm":
         return
@@ -405,7 +389,7 @@ def _validate_v2_mpich_slurm_externals(ctx: dict) -> None:
     if failures:
         details = "\n  - ".join(failures)
         raise ValueError(
-            "v2-mpich on Slurm requires site-managed libfabric, Slurm, and PMIx "
+            "*-mpich on Slurm requires site-managed libfabric, Slurm, and PMIx "
             f"externals for srun + PMIx launch.\n  - {details}"
         )
 
@@ -446,9 +430,11 @@ def _build_context(profile: SystemProfile, variant: str,
         "mpi_lane":        mpi_lane,
         "compiler_upper":  compiler_family.upper(),
         "mpi_label":       mpi_lane if mpi_lane == "serial" else f"mpi-{mpi_lane}",
-        # Derived booleans — kept for template backward compatibility
-        "is_openmpi":  mpi_lane == "openmpi",
-        "is_mpich":    mpi_lane in ("mpich", "craympich"),
+        # Derived booleans. `is_mpich` is intentionally narrow: it means upstream
+        # MPICH (the Spack `mpich` package), NOT cray-mpich. Cray-mpich uses
+        # `is_craympich` and a completely different externals path.
+        "is_openmpi":   mpi_lane == "openmpi",
+        "is_mpich":     mpi_lane == "mpich",
         "is_craympich": mpi_lane == "craympich",
         "is_serial":   mpi_lane == "serial",
         "is_gcc":      compiler_family == "gcc",
@@ -483,7 +469,7 @@ def _build_context(profile: SystemProfile, variant: str,
         # Disabled by default. Long padded prefixes can break generated
         # shebangs during builds such as gobject-introspection.
         "padded_length": padded_length if padded_length > 0 else 0,
-        # Cray detection — libfabric and pals for v2-mpich
+        # Cray detection — libfabric and pals for upstream *-mpich on Cray
         "is_cray":           profile.is_cray(),
         "has_libfabric":     profile.has_libfabric(),
         "libfabric_version": profile.libfabric_version(),
@@ -554,7 +540,7 @@ def _build_context(profile: SystemProfile, variant: str,
         for spec in ctx["spack_specs"]
     ]
     ctx["expanded_spack_specs"] = _expand_spack_specs(ctx["spack_specs"])
-    _validate_v2_mpich_slurm_externals(ctx)
+    _validate_mpich_slurm_externals(ctx)
     ctx["view_mpi_select"] = package_set_data.get("views", {}).get("mpi", [])
     ctx["view_serial_select"] = package_set_data.get("views", {}).get("serial", [])
     mpi_version = _spec_version(ctx["expanded_spack_specs"], ctx["mpi_provider"])
@@ -716,8 +702,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--profile", default="", help="Path to Cluster Inspector YAML profile")
     p.add_argument("--variant", required=True,
                    help="Variant slug: <compiler>-<mpi> or <compiler>-serial "
-                        "(e.g. gcc-openmpi, gcc-mpich, cce-craympich, aocc-openmpi). "
-                        "Legacy aliases: v1-openmpi=gcc-openmpi, v2-mpich=gcc-mpich.")
+                        "(e.g. gcc-openmpi, gcc-mpich, cce-craympich, aocc-openmpi).")
     p.add_argument("--shared-path", required=True, dest="shared_path")
     p.add_argument("--release", required=True)
     p.add_argument("--dry-run", action="store_true", dest="dry_run")
@@ -732,7 +717,6 @@ def _parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = _parse_args()
-    args.variant = _resolve_variant(args.variant)
     _cf, _ml = _parse_variant(args.variant)
     if _cf not in _KNOWN_COMPILERS:
         print(

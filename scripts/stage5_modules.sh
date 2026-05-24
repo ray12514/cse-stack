@@ -199,11 +199,16 @@ reset_spack_views() {
     done
 }
 
-# Determine which cse-init file to install
-if [[ "${CSE_VARIANT}" == "v1-openmpi" ]]; then
-    INIT_NAME="openmpi"
+# Determine which cse-init file to install — derive from variant slug.
+# Module path format: cse-init/<COMPILER_UPPER>/<mpi_label>
+# where mpi_label is "serial" or "mpi-<lane>" (e.g. mpi-openmpi, mpi-craympich).
+_V_COMPILER="${CSE_VARIANT%%-*}"
+_V_MPI="${CSE_VARIANT#*-}"
+_V_COMPILER_UPPER="$(echo "${_V_COMPILER}" | tr '[:lower:]' '[:upper:]')"
+if [[ "${_V_MPI}" == "serial" ]]; then
+    INIT_NAME="${_V_COMPILER_UPPER}/serial"
 else
-    INIT_NAME="mpich"
+    INIT_NAME="${_V_COMPILER_UPPER}/mpi-${_V_MPI}"
 fi
 
 if [[ "${MODULE_SYSTEM}" == "lmod" ]]; then
@@ -285,11 +290,6 @@ echo "Stage 5: done."
 echo ""
 echo "Users can now load the CSE environment with:"
 echo "  module use ${SITE_MODULE_PATH}"
-if [[ "${CSE_VARIANT}" == "v1-openmpi" ]]; then
-    echo "  module load cse-init/openmpi"
-    echo "  module load cse-init/${CSE_RELEASE}/openmpi"
-else
-    echo "  module load cse-init/mpich"
-    echo "  module load cse-init/${CSE_RELEASE}/mpich"
-fi
+echo "  module load cse-init/${INIT_NAME}"
+echo "  module load cse-init/${CSE_RELEASE}/${INIT_NAME}"
 echo "  module avail cse"

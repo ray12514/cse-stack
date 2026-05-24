@@ -324,9 +324,16 @@ class SystemProfile:
         if prefix:
             return prefix
         ver = self.cray_mpich_version()
+        if not ver:
+            return ""
         gcc_ver = self.prgenv_gcc_version()
-        gcc_major = gcc_ver.split(".")[0]
-        return f"/opt/cray/pe/mpich/{ver}/ofi/gnu/{gcc_major}.{gcc_ver.split('.')[1]}" if ver else ""
+        gcc_parts = gcc_ver.split(".") if gcc_ver else []
+        # The site-default cray-mpich path needs at least a major.minor GCC tag.
+        # Without it we can't synthesize a defensible default; let the caller
+        # set CSE_CRAY_MPICH_PREFIX_OVERRIDE.
+        if len(gcc_parts) < 2:
+            return ""
+        return f"/opt/cray/pe/mpich/{ver}/ofi/gnu/{gcc_parts[0]}.{gcc_parts[1]}"
 
     def cray_libsci_version(self) -> str:
         # TODO: confirm version from actual Cray system
@@ -339,7 +346,10 @@ class SystemProfile:
         if prefix:
             return prefix
         gcc_ver = self.prgenv_gcc_version()
-        return f"/opt/cray/pe/libsci/{ver}/gnu/{gcc_ver.split('.')[0]}.{gcc_ver.split('.')[1]}"  # TODO: confirm
+        gcc_parts = gcc_ver.split(".") if gcc_ver else []
+        if len(gcc_parts) < 2:
+            return ""
+        return f"/opt/cray/pe/libsci/{ver}/gnu/{gcc_parts[0]}.{gcc_parts[1]}"
 
     def has_cray_pals(self) -> bool:
         """True if cray-pals is present (PBS Cray systems; absent on Slurm Cray)."""
