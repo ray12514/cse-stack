@@ -3,6 +3,10 @@
 This guide mirrors what `scripts/deploy.sh` does. Prefer `deploy.sh` unless you
 are debugging a specific stage.
 
+For copy-paste cluster test flows covering automatic builds, render-only
+inspection, and prepared handoff/manual builds, see
+`docs/cluster_test_runbook.md`.
+
 ## Personal Test Build
 
 ```bash
