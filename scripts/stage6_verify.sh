@@ -84,11 +84,15 @@ run_optional() {
 }
 
 verify_local_manifest() {
-    local all_hashes external_hashes local_hashes
-    all_hashes="$(mktemp "${VERIFY_DIR}/spack-all.XXXXXX")"
-    external_hashes="$(mktemp "${VERIFY_DIR}/spack-external.XXXXXX")"
-    local_hashes="$(mktemp "${VERIFY_DIR}/spack-local.XXXXXX")"
-    trap 'rm -f "${all_hashes:-}" "${external_hashes:-}" "${local_hashes:-}"' RETURN
+    # Use a per-call scratch dir so cleanup is unambiguous. A `trap ... RETURN`
+    # set inside a function leaks to subsequent function returns unless the
+    # function has the `trace` attribute or `set -T` is in effect — neither
+    # holds here, so we clean up explicitly instead.
+    local scratch all_hashes external_hashes local_hashes rc=0
+    scratch="$(mktemp -d "${VERIFY_DIR}/spack-verify.XXXXXX")"
+    all_hashes="${scratch}/all"
+    external_hashes="${scratch}/external"
+    local_hashes="${scratch}/local"
 
     spack find -H | sort > "${all_hashes}"
     spack find -e -H | sort > "${external_hashes}"
@@ -96,10 +100,13 @@ verify_local_manifest() {
 
     if [[ ! -s "${local_hashes}" ]]; then
         echo "no non-external Spack installs found to verify"
+        rm -rf "${scratch}"
         return 1
     fi
 
-    xargs spack verify manifest < "${local_hashes}"
+    xargs spack verify manifest < "${local_hashes}" || rc=$?
+    rm -rf "${scratch}"
+    return "${rc}"
 }
 
 verify_public_libraries() {
@@ -265,9 +272,16 @@ int main(int argc, char **argv) {
   return 0;
 }
 EOF
+            # Require an actual MPI wrapper. Falling back to a bare `cc` would
+            # silently compile against host headers (or fail at link time with
+            # a confusing message); both outcomes mask the real failure mode —
+            # that the loaded MPI module did not put a wrapper on PATH.
             local mpi_cc=""
-            mpi_cc="$(command -v mpicc || command -v cc || true)"
-            [[ -n "${mpi_cc}" ]]
+            mpi_cc="$(command -v mpicc || command -v mpicxx || command -v mpic++ || true)"
+            if [[ -z "${mpi_cc}" ]]; then
+                echo "no MPI compiler wrapper (mpicc/mpicxx) found on PATH after loading ${mpi_module}"
+                return 1
+            fi
             "${mpi_cc}" "${WORK_DIR}/mpi_hello.c" -o "${WORK_DIR}/mpi_hello"
             if [[ "${RUNTIME}" == "1" ]]; then
                 if command -v srun >/dev/null 2>&1; then
