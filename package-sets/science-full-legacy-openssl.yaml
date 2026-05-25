@@ -5,7 +5,7 @@ variants:
   gcc-openmpi:
     mpi_provider: openmpi
     specs:
-      - "openmpi@4.1.6 fabrics=auto"
+      - "openmpi@4.1.6 fabrics=auto ~rsh"
       - "hdf5@1.14.6 +mpi  +fortran +cxx +hl"
       - "hdf5@1.14.6 ~mpi  +fortran +cxx +hl"
       - "hdf5@1.14.5 +mpi  +fortran +cxx +hl"

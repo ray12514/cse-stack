@@ -478,6 +478,7 @@ def _build_context(profile: SystemProfile, variant: str,
         "has_cray_pals":     profile.has_cray_pals(),
         "cray_pals_version": profile.cray_pals_version(),
         "cray_pals_prefix":  profile.cray_pals_prefix(),
+        "cray_pals_module":  profile.cray_pals_module(),
         "has_pmix":          profile.has_pmix(),
         "pmix_version":      profile.pmix_version(),
         "pmix_prefix":       profile.pmix_prefix(),
@@ -496,6 +497,7 @@ def _build_context(profile: SystemProfile, variant: str,
         # cray-mpich external (also used by gcc-craympich, nvhpc-craympich, etc.)
         "cray_mpich_version": profile.cray_mpich_version(),
         "cray_mpich_prefix":  profile.cray_mpich_prefix(),
+        "cray_mpich_module":  profile.cray_mpich_module(),
     }
     # variant_slug == variant name — no shortening needed
     ctx["variant_slug"] = variant

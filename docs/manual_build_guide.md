@@ -12,6 +12,29 @@ are debugging a specific stage.
   --shared-path /tmp/cse-test
 ```
 
+For a Docker or disposable local smoke build where compiler reproducibility is
+not the goal, skip the GCC bootstrap and use the GCC already in the image:
+
+```bash
+./scripts/deploy.sh \
+  --variant gcc-serial \
+  --release docker-hdf5-serial \
+  --shared-path /tmp/cse-test \
+  --package-set hdf5-serial-smoke \
+  --use-system-gcc \
+  --verify-runtime
+```
+
+The matching Docker wrapper is:
+
+```bash
+./scripts/docker_hdf5_serial_smoke_test.sh
+```
+
+It installs `environment-modules`, sources `/etc/profile.d/modules.sh`, and
+fails before deploy if the `module` command is not available. This is
+intentionally not the production path.
+
 For a rendering-only check (no Spack calls):
 
 ```bash
@@ -45,6 +68,41 @@ For a dry-run that prints every Spack command without executing:
 4. Stage 4 renders config/modules/spack YAML, reuses an authoritative
    lockfile when supplied, and installs.
 5. Stage 5 refreshes Spack modules and renders `cse-init`.
+6. Stage 6 verifies the completed release with Spack integrity checks and
+   clean-shell module smoke tests.
+
+## Rendered Directory Layout
+
+Rendered and built release state is under:
+
+```bash
+${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/
+```
+
+Important subdirectories and files:
+
+```text
+env/                    # rendered Spack environment
+env/packages.yaml       # site externals from the captured profile
+env/toolchains.yaml     # compiler/MPI constraints
+env/config.yaml         # install tree, cache, bootstrap config
+env/modules.yaml        # public module policy
+env/spack.yaml          # top-level environment
+env/spack.lock          # written after concretize/fetch/build
+store/                  # release-local Spack install tree
+views/compiler/         # clean compiler view exposed by cse-init
+views/modules/          # clean package view used by generated modules
+modules/                # Spack-generated package module tree
+verify/summary.txt      # Stage 6 report
+```
+
+The shared cross-release pieces are:
+
+```text
+${SHARED_PATH}/cse/spack-site/    # shared Spack installation
+${SHARED_PATH}/cse/cache/         # source, misc, and Spack user cache
+${SHARED_PATH}/cse/modulefiles/   # cse-init front-door modules
+```
 
 ## Package Sets And OpenSSL
 
@@ -59,6 +117,11 @@ Package sets may also set `openssl.mode: spack` to let Spack build its own
 OpenSSL. The `hdf5-mpi-smoke-spack-openssl` package set demonstrates this.
 When active, the OpenSSL preflight check is skipped and no `openssl:` block is
 written to `packages.yaml`.
+
+For fast Docker and pipeline validation, use `hdf5-serial-smoke` with
+`gcc-serial`. It avoids the MPI dependency graph while still testing Spack
+concretization, HDF5 build, module generation, and Stage 6 compile/runtime
+verification.
 
 ## Login-Node Fetch / Compute-Node Build
 
@@ -75,22 +138,92 @@ On clusters where internet access is limited to login nodes:
 `--fetch` writes `spack.lock` and populates the source cache then exits.
 `--build` reads the existing lockfile and skips concretization entirely.
 
-## Render-Only And Standalone Build
+## Render-Only And Prepared Handoff
 
-To render environment YAML without calling Spack at all:
+To render environment YAML without calling Spack at all, use `--render-only`.
+This is for inspection and template debugging; it does not prepare the shared
+Spack tree or lock the compiler choice.
 
 ```bash
 ./scripts/deploy.sh --variant gcc-openmpi --release 20260601 ... --render-only
 ```
 
-To hand the rendered environment to someone else to build (no cse-stack repo
-required on their side):
+For a buildable handoff, use `--render-handoff`. The renderer runs Cluster
+Inspector or accepts `--mock-profile`, prepares Spack, locks either the Spack
+GCC baseline or the `--use-system-gcc` external baseline, renders all YAML, and
+then stops before concretize/install.
+
+```bash
+./scripts/deploy.sh \
+  --variant gcc-openmpi \
+  --release 20260601 \
+  --shared-path /shared \
+  --render-handoff
+```
+
+The release directory then contains:
+
+- `profile.yaml`: the captured Cluster Inspector profile.
+- `render-metadata.json`: release, variant, package set, compiler mode,
+  Spack/GCC versions, module system, target, render host/user/time, and the
+  original command.
+- `env/setup-build-env.sh`: sourceable setup for the manual builder.
+
+The builder should not rerun Cluster Inspector by default. Source the generated
+setup script and run the printed commands:
+
+```bash
+source /shared/cse/20260601/gcc-openmpi/env/setup-build-env.sh
+spack concretize --fresh
+spack install --concurrent-packages 4 --jobs 16 --fail-fast
+```
+
+If site state changed after rendering, rerun `--render-handoff` so the profile,
+compiler decision, and rendered environment agree. After install, return to
+cse-stack for module generation and verification:
+
+```bash
+./scripts/deploy.sh \
+  --variant gcc-openmpi \
+  --release 20260601 \
+  --shared-path /shared \
+  --skip-render \
+  --from-stage 5
+```
+
+For older pre-rendered environments without a generated setup script,
+`scripts/spack_build.sh` remains available:
 
 ```bash
 ./scripts/spack_build.sh \
   --env-dir /shared/cse/20260601/gcc-openmpi/env \
   --spack-root /shared/cse/spack-site
 ```
+
+`spack_build.sh` only concretizes and installs. A cse-stack checkout is still
+needed afterward to run Stage 5/6 and publish `cse-init` plus package modules.
+
+## Per-System GitLab Repository
+
+Use one GitLab project per system or closely related system family when releases
+need local audit history. The system repo should not fork cse-stack by default;
+instead it records the release inputs and outputs:
+
+- captured profiles under `profiles/`
+- copied handoff `profile.yaml`, `render-metadata.json`, rendered `env/*.yaml`,
+  and final `spack.lock` under `releases/<release>/<variant>/`
+- Stage 6 `verify/summary.txt` and any build notes
+- release notes for promoted builds
+- site package-set overrides, if needed
+- artifact manifests that point at mirrors, bootstrap bundles, and buildcaches
+
+Large artifacts should live in GitLab Package Registry, object storage, or a
+site filesystem path referenced by a manifest. Do not commit large source
+mirror or buildcache tarballs directly to Git.
+
+Open policy details remain: promotion approval for current `cse-init`, release
+tag naming, artifact retention, and the supported mechanism for custom
+package-set files.
 
 ## Restricted And Air-Gapped Flow
 
@@ -105,9 +238,44 @@ Use the wrapper scripts for prepared deploys:
 `restricted` requires a bootstrap bundle, source mirror, and authoritative
 lockfile. `airgapped` additionally requires a versioned Spack seed bundle.
 
-## Module Verification
+## Stage 6 Verification
 
-After a successful build:
+Stage 6 runs by default after Stage 5. It first activates the rendered Spack
+environment and runs:
+
+```bash
+spack verify manifest  # run by Stage 6 against non-external installs
+spack verify libraries # run by Stage 6 against public CSE package modules
+```
+
+`manifest` and `libraries` failures are fatal. Stage 6 filters manifest checks
+to non-external installs so system packages under paths such as `/usr` do not
+fail because they were not installed by Spack. Library checks target public CSE
+package modules rather than build tools, which keeps system external linker
+behavior from failing an otherwise usable release.
+
+Stage 6 then starts from a clean module environment, loads any exact site
+external modules recorded in `packages.yaml`, loads the versioned `cse-init`
+module, and compiles representative C, C++, Fortran, MPI, HDF5, NetCDF, and
+Python/Numpy smoke checks when those modules exist in the selected package set.
+If `miniforge3` is published, Stage 6 also loads that module and verifies that
+`conda` starts.
+Runtime checks are disabled by default; pass `--verify-runtime` to run compiled
+binaries and MPI launcher checks.
+
+The summary is written to:
+
+```bash
+${SHARED_PATH}/cse/${CSE_RELEASE}/${CSE_VARIANT}/verify/summary.txt
+```
+
+To skip Stage 6:
+
+```bash
+./scripts/deploy.sh --variant gcc-openmpi --release test --shared-path /tmp/cse-test --skip-verify
+```
+
+For a manual module check after a successful build:
 
 ```bash
 module use /tmp/cse-test/cse/modulefiles

@@ -25,7 +25,7 @@ set gcc_root    "{{ cse_gcc_root }}"
 setenv CSE_RELEASE  $cse_release
 setenv CSE_VARIANT  $variant
 setenv CSE_COMPILER {{ compiler_upper }}
-setenv CSE_MPI      {{ mpi_provider }}
+setenv CSE_MPI      "{{ mpi_provider or mpi_lane }}"
 setenv CSE_ROOT     $cse_root
 setenv CSE_GCC_ROOT $gcc_root
 setenv CSE_CC       {{ cse_cc }}

@@ -76,10 +76,20 @@ _find_installed_gcc_bin() {
 # Walk PATH for the highest-versioned GCC available (used in both live and dry-run).
 _find_newest_gcc() {
     local best="" best_ver=0
-    local dir bin ver
+    local dir bin ver first suffix bin_dir gpp gfc
     for dir in $(echo "$PATH" | tr ':' ' '); do
         for bin in "$dir"/gcc "$dir"/gcc-[0-9]*; do
             [[ -x "$bin" ]] || continue
+            first=$("$bin" --version 2>/dev/null | head -n 1)
+            case "${first}" in
+                *clang*|*Clang*|*LLVM*) continue ;;
+            esac
+            suffix="$(basename "${bin}")"
+            suffix="${suffix#gcc}"
+            bin_dir="$(dirname "${bin}")"
+            gpp="${bin_dir}/g++${suffix}"
+            gfc="${bin_dir}/gfortran${suffix}"
+            [[ -x "${gpp}" && -x "${gfc}" ]] || continue
             ver=$("$bin" -dumpversion 2>/dev/null | cut -d. -f1)
             [[ "$ver" =~ ^[0-9]+$ ]] || continue
             (( ver > best_ver )) && { best_ver=$ver; best=$bin; }
@@ -90,6 +100,9 @@ _find_newest_gcc() {
 
 _publish_compiler_view() {
     local gcc_prefix="$1" gcc_version="$2"
+    local gcc_cc="${3:-${gcc_prefix}/bin/gcc}"
+    local gcc_cxx="${4:-${gcc_prefix}/bin/g++}"
+    local gcc_fc="${5:-${gcc_prefix}/bin/gfortran}"
     local clean_prefix="${COMPILER_VIEW_ROOT}/${gcc_version}"
 
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
@@ -98,6 +111,26 @@ _publish_compiler_view() {
     fi
 
     mkdir -p "${COMPILER_VIEW_ROOT}"
+    if [[ "${gcc_cc}" != "${gcc_prefix}/bin/gcc" \
+       || "${gcc_cxx}" != "${gcc_prefix}/bin/g++" \
+       || "${gcc_fc}" != "${gcc_prefix}/bin/gfortran" ]]; then
+        if [[ -L "${clean_prefix}" ]]; then
+            rm -f "${clean_prefix}"
+        elif [[ -e "${clean_prefix}" && ! -d "${clean_prefix}" ]]; then
+            echo "ERROR: compiler view path exists and is not a directory: ${clean_prefix}" >&2
+            exit 1
+        fi
+        mkdir -p "${clean_prefix}/bin"
+        ln -sfn "${gcc_cc}" "${clean_prefix}/bin/gcc"
+        ln -sfn "${gcc_cxx}" "${clean_prefix}/bin/g++"
+        ln -sfn "${gcc_fc}" "${clean_prefix}/bin/gfortran"
+        chgrp -h "${CSE_GROUP:-$(id -gn)}" \
+            "${clean_prefix}/bin/gcc" \
+            "${clean_prefix}/bin/g++" \
+            "${clean_prefix}/bin/gfortran" 2>/dev/null || true
+        return 0
+    fi
+
     if [[ -e "${clean_prefix}" && ! -L "${clean_prefix}" ]]; then
         echo "ERROR: compiler view path exists and is not a symlink: ${clean_prefix}" >&2
         exit 1
@@ -181,6 +214,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
         if [[ "${USE_SYSTEM_GCC}" == "1" ]]; then
             echo "[dry-run] Stage 2: system GCC → ${_DRY_SYS_GCC} (${_DRY_GCC_VER})"
             echo "[dry-run]           CSE_USE_SYSTEM_GCC=1 — this compiler becomes the CSE compiler (no bootstrap build)"
+            GCC_VERSION="${_DRY_GCC_VER}"
         else
             echo "[dry-run] Stage 2: system GCC → ${_DRY_SYS_GCC} (${_DRY_GCC_VER})"
             echo "[dry-run]           bootstrap compiler only — used to build gcc@${GCC_VERSION}, then discarded"
@@ -250,9 +284,14 @@ EOF
     _SGCC_BIN="$(dirname "${SYS_GCC}")"
     _SGPP="${_SGCC_BIN}/g++${_SGCC_SUFFIX}";   [[ -x "${_SGPP}" ]] || _SGPP="${_SGCC_BIN}/g++"
     _SGFC="${_SGCC_BIN}/gfortran${_SGCC_SUFFIX}"; [[ -x "${_SGFC}" ]] || _SGFC="${_SGCC_BIN}/gfortran"
-    echo "Stage 2: using system compiler: ${SYS_GCC} (${_SGCC_VER}) to build gcc@${GCC_VERSION}"
+    if [[ "${USE_SYSTEM_GCC}" == "1" ]]; then
+        echo "Stage 2: using system compiler: ${SYS_GCC} (${_SGCC_VER}) as the CSE compiler baseline"
+    else
+        echo "Stage 2: using system compiler: ${SYS_GCC} (${_SGCC_VER}) to build gcc@${GCC_VERSION}"
+    fi
 
-    # Register system GCC in SPACK_SITE so spack can use it to build gcc@GCC_VERSION.
+    # Register system GCC in SPACK_SITE so Spack can use it as a bootstrap or
+    # as the selected CSE compiler when --use-system-gcc is enabled.
     # Writing to etc/spack/ inside the spack tree is always read regardless of
     # SPACK_DISABLE_LOCAL_CONFIG — no `spack compiler add` invocation needed.
     mkdir -p "${SPACK_SITE}/etc/spack"
@@ -278,6 +317,9 @@ SYSEOF
 
     if [[ "${USE_SYSTEM_GCC}" == "1" ]]; then
         GCC_BIN="${SYS_GCC}"
+        GCC_CC="${SYS_GCC}"
+        GCC_CXX="${_SGPP}"
+        GCC_FC="${_SGFC}"
         GCC_PREFIX="$(dirname "$(dirname "${GCC_BIN}")")"
         GCC_VERSION="${_SGCC_VER}"
         echo "Stage 2: using system gcc@${GCC_VERSION} as the CSE compiler baseline."
@@ -305,6 +347,9 @@ SYSEOF
         fi
 
         GCC_PREFIX=$(dirname "$(dirname "${GCC_BIN}")")
+        GCC_CC="${GCC_PREFIX}/bin/gcc"
+        GCC_CXX="${GCC_PREFIX}/bin/g++"
+        GCC_FC="${GCC_PREFIX}/bin/gfortran"
         echo "Stage 2: gcc@${GCC_VERSION} prefix: ${GCC_PREFIX}"
     fi
 
@@ -319,9 +364,9 @@ packages:
       prefix: ${GCC_PREFIX}
       extra_attributes:
         compilers:
-          c:       ${GCC_PREFIX}/bin/gcc
-          cxx:     ${GCC_PREFIX}/bin/g++
-          fortran: ${GCC_PREFIX}/bin/gfortran
+          c:       ${GCC_CC}
+          cxx:     ${GCC_CXX}
+          fortran: ${GCC_FC}
     buildable: false
 EOF
 
@@ -337,10 +382,10 @@ compilers:
 - compiler:
     spec: gcc@${GCC_VERSION}
     paths:
-      cc:  ${GCC_PREFIX}/bin/gcc
-      cxx: ${GCC_PREFIX}/bin/g++
-      f77: ${GCC_PREFIX}/bin/gfortran
-      fc:  ${GCC_PREFIX}/bin/gfortran
+      cc:  ${GCC_CC}
+      cxx: ${GCC_CXX}
+      f77: ${GCC_FC}
+      fc:  ${GCC_FC}
     flags: {}
     operating_system: ${OS_SPACK}
     target: ${ARCH_SPACK}
@@ -350,7 +395,7 @@ compilers:
 EOF
 
     echo "Stage 2: publishing compiler view ${COMPILER_VIEW_ROOT}/${GCC_VERSION} -> ${GCC_PREFIX}"
-    _publish_compiler_view "${GCC_PREFIX}" "${GCC_VERSION}"
+    _publish_compiler_view "${GCC_PREFIX}" "${GCC_VERSION}" "${GCC_CC}" "${GCC_CXX}" "${GCC_FC}"
 
     # The site compilers.yaml is only a temporary bootstrap aid. Stage 4 uses
     # gcc-compilers.yaml (env-scoped) so compiler registration has one source of truth.

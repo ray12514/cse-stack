@@ -1,0 +1,10 @@
+description: Reduced serial HDF5 smoke set for Docker and pipeline tests.
+openssl: {}
+variants:
+  gcc-serial:
+    mpi_provider: ""
+    specs:
+      - "hdf5@1.14.4-3 ~mpi +fortran +cxx +hl"
+    views:
+      serial:
+        - "hdf5"

@@ -335,6 +335,12 @@ class SystemProfile:
             return ""
         return f"/opt/cray/pe/mpich/{ver}/ofi/gnu/{gcc_parts[0]}.{gcc_parts[1]}"
 
+    def cray_mpich_module(self) -> str:
+        return (
+            self._get("vendor_substrate", "mpi_module", default="")
+            or self._loaded_module_name("cray-mpich/")
+        )
+
     def cray_libsci_version(self) -> str:
         # TODO: confirm version from actual Cray system
         ver = self._loaded_module_version("cray-libsci/")
@@ -364,6 +370,9 @@ class SystemProfile:
         ver = self.cray_pals_version()
         prefix = self._loaded_module_prefix("cray-pals/")
         return prefix or f"/opt/cray/pe/pals/{ver}"  # TODO: confirm
+
+    def cray_pals_module(self) -> str:
+        return self._loaded_module_name("cray-pals/")
 
     # ------------------------------------------------------------------
     # Libfabric (OFI) — present on Cray/Slingshot systems

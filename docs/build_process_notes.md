@@ -288,6 +288,54 @@ When adding new dual-version packages to a science package set, write them as
 plain specs unless a second axis (variants, MPI providers, etc.) also needs to
 be crossed.
 
+### Stage 6 Verification Boundary
+
+`spack verify` is part of the release gate, but it is not the whole release
+gate. Stage 6 runs `spack verify manifest` against non-external installs to
+catch install-tree drift, and `spack verify libraries` against public CSE
+package modules to catch unresolved shared-library dependencies. Those checks do not
+prove that a user can load `cse-init`, load public package modules, compile
+against the clean views, or avoid accidental dependence on whatever modules
+were already loaded in the deployer's shell.
+
+Resolution:
+
+- Stage 6 runs Spack integrity checks first.
+- Stage 6 then purges or resets modules and reloads exact module-backed
+  externals from rendered `packages.yaml`.
+- The user-facing checks load versioned `cse-init` and compile representative
+  C, C++, Fortran, MPI, HDF5, NetCDF, Python/Numpy, and Miniforge smoke tests
+  when those packages are in the selected package set.
+- Runtime execution, including MPI launch, is opt-in with `--verify-runtime`.
+  It should be used inside a suitable allocation on systems where launchers
+  require scheduler context.
+
+### Miniforge Runtime Smoke
+
+Miniforge can build successfully and still fail only when a user loads the
+module and runs `conda`. Stage 6 treats a published `cse/miniforge3/*` module
+as a runtime surface: it loads the module, requires `conda` on `PATH`, and runs
+`conda --version`. With `--verify-runtime`, it also runs `conda info --base`.
+
+If a site sees a Miniforge failure outside Stage 6, capture the exact command,
+loaded modules, and error text. Common next checks are whether the module
+projects the clean view prefix, whether generated script shebangs point at the
+installed prefix, and whether broad inherited environment variables were
+present when testing manually.
+
+### Prepared Render Handoff
+
+`deploy.sh --render-only` remains an inspection path: it renders YAML and avoids
+Spack/compiler setup. `deploy.sh --render-handoff` is the buildable handoff
+path. It captures or accepts a Cluster Inspector profile, runs Stage 2 to lock
+the compiler baseline, renders the full environment, copies the profile to the
+release/variant directory, writes `render-metadata.json`, and generates
+`env/setup-build-env.sh`.
+
+The manual builder sources that setup script and runs `spack concretize --fresh`
+and `spack install`. Cluster Inspector is not rerun during the manual build; if
+site facts changed, refresh by rerunning `--render-handoff`.
+
 ## Open Items
 
 - Decide when to introduce signed production buildcaches and key trust

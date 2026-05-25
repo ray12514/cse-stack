@@ -162,5 +162,32 @@ Use optimized targets only as explicit site-specific layers:
 - Inspect rendered module YAML for root-spec-derived public `include` plus
   `exclude: ["*"]`.
 - Inspect generated modulefiles for curated module load/depends-on statements.
+- Run `scripts/docker_hdf5_serial_smoke_test.sh` for a Docker proof that the
+  image GCC can be used as the external compiler baseline, the `module` command
+  is initialized, serial HDF5 builds, and Stage 6 can verify the result.
 - In a clean module shell, verify loading `cse/netcdf-fortran/4.6.1-mpi` loads
   NetCDF-C, HDF5, and MPI, but not the full low-level dependency graph.
+
+## Stage 6 Verification
+
+Stage 6 is the post-install release gate. It is intentionally separate from
+Stage 4 and Stage 5 because a successful `spack install` and generated module
+tree do not prove that users can load and build against the published CSE.
+
+The verification contract has two layers:
+
+- Spack integrity checks: `spack verify manifest` for non-external installs and
+  `spack verify libraries` for public CSE package modules.
+- CSE user workflow checks: clean module environment, exact site external
+  module preload from rendered `packages.yaml`, versioned `cse-init` load, and
+  representative compile smoke tests for the compiler baseline, MPI, HDF5,
+  NetCDF, Python/Numpy, and Miniforge when present.
+
+Runtime checks are opt-in with `--verify-runtime`; they may need a scheduler
+allocation or site-specific MPI launcher.
+
+Inherited module state is never trusted. Stage 6 purges or resets the module
+environment first, then reloads only modules that are part of the captured site
+external contract. If an exact required external module is unavailable on a
+target system, integrated/vendor variants fail with a clear verification error
+instead of silently using a site default from another module version.

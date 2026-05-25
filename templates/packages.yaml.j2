@@ -99,6 +99,9 @@ packages:
     externals:
       - spec: cray-mpich@{{ cray_mpich_version }}
         prefix: {{ cray_mpich_prefix }}
+{% if cray_mpich_module %}
+        modules: [{{ cray_mpich_module }}]
+{% endif %}
 {% endif %}
 
 {% if is_aocc and aocc_version %}
@@ -145,6 +148,10 @@ packages:
     buildable: false
     externals:
       - spec: pals@{{ cray_pals_version }}
-        modules: [cray-pals/{{ cray_pals_version }}]
         prefix: {{ cray_pals_prefix }}
+{% if cray_pals_module %}
+        modules: [{{ cray_pals_module }}]
+{% else %}
+        modules: [cray-pals/{{ cray_pals_version }}]
+{% endif %}
 {% endif %}

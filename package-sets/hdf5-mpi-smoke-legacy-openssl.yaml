@@ -5,8 +5,8 @@ variants:
   gcc-openmpi:
     mpi_provider: openmpi
     specs:
-      - "openmpi@4.1.6 fabrics=auto"
-      - "hdf5@1.14.4 +mpi  +fortran +cxx +hl"
+      - "openmpi@4.1.6 fabrics=auto ~rsh"
+      - "hdf5@1.14.4-3 +mpi  +fortran +cxx +hl"
     views:
       mpi:
         - "+mpi"
@@ -15,7 +15,7 @@ variants:
     mpi_provider: mpich
     specs:
       - "mpich@{mpich_version} device=ch4 netmod=ofi pmi=pmix ~hydra +slurm"
-      - "hdf5@1.14.4 +mpi  +fortran +cxx +hl ^mpich@{mpich_version}"
+      - "hdf5@1.14.4-3 +mpi  +fortran +cxx +hl ^mpich@{mpich_version}"
     views:
       mpi:
         - "+mpi"

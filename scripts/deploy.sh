@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # deploy.sh — CSE deploy orchestrator.
 #
-# Runs Stage 1–5 in order.  Each stage script is independently runnable;
+# Runs Stage 1–6 in order.  Each stage script is independently runnable;
 # this script just composes them and manages shared environment variables.
 #
 # Usage:
@@ -26,13 +26,18 @@
 #                       [--bootstrap-bundle <path>] \
 #                       [--lockfile <path>]        \
 #                       [--module-system {lmod|tcl}]   \
+#                       [--use-system-gcc]         \
 #                       [--preflight]              \
 #                       [--preflight-strict]       \
 #                       [--preflight-timeout N]    \
 #                       [--render-only]            \
+#                       [--render-handoff]         \
 #                       [--skip-render]            \
 #                       [--fetch]                  \
-#                       [--build]
+#                       [--build]                  \
+#                       [--verify|--skip-verify]  \
+#                       [--verify-runtime]         \
+#                       [--verify-strict]
 #
 # Options:
 #   --variant         Required. Variant slug: <compiler>-<mpi> or <compiler>-serial.
@@ -79,6 +84,9 @@
 #                     target without re-concretizing. Required for restricted
 #                     and air-gapped deploys.
 #   --module-system   Override auto-detected module system (lmod or tcl).
+#   --use-system-gcc  Use the detected PATH GCC as the CSE compiler baseline
+#                     instead of building gcc@<ver>. Intended for Docker smoke
+#                     tests and throwaway local builds, not production releases.
 #   --preflight       HEAD-check every source tarball URL after concretize and
 #                     before install.  Warns on unreachable URLs; build continues.
 #   --preflight-strict  Same as --preflight but abort the build if any URL is
@@ -87,6 +95,10 @@
 #   --render-only     Run stages 1+3 and render all remaining templates (config,
 #                     modules, spack YAML), then exit without calling any spack
 #                     command.  Lets a human take over with raw `spack -e` commands.
+#   --render-handoff  Run stages 1-3, prepare Spack/compiler state, render all
+#                     build YAML, preserve the captured profile and metadata,
+#                     and write env/setup-build-env.sh for a manual builder.
+#                     Stops before concretize/install.
 #   --skip-render     Skip stages 1-3; assume env YAML files already exist.
 #                     Jump directly to spack concretize+install in stage 4.
 #   --fetch           (passed to stage 4) Login-node step: concretize + spack fetch
@@ -95,6 +107,10 @@
 #   --build           (passed to stage 4) Compute-node step: spack install using the
 #                     existing spack.lock; skip concretize and fetch.  Requires
 #                     --fetch to have been run first.
+#   --verify          Run Stage 6 post-install verification (default for full builds).
+#   --skip-verify     Skip Stage 6.
+#   --verify-runtime  Allow Stage 6 to run compiled binaries and MPI launch checks.
+#   --verify-strict   Reserved for optional Stage 6 checks; current checks are fatal.
 #   --mock-profile    Path to a mock Cluster Inspector YAML profile.
 #                     Useful for testing Cray variants on a non-Cray host.
 set -euo pipefail
@@ -108,6 +124,8 @@ export REPO_ROOT
 # ------------------------------------------------------------------
 # Parse arguments
 # ------------------------------------------------------------------
+ORIGINAL_COMMAND="$(printf '%q ' "$0" "$@")"
+ORIGINAL_COMMAND="${ORIGINAL_COMMAND% }"
 VARIANT=""
 RELEASE=""
 SHARED_PATH=""
@@ -133,12 +151,17 @@ ARTIFACT_MANIFEST="${CSE_ARTIFACT_MANIFEST:-}"
 MODULE_SYSTEM_OVERRIDE=""
 MOCK_PROFILE=""
 SPACK_VERSION_OVERRIDE=""
+CSE_USE_SYSTEM_GCC=0
 CSE_FETCH_PREFLIGHT=0
 CSE_PREFLIGHT_STRICT=0
 CSE_PREFLIGHT_TIMEOUT=5
 RENDER_ONLY=0
+RENDER_HANDOFF=0
 SKIP_RENDER=0
 STAGE4_BUILD_MODE="full"
+CSE_VERIFY=1
+CSE_VERIFY_RUNTIME=0
+CSE_VERIFY_STRICT=0
 
 require_arg_value() {
     local opt="$1"
@@ -176,13 +199,19 @@ while [[ $# -gt 0 ]]; do
         --module-system)  require_arg_value "$1" "${2:-}"; MODULE_SYSTEM_OVERRIDE="$2"; shift 2 ;;
         --mock-profile)   require_arg_value "$1" "${2:-}"; MOCK_PROFILE="$2";           shift 2 ;;
         --spack-version)  require_arg_value "$1" "${2:-}"; SPACK_VERSION_OVERRIDE="$2"; shift 2 ;;
+        --use-system-gcc) CSE_USE_SYSTEM_GCC=1;                                shift   ;;
         --preflight)        CSE_FETCH_PREFLIGHT=1;                               shift   ;;
         --preflight-strict) CSE_FETCH_PREFLIGHT=1; CSE_PREFLIGHT_STRICT=1;      shift   ;;
         --preflight-timeout) require_arg_value "$1" "${2:-}"; CSE_PREFLIGHT_TIMEOUT="$2"; shift 2 ;;
         --render-only)      RENDER_ONLY=1;                                       shift   ;;
+        --render-handoff)   RENDER_HANDOFF=1;                                    shift   ;;
         --skip-render)      SKIP_RENDER=1;                                       shift   ;;
         --fetch)            SAW_FETCH=1; STAGE4_BUILD_MODE="fetch";              shift   ;;
         --build)            SAW_BUILD=1; STAGE4_BUILD_MODE="build";              shift   ;;
+        --verify)           CSE_VERIFY=1;                                        shift   ;;
+        --skip-verify)      CSE_VERIFY=0;                                        shift   ;;
+        --verify-runtime)   CSE_VERIFY_RUNTIME=1;                                shift   ;;
+        --verify-strict)    CSE_VERIFY_STRICT=1;                                 shift   ;;
         -h|--help)
             sed -n '3,49p' "${BASH_SOURCE[0]}"
             exit 0
@@ -247,16 +276,32 @@ if [[ "${SPACK_CACHE_ONLY}" == "1" && -z "${BUILDCACHE_URI}" ]]; then
     echo "ERROR: --cache-only requires --buildcache-uri or BUILDCACHE_URI" >&2
     errors=1
 fi
-if [[ "${FROM_STAGE}" -lt 1 || "${FROM_STAGE}" -gt 5 ]]; then
-    echo "ERROR: --from-stage must be between 1 and 5" >&2
+if [[ "${FROM_STAGE}" -lt 1 || "${FROM_STAGE}" -gt 6 ]]; then
+    echo "ERROR: --from-stage must be between 1 and 6" >&2
     errors=1
 fi
 if [[ "${RENDER_ONLY}" == "1" && "${SKIP_RENDER}" == "1" ]]; then
     echo "ERROR: --render-only and --skip-render are mutually exclusive" >&2
     errors=1
 fi
+if [[ "${RENDER_HANDOFF}" == "1" && "${RENDER_ONLY}" == "1" ]]; then
+    echo "ERROR: --render-handoff and --render-only are mutually exclusive" >&2
+    errors=1
+fi
+if [[ "${RENDER_HANDOFF}" == "1" && "${SKIP_RENDER}" == "1" ]]; then
+    echo "ERROR: --render-handoff and --skip-render are mutually exclusive" >&2
+    errors=1
+fi
+if [[ "${RENDER_HANDOFF}" == "1" && "${FROM_STAGE}" -ne 1 ]]; then
+    echo "ERROR: --render-handoff must start from stage 1 so the captured profile can be preserved" >&2
+    errors=1
+fi
 if [[ "${SAW_FETCH:-0}" == "1" && "${SAW_BUILD:-0}" == "1" ]]; then
     echo "ERROR: --fetch and --build are mutually exclusive" >&2
+    errors=1
+fi
+if [[ "${RENDER_HANDOFF}" == "1" && ( "${SAW_FETCH:-0}" == "1" || "${SAW_BUILD:-0}" == "1" ) ]]; then
+    echo "ERROR: --render-handoff cannot be combined with --fetch or --build" >&2
     errors=1
 fi
 if [[ "${RESTART_RELEASE}" == "1" && "${FROM_STAGE}" -gt 3 ]]; then
@@ -296,6 +341,7 @@ export CSE_ARTIFACT_MANIFEST="${ARTIFACT_MANIFEST}"
 # Both variants now bootstrap GCC from Spack.
 export GCC_VERSION="${GCC_VERSION_OVERRIDE:-${GCC_VERSION:-13.3.0}}"
 export SPACK_VERSION="${SPACK_VERSION_OVERRIDE:-${SPACK_VERSION:-v1.1.1}}"
+export CSE_USE_SYSTEM_GCC
 # MPICH_VERSION: explicit override for *-mpich variants; when unset render.py auto-detects
 # from cray-mpich series via Cluster Inspector (8.x→3.4.3, 9.x→4.2.2).
 if [[ -n "${MPICH_VERSION_OVERRIDE}" ]]; then
@@ -327,8 +373,12 @@ export CSE_GROUP="${CSE_GROUP_OVERRIDE:-${CSE_GROUP:-$(id -gn)}}"
 # environment's authoritative packages.yaml.
 export SPACK_DISABLE_LOCAL_CONFIG=1
 export RENDER_ONLY
+export RENDER_HANDOFF
 export SKIP_RENDER
 export STAGE4_BUILD_MODE
+export CSE_VERIFY
+export CSE_VERIFY_RUNTIME
+export CSE_VERIFY_STRICT
 
 # ------------------------------------------------------------------
 # Auto-detect module system (or use override)
@@ -362,6 +412,9 @@ echo "  network mode : ${NETWORK_MODE}"
 echo "  group        : ${CSE_GROUP}"
 echo "  spack version: ${SPACK_VERSION}"
 echo "  gcc version  : ${GCC_VERSION}"
+if [[ "${CSE_USE_SYSTEM_GCC}" == "1" ]]; then
+    echo "  gcc mode     : system external"
+fi
 if [[ "${VARIANT_MPI}" == "mpich" ]]; then
     echo "  mpich version: ${MPICH_VERSION:-auto-detect from profile}"
 fi
@@ -372,6 +425,17 @@ echo "  package set  : ${CSE_PACKAGE_SET}"
 echo "  target       : ${SPACK_TARGET}"
 if [[ "${SPACK_CACHE_ONLY}" == "1" ]]; then
     echo "  cache only   : yes"
+fi
+if [[ "${CSE_VERIFY}" == "1" ]]; then
+    echo "  verify       : yes"
+    if [[ "${CSE_VERIFY_RUNTIME}" == "1" ]]; then
+        echo "  verify runtime: yes"
+    fi
+    if [[ "${CSE_VERIFY_STRICT}" == "1" ]]; then
+        echo "  verify strict : yes"
+    fi
+else
+    echo "  verify       : skipped"
 fi
 if [[ -n "${MIRROR_PATH}" ]]; then
     echo "  mirror       : ${MIRROR_PATH}"
@@ -387,6 +451,8 @@ if [[ -n "${AUTHORITATIVE_LOCKFILE}" ]]; then
 fi
 if [[ ${DRY_RUN} == 1 ]]; then
     echo "  mode         : DRY-RUN (no changes will be made)"
+elif [[ "${RENDER_HANDOFF}" == "1" ]]; then
+    echo "  mode         : render handoff"
 fi
 if [[ "${RESTART_RELEASE}" == "1" ]]; then
     echo "  restart      : yes"
@@ -474,6 +540,13 @@ python3 "${REPO_ROOT}/scripts/lib/package_sets.py" \
     --variant "${VARIANT}" \
     --mpich-version "${MPICH_VERSION:-}"
 
+if [[ -z "${PROFILE_FILE:-}" && "${FROM_STAGE}" -gt 1 ]]; then
+    _STORED_PROFILE="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/profile.yaml"
+    if [[ -f "${_STORED_PROFILE}" ]]; then
+        export PROFILE_FILE="${_STORED_PROFILE}"
+    fi
+fi
+
 restart_release_state() {
     local release_dir="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}"
     local old_lockfile="${release_dir}/env/spack.lock"
@@ -543,6 +616,240 @@ restart_release_state() {
 
 restart_release_state
 
+write_mirrors_yaml() {
+    local env_dir="$1"
+    local mirror_uri=""
+
+    if [[ -z "${MIRROR_PATH:-}" && -z "${BUILDCACHE_URI:-}" ]]; then
+        return 0
+    fi
+
+    if [[ "${DRY_RUN}" == "1" ]]; then
+        [[ -z "${MIRROR_PATH:-}" ]] || echo "[dry-run] would write source mirror ${MIRROR_PATH} to ${env_dir}/mirrors.yaml"
+        [[ -z "${BUILDCACHE_URI:-}" ]] || echo "[dry-run] would write build cache ${BUILDCACHE_URI} to ${env_dir}/mirrors.yaml"
+        return 0
+    fi
+
+    : > "${env_dir}/mirrors.yaml"
+    printf 'mirrors:\n' >> "${env_dir}/mirrors.yaml"
+    if [[ -n "${MIRROR_PATH:-}" ]]; then
+        if [[ "${MIRROR_PATH}" != *://* ]]; then
+            mirror_uri="file://${MIRROR_PATH}"
+        else
+            mirror_uri="${MIRROR_PATH}"
+        fi
+        printf '  cse-local: %s\n' "${mirror_uri}" >> "${env_dir}/mirrors.yaml"
+    fi
+    if [[ -n "${BUILDCACHE_URI:-}" ]]; then
+        printf '  cse-buildcache: %s\n' "${BUILDCACHE_URI}" >> "${env_dir}/mirrors.yaml"
+    fi
+}
+
+render_remaining_yaml() {
+    local label="$1"
+    local variant_env_dir="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/env"
+    local render_args=(
+        --variant "${VARIANT}"
+        --shared-path "${SHARED_PATH}"
+        --release "${RELEASE}"
+    )
+
+    if [[ -n "${PROFILE_FILE:-}" && -f "${PROFILE_FILE}" ]]; then
+        render_args+=(--profile "${PROFILE_FILE}")
+    fi
+
+    echo "--- ${label}: rendering config.yaml, modules.yaml, spack.yaml..."
+    if [[ "${DRY_RUN}" == "1" ]]; then
+        python3 "${REPO_ROOT}/scripts/lib/render.py" "${render_args[@]}" \
+            --template "${REPO_ROOT}/templates/config.yaml.j2" --dry-run
+        python3 "${REPO_ROOT}/scripts/lib/render.py" "${render_args[@]}" \
+            --template "${REPO_ROOT}/templates/modules.yaml.j2" --dry-run
+        write_mirrors_yaml "${variant_env_dir}"
+        python3 "${REPO_ROOT}/scripts/lib/render.py" "${render_args[@]}" \
+            --template "${REPO_ROOT}/templates/spack.yaml.j2" --dry-run
+        return 0
+    fi
+
+    umask 002
+    mkdir -p "${variant_env_dir}"
+    python3 "${REPO_ROOT}/scripts/lib/render.py" "${render_args[@]}" \
+        --template "${REPO_ROOT}/templates/config.yaml.j2" \
+        --output "${variant_env_dir}/config.yaml"
+    python3 "${REPO_ROOT}/scripts/lib/render.py" "${render_args[@]}" \
+        --template "${REPO_ROOT}/templates/modules.yaml.j2" \
+        --output "${variant_env_dir}/modules.yaml"
+    write_mirrors_yaml "${variant_env_dir}"
+    python3 "${REPO_ROOT}/scripts/lib/render.py" "${render_args[@]}" \
+        --template "${REPO_ROOT}/templates/spack.yaml.j2" \
+        --output "${variant_env_dir}/spack.yaml"
+    echo "--- ${label}: all YAML written to ${variant_env_dir}"
+}
+
+write_render_handoff_artifacts() {
+    local variant_dir="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}"
+    local variant_env_dir="${variant_dir}/env"
+    local profile_dest="${variant_dir}/profile.yaml"
+    local metadata_dest="${variant_dir}/render-metadata.json"
+    local setup_dest="${variant_env_dir}/setup-build-env.sh"
+
+    if [[ -z "${PROFILE_FILE:-}" || ! -f "${PROFILE_FILE:-}" ]]; then
+        echo "ERROR: --render-handoff requires a captured or mock profile from Stage 1" >&2
+        exit 1
+    fi
+
+    if [[ "${DRY_RUN}" == "1" ]]; then
+        echo "[dry-run] render-handoff: would copy ${PROFILE_FILE} to ${profile_dest}"
+        echo "[dry-run] render-handoff: would write ${metadata_dest}"
+        echo "[dry-run] render-handoff: would write ${setup_dest}"
+        return 0
+    fi
+
+    mkdir -p "${variant_dir}" "${variant_env_dir}"
+    if [[ "${PROFILE_FILE}" != "${profile_dest}" ]]; then
+        cp "${PROFILE_FILE}" "${profile_dest}"
+    fi
+    export PROFILE_FILE="${profile_dest}"
+
+    CSE_ORIGINAL_COMMAND="${ORIGINAL_COMMAND}" python3 - "${metadata_dest}" "${setup_dest}" <<'PY'
+import getpass
+import json
+import os
+import shlex
+import socket
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+metadata_path = Path(sys.argv[1])
+setup_path = Path(sys.argv[2])
+env = os.environ
+
+shared_path = env["SHARED_PATH"]
+release = env["CSE_RELEASE"]
+variant = env["CSE_VARIANT"]
+package_set = env.get("CSE_PACKAGE_SET", "full")
+target = env.get("SPACK_TARGET", "x86_64")
+spack_root = env.get("SPACK_ROOT") or f"{shared_path}/cse/spack-site"
+variant_dir = f"{shared_path}/cse/{release}/{variant}"
+env_dir = f"{variant_dir}/env"
+profile_file = f"{variant_dir}/profile.yaml"
+metadata_file = str(metadata_path)
+compiler_mode = "system-gcc" if env.get("CSE_USE_SYSTEM_GCC") == "1" else "spack-gcc"
+install_jobs = env.get("SPACK_INSTALL_JOBS", "4")
+make_jobs = env.get("SPACK_MAKE_JOBS", "16")
+cache_only = env.get("SPACK_CACHE_ONLY", "0")
+no_check_signature = env.get("SPACK_NO_CHECK_SIGNATURE", "0")
+buildcache_uri = env.get("BUILDCACHE_URI", "")
+
+metadata = {
+    "release": release,
+    "variant": variant,
+    "package_set": package_set,
+    "compiler_mode": compiler_mode,
+    "spack_version": env.get("SPACK_VERSION", ""),
+    "gcc_version": env.get("GCC_VERSION", ""),
+    "module_system": env.get("MODULE_SYSTEM", ""),
+    "target": target,
+    "shared_path": shared_path,
+    "spack_root": spack_root,
+    "profile": profile_file,
+    "env_dir": env_dir,
+    "render_host": socket.gethostname(),
+    "render_user": getpass.getuser(),
+    "render_time_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "original_command": env.get("CSE_ORIGINAL_COMMAND", ""),
+    "install_jobs": install_jobs,
+    "make_jobs": make_jobs,
+    "mirror_path": env.get("MIRROR_PATH", ""),
+    "buildcache_uri": buildcache_uri,
+    "cache_only": cache_only == "1",
+}
+metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+
+def q(value: str) -> str:
+    return shlex.quote(str(value))
+
+install_cmd = (
+    f"spack install --concurrent-packages {shlex.quote(install_jobs)} "
+    f"--jobs {shlex.quote(make_jobs)} --fail-fast"
+)
+if cache_only == "1":
+    install_cmd += " --cache-only"
+if no_check_signature == "1" and buildcache_uri:
+    install_cmd += " --no-check-signature"
+
+return_cmd_parts = [
+    "./scripts/deploy.sh",
+    "--variant", variant,
+    "--release", release,
+    "--shared-path", shared_path,
+    "--package-set", package_set,
+    "--target", target,
+    "--module-system", env.get("MODULE_SYSTEM", "lmod"),
+]
+if compiler_mode == "system-gcc":
+    return_cmd_parts.append("--use-system-gcc")
+return_cmd_parts.extend(["--skip-render", "--from-stage", "5"])
+return_cmd = " ".join(shlex.quote(part) for part in return_cmd_parts)
+
+setup = f"""# Source this file to build CSE release {release}/{variant}.
+# Generated by deploy.sh --render-handoff. Do not execute it in a subshell.
+
+export SHARED_PATH={q(shared_path)}
+export CSE_SHARED_PATH={q(shared_path)}
+export CSE_RELEASE={q(release)}
+export CSE_RELEASE_DEFAULT={q(release)}
+export CSE_VARIANT={q(variant)}
+export CSE_PACKAGE_SET={q(package_set)}
+export SPACK_ROOT={q(spack_root)}
+export SPACK_TARGET={q(target)}
+export SPACK_INSTALL_JOBS={q(install_jobs)}
+export SPACK_MAKE_JOBS={q(make_jobs)}
+export SPACK_CACHE_ONLY={q(cache_only)}
+export MIRROR_PATH={q(env.get("MIRROR_PATH", ""))}
+export BUILDCACHE_URI={q(buildcache_uri)}
+export MODULE_SYSTEM={q(env.get("MODULE_SYSTEM", ""))}
+export PROFILE_FILE={q(profile_file)}
+export CSE_PROFILE_FILE={q(profile_file)}
+export CSE_RENDER_METADATA={q(metadata_file)}
+export CSE_ENV_DIR={q(env_dir)}
+export CSE_VARIANT_DIR={q(variant_dir)}
+export SPACK_DISABLE_LOCAL_CONFIG=1
+export SPACK_USER_CACHE_PATH="${{SHARED_PATH}}/cse/cache/spack"
+export SPACK_SYSTEM_CONFIG_PATH=/dev/null
+export SPACK_USER_CONFIG_PATH=/dev/null
+export SPACK_NO_CHECK_SIGNATURE={q(no_check_signature)}
+
+if [ ! -f "${{SPACK_ROOT}}/share/spack/setup-env.sh" ]; then
+    echo "ERROR: ${{SPACK_ROOT}}/share/spack/setup-env.sh not found" >&2
+    return 1 2>/dev/null || exit 1
+fi
+
+. "${{SPACK_ROOT}}/share/spack/setup-env.sh"
+
+if ! spack env activate -d "${{CSE_ENV_DIR}}"; then
+    echo "ERROR: failed to activate Spack environment ${{CSE_ENV_DIR}}" >&2
+    return 1 2>/dev/null || exit 1
+fi
+
+cat <<'CSE_HANDOFF_NEXT'
+CSE build environment active.
+Next commands:
+  spack concretize --fresh
+  {install_cmd}
+  {return_cmd}
+CSE_HANDOFF_NEXT
+"""
+setup_path.write_text(setup)
+setup_path.chmod(0o775)
+PY
+    chgrp "${CSE_GROUP:-$(id -gn)}" "${profile_dest}" "${metadata_dest}" "${setup_dest}" 2>/dev/null || true
+
+    echo "--- render-handoff: copied profile to ${profile_dest}"
+    echo "--- render-handoff: wrote metadata to ${metadata_dest}"
+    echo "--- render-handoff: wrote setup script to ${setup_dest}"
+}
+
 # ------------------------------------------------------------------
 # Stage runner
 # ------------------------------------------------------------------
@@ -571,51 +878,52 @@ run_stage 2 stage2_spack.sh
 run_stage 3 stage3_externals.sh
 
 if [[ "${RENDER_ONLY}" == "1" ]]; then
-    # Render config.yaml, modules.yaml, spack.yaml without calling spack
-    echo "--- render-only: rendering config.yaml, modules.yaml, spack.yaml..."
-    _RENDER_ARGS=(
-        --variant   "${VARIANT}"
-        --shared-path "${SHARED_PATH}"
-        --release   "${RELEASE}"
-    )
-    if [[ -n "${PROFILE_FILE:-}" && -f "${PROFILE_FILE}" ]]; then
-        _RENDER_ARGS+=(--profile "${PROFILE_FILE}")
-    fi
-    _VARIANT_ENV_DIR="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/env"
-    if [[ "${DRY_RUN}" == "1" ]]; then
-        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
-            --template "${REPO_ROOT}/templates/config.yaml.j2"  --dry-run
-        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
-            --template "${REPO_ROOT}/templates/modules.yaml.j2" --dry-run
-        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
-            --template "${REPO_ROOT}/templates/spack.yaml.j2"   --dry-run
-    else
-        umask 002
-        mkdir -p "${_VARIANT_ENV_DIR}"
-        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
-            --template "${REPO_ROOT}/templates/config.yaml.j2" \
-            --output "${_VARIANT_ENV_DIR}/config.yaml"
-        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
-            --template "${REPO_ROOT}/templates/modules.yaml.j2" \
-            --output "${_VARIANT_ENV_DIR}/modules.yaml"
-        python3 "${REPO_ROOT}/scripts/lib/render.py" "${_RENDER_ARGS[@]}" \
-            --template "${REPO_ROOT}/templates/spack.yaml.j2" \
-            --output "${_VARIANT_ENV_DIR}/spack.yaml"
-        echo "--- render-only: all YAML written to ${_VARIANT_ENV_DIR}"
+    render_remaining_yaml "render-only"
+    if [[ "${DRY_RUN}" != "1" ]]; then
+        _VARIANT_ENV_DIR="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/env"
         echo "--- render-only: run  spack -e ${_VARIANT_ENV_DIR} concretize  to continue"
     fi
+elif [[ "${RENDER_HANDOFF}" == "1" ]]; then
+    render_remaining_yaml "render-handoff"
+    write_render_handoff_artifacts
 else
     run_stage 4 stage4_build.sh
     run_stage 5 stage5_modules.sh
+    if [[ "${CSE_VERIFY}" == "1" ]]; then
+        run_stage 6 stage6_verify.sh
+    else
+        echo "--- Stage 6: skipped (--skip-verify)"
+    fi
 fi
 
 echo "========================================================"
 if [[ ${DRY_RUN} == 1 ]]; then
     echo " Dry-run complete.  No changes were made."
+elif [[ "${RENDER_ONLY}" == "1" ]]; then
+    _VARIANT_ENV_DIR="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/env"
+    echo " Render-only complete."
+    echo " Rendered environment:"
+    echo "   ${_VARIANT_ENV_DIR}"
+    echo " Continue manually with:"
+    echo "   . ${SHARED_PATH}/cse/spack-site/share/spack/setup-env.sh"
+    echo "   spack -e ${_VARIANT_ENV_DIR} concretize --fresh"
+    echo "   spack -e ${_VARIANT_ENV_DIR} install --fail-fast"
+    echo " Then return for modules and verification with:"
+    echo "   ./scripts/deploy.sh --variant ${VARIANT} --release ${RELEASE} --shared-path ${SHARED_PATH} --skip-render --from-stage 5"
+elif [[ "${RENDER_HANDOFF}" == "1" ]]; then
+    _VARIANT_ENV_DIR="${SHARED_PATH}/cse/${RELEASE}/${VARIANT}/env"
+    echo " Render handoff complete."
+    echo " Handoff setup:"
+    echo "   ${_VARIANT_ENV_DIR}/setup-build-env.sh"
+    echo " Manual builder commands:"
+    echo "   source ${_VARIANT_ENV_DIR}/setup-build-env.sh"
+    echo "   spack concretize --fresh"
+    echo "   spack install --concurrent-packages ${SPACK_INSTALL_JOBS} --jobs ${SPACK_MAKE_JOBS} --fail-fast"
+    echo " Then return for modules and verification with the command printed by setup-build-env.sh."
 else
     echo " Deploy complete."
     echo " Users can now load the CSE environment with:"
-    echo "   module use ${SITE_MODULE_PATH}"
+    echo "   module use ${SITE_MODULE_PATH:-${SHARED_PATH}/cse/modulefiles}"
     _COMPILER_UPPER="$(echo "${VARIANT_COMPILER}" | tr '[:lower:]' '[:upper:]')"
     if [[ "${VARIANT_MPI}" == "serial" ]]; then
         _MPI_LABEL="serial"

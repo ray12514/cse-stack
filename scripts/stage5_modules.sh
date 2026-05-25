@@ -236,7 +236,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[dry-run]   mkdir -p $(dirname "${INIT_VERSIONED_DST}")"
     echo "[dry-run]   python3 ${REPO_ROOT}/scripts/lib/render.py --template ${INIT_TEMPLATE} --output ${INIT_CURRENT_DST} --variant ${CSE_VARIANT} --shared-path ${SHARED_PATH} --release ${CSE_RELEASE}"
     echo "[dry-run]   python3 ${REPO_ROOT}/scripts/lib/render.py --template ${INIT_TEMPLATE} --output ${INIT_VERSIONED_DST} --variant ${CSE_VARIANT} --shared-path ${SHARED_PATH} --release ${CSE_RELEASE}"
-    exit 0
+    return 0 2>/dev/null || exit 0
 fi
 
 if [[ -z "${SPACK_ROOT:-}" ]]; then

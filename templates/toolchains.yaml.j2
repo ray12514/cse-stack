@@ -6,6 +6,9 @@
 # Spack concretization selects the correct external. GCC is resolved via
 # gcc-compilers.yaml (written by stage 2); no require: needed for GCC.
 packages:
+{% if is_serial and not (is_cce and cce_version) and not (is_aocc and aocc_version) and not (is_nvhpc and nvhpc_version) and not (is_rocmcc and rocmcc_version) and not (is_intel and intel_version) %}
+  all: {}
+{% else %}
   all:
 {% if is_cce and cce_version %}
     require:
@@ -26,6 +29,7 @@ packages:
 {% if not is_serial %}
     providers:
       mpi: [{{ mpi_provider }}]
+{% endif %}
 {% endif %}
 {% if is_craympich and cray_mpich_version %}
   cray-mpich:
