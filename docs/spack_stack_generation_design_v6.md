@@ -46,7 +46,7 @@ concept.
 | **Stack file** | The stack-intent document (`stack.yaml`). Stack policy only; no detected system facts. |
 | **Package set** | A named list of root specs grouped by purpose (`core-foundation`, `science-full`, `science-gpu`). One file per set under `package-sets/`. Referenced by name from `stack.yaml.lanes[*].package_set`. |
 | **Template set** | The collection of Jinja-style templates the render step expands. Versioned by name (`v6`) and selected by `stack.yaml.templates.set`. |
-| **Lane** | A single Spack environment representing one (compiler, kind) pairing within a stack. Examples: `gcc/core`, `cce/serial`, `cce/mpi-craympich`, `rocmcc/gpu-craympich`. A lane has its own `spack.yaml`, its own lockfile, its own view, and its own module root. |
+| **Lane** | A single Spack environment representing one (compiler, kind) pairing within a stack. Examples: `gcc/core`, `cce/serial`, `cce/mpi-craympich`, `gcc/gpu-craympich-gfx90a`. A lane has its own `spack.yaml`, its own lockfile, its own view, and its own module root. |
 | **Lane kind** | One of `core` / `serial` / `mpi` / `gpu`. The kind controls which scopes the lane includes and which package set it expands. |
 | **Front-door module** | The single user-facing module that selects a lane. Loading the front-door module prepends the lane's MODULEPATH and (for site-external lanes) the platform modules the lane depends on. Example: `CSE/CCE/mpi-craympich`. |
 | **Scope** | A directory of Spack config files (`packages.yaml`, `toolchains.yaml`, etc.) that a lane's `include::` list pulls in. Lives under `templates/configs/<scope-name>/` in source and `configs/<scope-name>/` in the rendered workspace. |
@@ -171,6 +171,16 @@ Important rules:
 - Use one `include::` list with the selected scopes directly underneath it.
 - Do not rely on environment variables as the main isolation mechanism for production environments.
 
+**Ordering rule: most-specific first, `common` last.** Spack reads
+include scopes in list order with later scopes overriding earlier
+scopes. Production environments use the order **most-specific →
+most-general**, with the `common` scope always last so its policy
+(foundation `require:` pins, `unify: when_possible`, mirror
+declarations) cannot be silently overridden by a lane-specific scope.
+A lane that needs to override common policy must do so explicitly via
+an inline override in its `spack.yaml`, never via a scope shadowing
+common. Every `include::` example in this document follows this order.
+
 Verification commands:
 
 ```bash
@@ -183,23 +193,24 @@ spack -e <env> config blame modules
 If config blame shows unexpected `~/.spack`, site, or system scopes, the
 environment is not isolated correctly.
 
-Example environment include list:
+Example environment include list (most-specific → most-general,
+`common` last):
 
 ```yaml
 spack:
   include::
-    - ../../../configs/common
+    - ../../../configs/vendor/cray
     - ../../../configs/os/rhel8
     - ../../../configs/target/zen3
-    - ../../../configs/vendor/cray
     - ../../../configs/mpi/cray-mpich
+    - ../../../configs/common
 ```
 
 ## Spack Concepts Used
 
 | Spack concept | Use in this design |
 |---|---|
-| Environment | Build unit for a lane such as `gcc/serial`, `cce/mpi-craympich`, or `rocmcc/gpu-craympich`. |
+| Environment | Build unit for a lane such as `gcc/serial`, `cce/mpi-craympich`, or `gcc/gpu-craympich-gfx90a`. |
 | `spack.yaml` | Lane manifest: root specs, include list, views, and lane-local settings. |
 | `spack.lock` | Concrete resolved DAG. Saved per release and lane. |
 | `packages.yaml` | Externals, buildable policy, providers, targets, variants, and package requirements. |
@@ -380,6 +391,24 @@ mpi:                                            # O - non-Cray MPI implementatio
     compiler: aocc@4.2.0                        # O - the compiler the site MPI was built with
     modules: []                                 # O - omit when prefix is sufficient
 
+gpu_toolkit_modules:                            # O - standalone GPU toolkit modules (Cray PE Option B path)
+  # Populated when the system exposes GPU toolkits as standalone modules
+  # separable from a vendor PrgEnv (e.g., `rocm/<v>`, `cudatoolkit/<v>`).
+  # The committed default Cray-PE GPU lane (Option B) loads the GNU
+  # PrgEnv plus the standalone toolkit module from this list.
+  rocm:
+    version: "6.0.0"
+    module: rocm/6.0.0
+    prefix: /opt/rocm-6.0.0
+  cudatoolkit:                                  # NVIDIA equivalent on NVIDIA systems
+    version: "12.4"
+    module: cudatoolkit/12.4
+    prefix: /opt/cray/pe/cudatoolkit/12.4
+  nvhpc:                                        # NVHPC as a standalone toolkit (no PrgEnv switch); rare
+    version: "24.5"
+    module: nvhpc/24.5
+    prefix: /opt/nvidia/hpc_sdk/24.5
+
 filesystem:                                     # R - install-tree and shared-storage candidates
   install_tree_candidates:                      # R - shared filesystems suitable for the install tree
     - path: /shared/stack/spack/opt
@@ -470,9 +499,13 @@ capabilities:                                   # R - derived flags the stack co
     - { compiler: cce,    lane: mpi-craympich,    runtime_node_types: [cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
     - { compiler: gcc,    lane: core,             runtime_node_types: [login, cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
     - { compiler: gcc,    lane: mpi-craympich,    runtime_node_types: [cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
+    # GPU lanes default to GCC host (Cray PE Option B: PrgEnv-gnu + standalone
+    # rocm toolkit module). See §Host-Compiler Policy and §Cray PE + GPU.
+    - { compiler: gcc,    lane: gpu-craympich-gfx90a,  runtime_node_types: [gpu_compute_mi250x] }
+    - { compiler: gcc,    lane: gpu-craympich-gfx942,  runtime_node_types: [gpu_compute_mi300a] }
+    # rocmcc/core is available as the precondition for named ROCmCC exception
+    # lanes; no general-stack lanes are built under rocmcc by default.
     - { compiler: rocmcc, lane: core,             runtime_node_types: [gpu_compute_mi250x, gpu_compute_mi300a] }
-    - { compiler: rocmcc, lane: gpu-craympich-gfx90a,  runtime_node_types: [gpu_compute_mi250x] }
-    - { compiler: rocmcc, lane: gpu-craympich-gfx942, runtime_node_types: [gpu_compute_mi300a] }
   gpu_lane_supported: true                      # O - true if any node_type carries a gpu: block
   fabric_class: vendor_tuned                    # O - vendor_tuned | open | ethernet_only
 ```
@@ -542,12 +575,28 @@ Required keys missing is a render-time failure, not a silent default.
 
 ### `stack.yaml`
 
-`stack.yaml` declares desired stack behavior. It is the durable stack contract,
-and it stays platform-agnostic — it says *what* the stack wants, and the render
-step decides *how* that maps onto the platform reality the profile describes.
-Platform-specific stanzas do not belong in `stack.yaml`; the render step reads
-the profile to learn which platform externals exist and picks the matching
-scope.
+`stack.yaml` declares desired stack behavior. It is the durable stack
+contract, and it is **platform-portable** — one stack file can drive
+multiple platforms because the render step picks which lanes apply based
+on what the profile declares.
+
+Lane entries may name platform-specific providers (a `mpi-craympich` lane
+references the Cray PE provider, a `mpi-openmpi` lane references a
+Spack-built provider). Lanes whose providers are not declared in the
+profile are **skipped** at render time with an info-level log entry —
+not an error. So a stack file can list both `mpi-craympich` and
+`mpi-openmpi` lanes; on a Cray system the openmpi lane is skipped, on a
+Penguin the craympich lane is skipped, and the same stack file produces
+a valid workspace on either. A lane is rendered only when every provider
+it names is in the profile. A skipped lane becomes an error only if the
+lane carries `required: true`, which a stack maintainer sets when the
+lane's absence on a given system should fail the render rather than be
+silently dropped.
+
+Top-level stanzas (`externals.*`, `targets.*`, `modules.*`) stay
+genuinely platform-agnostic: they express policy in terms of categories
+(`compilers: prefer_platform`) that the render step resolves against the
+profile.
 
 It should answer questions like:
 
@@ -572,7 +621,8 @@ templates:                                      # R - which template set to rend
   set: v6                                       # R - template set name; matches templates/ on disk
 
 modules:                                        # R - user-visible module strategy
-  tool: tcl                                     # R - tcl is the baseline; lmod allowed where present
+  format: tcl                                   # R - mandatory baseline; always `tcl` (only valid value)
+  additional_formats: []                        # O - optional add-ons; e.g. [lmod] to also emit Lua tree
   front_door: cse-init                          # R - top-level module name users load first
   hierarchy_style: collapsed                    # O - collapsed (default) | granular (Lmod-only)
   expose_provenance: true                       # O - default true; emits STACK_PACKAGE_PROVENANCE
@@ -591,6 +641,7 @@ lanes:                                          # R - the matrix the render step
     target: foundation                          # R - foundation | science_default | <named target>
     runtime_node_type: cpu_compute              # R - which profile.node_types entry the lane runs on
     publish: true                               # O - default true; false skips view/module regeneration
+    required: false                             # O - default false; true → render errors if the lane cannot be satisfied
 
   - name: cce-mpi-craympich
     compiler: cce
@@ -601,8 +652,9 @@ lanes:                                          # R - the matrix the render step
     runtime_node_type: cpu_compute              # MPI lane targets a CPU compute class
     publish: true
 
-  - name: rocmcc-gpu-craympich-gfx90a            # one lane per GPU class — names are explicit
-    compiler: rocmcc
+  # GPU lanes default to GCC host (Cray PE Option B). One lane per GPU class.
+  - name: gcc-gpu-craympich-gfx90a               # one lane per GPU class — names are explicit
+    compiler: gcc
     lane: gpu-craympich-gfx90a
     kind: gpu
     package_set: science-gpu
@@ -610,8 +662,8 @@ lanes:                                          # R - the matrix the render step
     runtime_node_type: gpu_compute_mi250x        # GPU lane targets the matching GPU class
     publish: true
 
-  - name: rocmcc-gpu-craympich-gfx942
-    compiler: rocmcc
+  - name: gcc-gpu-craympich-gfx942
+    compiler: gcc
     lane: gpu-craympich-gfx942
     kind: gpu
     package_set: science-gpu
@@ -647,10 +699,13 @@ release:                                        # R - what to save per release
   retain_previous: 2                            # O - default 2; previous releases kept loadable
   promotion: gated_manual                       # O - gated_manual (default) | auto
 
-helpers:                                        # O - declares which helpers the stack expects
-  inspector: optional                           # O - optional (default) | required | forbidden
-  render:    optional                           # O - same vocabulary
-  ansible:   optional                           # O - same vocabulary
+helpers:                                        # O - maintainer recommendations on helper use
+  # Values: preferred | available | disabled. These are recommendations only;
+  # the manual workflow remains valid regardless. A stack can never force a
+  # helper to be required — the design guarantees the manual path stays open.
+  inspector: available                          # O - available (default) | preferred | disabled
+  render:    available                          # O - same vocabulary
+  ansible:   available                          # O - same vocabulary
 ```
 
 Every key the render step understands maps to one or more template slots. The
@@ -661,7 +716,8 @@ reaches Spack config follows this map.
 |---|---|
 | `name` | rendered workspace path, front-door module name root, view path root |
 | `templates.set` | which `templates/` subtree is used |
-| `modules.tool` | which generator (`tcl` / `lmod`) Spack emits |
+| `modules.format` | the mandatory baseline format — always `tcl` |
+| `modules.additional_formats` | optional extra formats to also emit (e.g. `[lmod]` on Lmod sites) |
 | `modules.front_door` | top-level module path (`cse-init` → `CSE/...`) |
 | `modules.expose_provenance` | whether `setenv STACK_PACKAGE_PROVENANCE` is emitted |
 | `targets.foundation` | `configs/target/<baseline>/packages.yaml` rendered into core lanes |
@@ -687,8 +743,12 @@ reaches Spack config follows this map.
 Stack rules:
 
 - It is stack intent, not detected system state.
-- It is platform-agnostic. There are no `cray_*` or `linux_*` blocks; the
-  render step maps `externals.*` to platform reality via the profile.
+- It is platform-portable. Top-level policy stanzas (`externals.*`,
+  `targets.*`, `modules.*`) carry no platform-specific blocks; the
+  render step resolves them against the profile. Lane entries may name
+  platform-specific providers; lanes whose providers are absent from
+  the profile are skipped at render (or flagged as errors if marked
+  `required: true`).
 - It should be sufficient to explain the generated stack layout. Anything that
   shows up in the rendered workspace must be traceable to a key here, to a
   template, to a package set, or to the profile.
@@ -795,7 +855,7 @@ Example shape:
     gcc/core/spack.yaml
     gcc/serial/spack.yaml
     cce/mpi-craympich/spack.yaml
-    rocmcc/gpu-craympich/spack.yaml
+    gcc/gpu-craympich-gfx90a/spack.yaml
   release-manifest.yaml
 ```
 
@@ -1473,13 +1533,19 @@ whole design.
 The reference helper is `stack-render`. Names are illustrative; the design
 does not bind a name.
 
+The helper writes the workspace under
+`<--output-root>/<system>/<stack>/<release>/`. Pass the root; the helper
+derives the rest from the profile and release vars. This matches the
+determinism guarantee (same inputs → same output path).
+
 ```bash
 # Render a release workspace
 stack-render \
   --profile systems/example-cray/profile.yaml \
   --stack stacks/cse/stack.yaml \
   --release 2026.06 \
-  --output /tmp/rendered/example-cray/cse/2026.06
+  --output-root /tmp/rendered
+# → workspace written to /tmp/rendered/example-cray/cse/2026.06/
 
 # Validate without rendering
 stack-validate \
@@ -2225,10 +2291,11 @@ roles:
           set_fact: skip_render = true
         else:
           run_locally: stack-render
-            --profile {{ profile }}
-            --stack   {{ stack }}
-            --release {{ release }}
-            --output  {{ workspace }}
+            --profile     {{ profile }}
+            --stack       {{ stack }}
+            --release     {{ release }}
+            --output-root {{ workspace_root }}
+          # → workspace written to {{ workspace_root }}/{{ system }}/{{ stack_name }}/{{ release }}/
 
   - role: provision
     tasks:
@@ -2283,7 +2350,7 @@ roles:
       - for lane:
           run: spack -e <env> env view regenerate
           run: spack -e <env> module {{ modules_tool }} refresh -y
-          run: spack -e <env> buildcache push --update-index {{ buildcache_mirror }}
+          run: spack -e <env> buildcache push --update-index --unsigned {{ buildcache_mirror }}
       - write_yaml:
           dest: "{{ release_dir }}/release-manifest.yaml"
           content: "{{ build_manifest(stack, profile, release, lane_results) }}"
@@ -2808,21 +2875,30 @@ support, and provider build options belong in `spack.yaml` specs and
 ### Toolchain Propagation And Foundation Reuse
 
 Compiler propagation should be scoped to lane roots and science subtrees, not to
-the whole foundation. Build tools such as CMake and Ninja do not need to be
-rebuilt per compiler because they are executed during builds, not linked into
-the result. Stable plain-C libraries can also often be reused across compiler
-lanes within a system.
+the whole foundation. The committed model is **per-lane Core** (see §Per-Lane
+Core, Not Shared Core): each compiler builds its own Core, including its own
+build tools (CMake, Ninja) and its own foundation stable-ABI libraries (zlib,
+xz, zstd). Binary reuse happens *within* a compiler — a CCE science lane
+reuses CCE's Core build of CMake — not *across* compilers. The hash carries
+the compiler, so cross-compiler reuse is not what the foundation cache is
+doing.
 
 The desired behavior is:
 
 ```text
-Core/foundation builds once at the baseline target.
-Science lanes reuse Core when compatible.
+Each compiler's Core builds at the baseline (x86_64_v3) target.
+Each science lane reuses its own compiler's Core from the foundation cache.
 Compiler/MPI-sensitive packages build in the lane.
 ```
 
-Validate this with `spack spec -l` and `spack.lock` inspection before relying on
-it for production.
+The foundation cache is keyed by OS/glibc, not by compiler. Both compilers'
+Core builds land in the same cache lane (e.g., `foundation/rhel8/x86_64_v3/`);
+the per-spec hash decides which binary a given lane pulls. See
+§Build-Cache Keying for why the cache directory must not be per-compiler-
+keyed even though binaries inside it are compiler-specific.
+
+Validate the reuse path with `spack spec -l` and `spack.lock` inspection
+before relying on it for production.
 
 ### Externalization Mechanics
 
@@ -3089,7 +3165,7 @@ vendor_cray:
       gcc:    { prefix: /opt/cray/pe/mpich/8.1.29/ofi/gnu/13.3,   modules: [cray-mpich/8.1.29] }
       rocmcc: { prefix: /opt/cray/pe/mpich/8.1.29/ofi/amd/6.0,    modules: [cray-mpich/8.1.29] }
 
-gpu_toolkit_modules:                           # NEW: standalone toolkit modules (Option B path)
+gpu_toolkit_modules:                           # standalone toolkit modules (Option B path)
   rocm:
     version: "6.0.0"
     module: rocm/6.0.0
@@ -3206,12 +3282,17 @@ build campaign has a few rules that are not visible from the order alone.
 These are the things that bite on the first run if they are not stated.
 
 **The foundation neck is sequential on purpose.** The bottom compiler
-(external or vendor) must be available before the common GCC can be built.
-The common GCC must be in the foundation cache before any lane can reuse
-it. The Core must be in the foundation cache before lane fan-out is
-useful. These are three sequential checkpoints; do not try to parallelize
-them. The neck is cheap (compiler + a handful of tools); the cost of
-parallelizing it is far higher than the time saved.
+(external or vendor) must be available before any stack-built compiler
+(typically a common GCC) can be built. Each stack-built compiler must be
+in the foundation cache before that compiler's Core can be built against
+it. Each compiler's Core must be in the foundation cache before its
+science lanes can reuse it. These checkpoints are sequential per
+compiler chain; do not try to parallelize within a chain. The neck is
+cheap (a compiler plus a handful of tools); the cost of parallelizing it
+is far higher than the time saved. Different compiler chains *can* run
+in parallel once their bottom compiler is in place — GCC's Core build
+and CCE's Core build are independent and the foundation cache absorbs
+both.
 
 **Per-prefix locks are a safety net, not a coordination primitive.** Spack
 holds a file lock on each install prefix during the build, so two
@@ -3238,7 +3319,7 @@ means a later pass pulls finished work from the cache instead of
 rebuilding it; the cache *is* the cross-run progress checkpoint. A small
 DAG change then rebuilds only the changed spec and its dependents, never
 the whole stack. The discipline is: every time a spec finishes,
-`buildcache push --update-index <mirror> <spec>` it. Ansible's `install`
+`buildcache push --update-index --unsigned <mirror> <spec>` it. Ansible's `install`
 role can do this automatically per lane.
 
 **First run is for correctness, second run is for speed.** On the very
@@ -3260,7 +3341,7 @@ fastest builder wins and the others reuse.
 # After Core is in the foundation cache, fan out lanes one per node.
 srun -N1 -n1 -w node01 spack -e environments/cce/mpi-craympich  install -j64 &
 srun -N1 -n1 -w node02 spack -e environments/gcc/mpi-craympich  install -j64 &
-srun -N1 -n1 -w node03 spack -e environments/rocmcc/gpu-craympich install -j64 &
+srun -N1 -n1 -w node03 spack -e environments/gcc/gpu-craympich-gfx90a install -j64 &
 wait
 ```
 
@@ -3697,6 +3778,37 @@ lockfile.
 
 Do not treat the build cache as one universal bucket. Use compatibility lanes.
 
+### Unsigned Buildcache: Why The Default Is Correct
+
+The committed default is `buildcache.signed: false`. This is a deliberate
+position based on the trust boundary, not an oversight. The reasoning:
+
+- **The mirror sits inside the team's own trust boundary.** It lives at
+  `file:///shared/stack/buildcache/...` on a shared filesystem with
+  team-controlled write access. Only Ansible (running on behalf of the
+  stack maintainers) writes to it; only the stack's own systems read
+  from it.
+- **Anyone who can tamper with the mirror has already crossed the trust
+  boundary.** Write access to the mirror implies write access to the
+  install tree, the modulefiles, and the source repo. Signing within
+  the same boundary adds key-management overhead (key creation,
+  distribution, rotation, loss recovery) without adding security.
+- **Airgap does not change this.** GPG signature verification is
+  offline — signed caches work in airgap with the public key shipped
+  alongside the cache files. The unsigned default is not a concession
+  to airgap; both modes work in airgap.
+- **Signing becomes worth it only when the trust boundary changes.**
+  Cross-org publishing, vendor-hosted artifact stores, public mirrors,
+  or audit-required per-binary provenance are the triggers. None apply
+  to the current shape; the Committed Decisions row flags when to
+  revisit.
+
+Operational consequence: `spack buildcache push` requires the
+`--unsigned` flag when the mirror is configured `signed: false`. Every
+push example in this document includes it. If signing is later turned
+on (mirror `signed: true`), drop the flag and add the key-distribution
+step.
+
 ### Build-Cache Keying: OS/glibc, Not Compiler
 
 ABI correctness for binary reuse is enforced by **Spack's hash**, not by the
@@ -3719,18 +3831,27 @@ The rule:
   `science/cray-rhel/cce-mpi-craympich/zen3` is easier for a human to scan
   than a hash, but the hash is what the solver matches against.
 - **Within one OS/glibc, register every compatible cache lane as a read
-  source.** A CCE MPI lane should be able to read the foundation cache (built
-  by GCC) and any peer science caches. The hash decides what gets pulled; the
-  bucket placement only affects whether the lane can *see* the binary at all.
+  source.** A CCE MPI lane reads the foundation cache lane, which holds
+  both CCE-built and GCC-built Core binaries (each compiler builds its
+  own Core under per-lane Core). The CCE lane pulls the `%cce`-hashed
+  CMake; the GCC lane pulls the `%gcc`-hashed CMake. They share the
+  cache *lane* but not the *binaries*. The hash decides what gets
+  pulled; the bucket placement only affects whether the lane can *see*
+  the binary at all.
 
 The wrong-way example is the trap to avoid. If the cache is keyed by
-compiler — `cache/gcc/foundation/...`, `cache/cce/science/...` — then the
-GCC-built CMake (which a CCE lane could reuse, because CMake is *run* during
-the build and produces no compiler-coupled artifact) sits in the GCC bucket
-where the CCE lane is not configured to read. The CCE lane rebuilds CMake
-under CCE for no benefit, and the per-compiler bucketing has stranded the
-foundation in one compiler's silo. The hash would have prevented an unsafe
-pick on its own; the bucketing did not add safety, it only removed reuse.
+compiler — `cache/gcc/foundation/...`, `cache/cce/foundation/...` — then
+each compiler's foundation cache sits in its own silo where the *other*
+compilers' lanes cannot read it. That seems fine at first glance because
+each compiler reuses its own Core anyway. But it breaks the model in two
+ways. First, when a second compiler is added later, its Core builds land
+in a *new* per-compiler bucket; existing lanes never gain access to it,
+and registering N buckets per lane scales poorly. Second, it implies
+"per-compiler reuse" is the rule when actually the reuse rule is
+"per-hash reuse" — the bucketing reads as a safety mechanism it is not.
+Spack's hash already prevents unsafe picks; the bucketing does not add
+safety, it only removes the operational simplicity of one cache lane per
+OS.
 
 Recommended axes for the cache directory label (humans), in order:
 
@@ -3749,7 +3870,7 @@ buildcache/foundation/rhel8/x86_64_v3            # OS=rhel8 is the key; foundati
 buildcache/foundation/sles15/x86_64_v3           # different OS = different key
 buildcache/science/example-cray/cce-mpi-craympich/zen3
 buildcache/science/example-cray/gcc-mpi-craympich/zen3
-buildcache/science/example-cray/rocmcc-gpu-craympich/gfx90a
+buildcache/science/example-cray/gcc-gpu-craympich/gfx90a
 ```
 
 The lane on a Cray RHEL system registers `foundation/rhel8/x86_64_v3` and
@@ -3820,9 +3941,35 @@ releases/2026.06/example-cray/cse/
   gcc/serial/spack.lock
   cce/core/spack.lock
   cce/mpi-craympich/spack.lock
-  rocmcc/core/spack.lock
-  rocmcc/gpu-craympich/spack.lock
+  gcc/gpu-craympich-gfx90a/spack.lock
+  gcc/gpu-craympich-gfx942/spack.lock
 ```
+
+### Manifest Phases (Draft And Final)
+
+The release manifest is written **twice**: once by the render step (as a
+draft, with only source-derived fields populated) and again by the
+publish step (as final, with build-host, lockfile, buildcache, and
+verification fields added). One file, two states. A `phase:` top-level
+key distinguishes them.
+
+Why two writes rather than two files: a reader who asks "what was in
+release 2026.06?" goes to one filename in one place. Splitting into
+`render-manifest.yaml` + `release-manifest.yaml` would force the reader
+to know which manifest carries which fact and what to do when the two
+disagree (after a re-render, for example). Two phases of one file makes
+the lifecycle explicit without doubling the lookup surface.
+
+| Phase | Written by | Fields populated |
+|---|---|---|
+| `draft` | render step | source-derived: profile/stack/package-set digests, render-tool identity, render timestamp, lane definitions (env path, kind, compiler, target, package_set, runtime_node_type), planned install/view/module paths, planned buildcache destinations |
+| `final` | publish step | adds: build host, lockfile digests per lane, provenance summary per lane, runtime modules per lane, actual buildcache push destinations + lanes pushed, verification results, promoted_at / promoted_by, previous_release |
+
+A draft manifest is valid input to Ansible's deploy roles; the publish
+role overwrites it with the final phase when the build completes
+successfully. A re-render replaces a final manifest with a fresh draft
+(losing the publish-time fields for that file — they live in the
+previous release directory until that release is reproved).
 
 ### Release Manifest Schema
 
@@ -3832,13 +3979,15 @@ to read first when answering "what was in release 2026.06?" The schema:
 
 ```yaml
 schema_version: 1
+phase: final                                   # draft (after render) | final (after publish)
 
 release:
-  name:         "2026.06"                      # release tag
-  rendered_at:  "2026-06-14T18:42:00Z"         # render-step start time, UTC
-  promoted_at:  "2026-06-15T10:15:00Z"         # symlink-swap time, UTC; null if not yet promoted
-  promoted_by:  "rventers"                     # user who approved promotion; null if not yet promoted
+  name:         "2026.06"                      # release tag (draft + final)
+  rendered_at:  "2026-06-14T18:42:00Z"         # render-step start time, UTC (draft + final)
+  promoted_at:  "2026-06-15T10:15:00Z"         # filled at publish; null in draft
+  promoted_by:  "rventers"                     # filled at publish; null in draft
 
+# ── Source-derived (filled at render, present in both draft and final) ──
 stack:
   name:       cse                              # from stack.yaml.name
   source_repo: "git@gitlab:stacks/cse-stack"   # repo URL
@@ -3872,6 +4021,7 @@ templates:
     name:    stack-render
     version: "0.4.2"
 
+# ── Build-context (filled at publish; null in draft) ────────────────────
 spack:
   version: "1.1.1"                             # `spack --version` on the build host
   commit:  "ba9d6a01..."                       # exact commit, if Spack is a git checkout
@@ -3887,19 +4037,21 @@ build_host:
   glibc:     "2.28"
   cpu:       "zen3"
 
+# ── Lanes (skeleton at render; lockfile/install/provenance/runtime_modules at publish) ──
 lanes:                                         # one entry per environment in the release
   - name: gcc-core
-    env_path: "environments/gcc/core"
-    kind: core
-    compiler: gcc
-    target: x86_64_v3
-    runtime_node_type: cpu_compute             # the profile.node_types name the lane runs on
+    env_path: "environments/gcc/core"          # render-filled
+    kind: core                                 # render-filled
+    compiler: gcc                              # render-filled
+    target: x86_64_v3                          # render-filled
+    runtime_node_type: cpu_compute             # render-filled
+    package_set: core-foundation               # render-filled
+    view_root: "/shared/stack/releases/2026.06/example-cray/cse/views/gcc/core"    # render-filled (planned path)
+    module_root: "/shared/stack/releases/2026.06/example-cray/cse/modules/gcc/core" # render-filled (planned path)
+    # publish-filled fields below
     lockfile: "gcc/core/spack.lock"
     lockfile_digest: "sha256:09abee..."
     install_root: "/shared/stack/spack/opt/linux-rhel8-x86_64_v3/gcc-13.3.0"
-    view_root: "/shared/stack/releases/2026.06/example-cray/cse/views/gcc/core"
-    module_root: "/shared/stack/releases/2026.06/example-cray/cse/modules/gcc/core"
-    package_set: core-foundation
     provenance_summary:
       stack_built: 7                           # count of packages by provenance class
       platform_backed: 0
@@ -3952,6 +4104,8 @@ lanes:                                         # one entry per environment in th
       - rocm/6.0.0
       - cray-mpich/8.1.29
 
+# ── Buildcache + verification (filled at publish; planned destinations may
+#    appear in draft as `planned_destinations:` for Ansible to consult) ──
 buildcache:
   push_destinations:                           # mirrors this release was pushed to
     - name: foundation
@@ -3959,7 +4113,7 @@ buildcache:
       lanes_pushed: ["gcc-core", "cce-core", "rocmcc-core"]
     - name: science
       url:  "file:///shared/stack/buildcache/science/example-cray"
-      lanes_pushed: ["cce-mpi-craympich", "rocmcc-gpu-craympich"]
+      lanes_pushed: ["cce-mpi-craympich", "gcc-gpu-craympich-gfx90a"]
   signed: false
 
 verification:
@@ -4015,7 +4169,7 @@ spack -e <env> config scopes -vp
 spack -e <env> config blame packages
 spack -e <env> config blame config
 spack -e <env> config blame modules
-#   Pass: every setting traces to a CSE-controlled scope file or to
+#   Pass: every setting traces to a stack-controlled scope file or to
 #         Spack defaults.
 #   Fail: a setting traces to a user or site scope.
 ```
@@ -4124,7 +4278,7 @@ spack -e <env> module lmod refresh -y
 **Build cache:**
 
 ```bash
-spack -e <env> buildcache push --update-index <mirror> [<spec> ...]
+spack -e <env> buildcache push --update-index --unsigned <mirror> [<spec> ...]
 #   Push specs to the named mirror. Omitting specs (inside an active
 #   environment) pushes the environment's specs.
 
@@ -4139,7 +4293,7 @@ cluster-inspector profile [--system <name>]
 cluster-inspector verify <profile.yaml>
 
 stack-validate --profile <profile> --stack <stack>
-stack-render   --profile <profile> --stack <stack> --release <tag> --output <dir>
+stack-render   --profile <profile> --stack <stack> --release <tag> --output-root <dir>
 stack-explain  --profile <profile> --stack <stack> [--release <tag>]
 ```
 
@@ -4207,12 +4361,19 @@ table — it is the single place the team's failure knowledge accumulates.
 | `module load` of a package finds a stale path that no longer exists | View was not regenerated after install | Run `spack -e <env> env view regenerate` — Ansible's `publish` role should do this automatically |
 | Site smoke test passes but `verify libraries` fails | Soft RPATH; runtime library happens to be available at test time but not via RPATH | Inspect with `readelf -d`; rebuild with explicit RPATH or fix the package recipe |
 
-## Example Cray Flow (End-To-End Walkthrough)
+## Example Cray Flow (Helper-Assisted End-To-End Walkthrough)
 
 A worked example of bringing up `release 2026.06` of the CSE stack on a
 Cray-class system named `example-cray` (RHEL8, Slingshot/CXI fabric, AMD
 GPU compute partitions for MI250X and MI300A). Every command shown is
 runnable; the values mirror the schema examples in §Durable Inputs.
+
+> **Helper-assisted.** This walkthrough uses ClusterInspector and the
+> render helper to reduce labor. The §Manual Workflow remains valid:
+> write `profile.yaml` and `environments/*/spack.yaml` by hand against
+> the schemas in §Durable Inputs and §Lane Model, skip the inspector
+> and render steps, and run `spack -e <env> install` directly. The
+> helpers are convenience; the model does not require them.
 
 ### Phase 1 — Author the profile
 
@@ -4335,10 +4496,11 @@ Materialize the rendered workspace:
 
 ```bash
 $ stack-render \
-    --profile systems/example-cray/profile.yaml \
-    --stack   stacks/cse/stack.yaml \
-    --release 2026.06 \
-    --output  /tmp/rendered
+    --profile     systems/example-cray/profile.yaml \
+    --stack       stacks/cse/stack.yaml \
+    --release     2026.06 \
+    --output-root /tmp/rendered
+# → workspace written to /tmp/rendered/example-cray/cse/2026.06/
 
 $ tree -L 3 /tmp/rendered/example-cray/cse/2026.06/
 /tmp/rendered/example-cray/cse/2026.06/
@@ -4390,14 +4552,14 @@ $ cd /tmp/rendered/example-cray/cse/2026.06
 $ spack -e environments/gcc/core concretize
 $ spack -e environments/gcc/core fetch -D
 $ spack -e environments/gcc/core install -j 48
-$ spack -e environments/gcc/core buildcache push --update-index \
+$ spack -e environments/gcc/core buildcache push --update-index --unsigned \
        file:///shared/stack/buildcache/foundation/rhel8/x86_64_v3
 
 # CCE Core: same package set, built under CCE — per-lane Core means
 # this duplicates the build tools, intentionally
 $ spack -e environments/cce/core concretize
 $ spack -e environments/cce/core install -j 48
-$ spack -e environments/cce/core buildcache push --update-index \
+$ spack -e environments/cce/core buildcache push --update-index --unsigned \
        file:///shared/stack/buildcache/foundation/rhel8/x86_64_v3
 ```
 
@@ -4442,7 +4604,7 @@ $ for env in gcc/mpi-craympich cce/mpi-craympich \
 
     spack -e environments/$env env view regenerate
     spack -e environments/$env module tcl refresh -y
-    spack -e environments/$env buildcache push --update-index \
+    spack -e environments/$env buildcache push --update-index --unsigned \
          file:///shared/stack/buildcache/science/example-cray
 done
 ```
@@ -4451,15 +4613,22 @@ Copy the workspace + lockfiles to the release directory and write the
 manifest:
 
 ```bash
+# The workspace already carries a draft release-manifest.yaml (written by
+# stack-render in Phase 3). rsync it into the release dir along with the
+# rest of the workspace:
 $ rsync -a /tmp/rendered/example-cray/cse/2026.06/ \
         /shared/stack/releases/2026.06/example-cray/cse/
 
-$ stack-render \
-    --profile systems/example-cray/profile.yaml \
-    --stack   stacks/cse/stack.yaml \
-    --release 2026.06 \
-    --emit-manifest-only \
-    --output  /shared/stack/releases/2026.06/example-cray/cse/release-manifest.yaml
+# The publish step rewrites the manifest with phase: final, adding
+# build-host, lockfile digests, provenance summaries, runtime modules,
+# buildcache push destinations, and verification results:
+$ stack-publish-manifest \
+    --release-dir /shared/stack/releases/2026.06/example-cray/cse \
+    --build-host  $(hostname) \
+    --buildcache  foundation=file:///shared/stack/buildcache/foundation/rhel8/x86_64_v3 \
+    --buildcache  science=file:///shared/stack/buildcache/science/example-cray \
+    --verification-results /tmp/verify-results.yaml
+# → overwrites release-manifest.yaml with phase: final
 ```
 
 ### Phase 7 — Promote (gated)
@@ -4487,12 +4656,15 @@ The previous release (`releases/2026.05`) remains intact and loadable
 via the release-tagged paths (`/shared/stack/releases/2026.05/...`) for
 two cycles per the retention policy.
 
-## Example Regular Linux Flow (End-To-End Walkthrough)
+## Example Regular Linux Flow (Helper-Assisted End-To-End Walkthrough)
 
 A worked example for a Penguin-class Linux system named `example-linux`
 (SLES15, InfiniBand HDR fabric, AOCC site compiler, OpenMPI from the
 site). Differences from the Cray flow: no PE, the site MPI is registered
 as a `prefix:`-only external, no GPU.
+
+> **Helper-assisted.** Same caveat as the Cray flow above — the helpers
+> reduce labor but are not required. The manual workflow remains valid.
 
 ### Phase 1 — Author the profile
 
@@ -4559,10 +4731,11 @@ $ stack-validate \
 
 ```bash
 $ stack-render \
-    --profile systems/example-linux/profile.yaml \
-    --stack   stacks/cse/stack.yaml \
-    --release 2026.06 \
-    --output  /tmp/rendered
+    --profile     systems/example-linux/profile.yaml \
+    --stack       stacks/cse/stack.yaml \
+    --release     2026.06 \
+    --output-root /tmp/rendered
+# → workspace written to /tmp/rendered/example-linux/cse/2026.06/
 
 $ ls /tmp/rendered/example-linux/cse/2026.06/environments/
 aocc/core  aocc/serial  aocc/mpi-site  aocc/mpi-openmpi
@@ -4582,11 +4755,11 @@ builds OpenMPI from source as part of the lane.
 
 ```bash
 $ spack -e environments/aocc/core install -j 64
-$ spack -e environments/aocc/core buildcache push --update-index \
+$ spack -e environments/aocc/core buildcache push --update-index --unsigned \
        file:///shared/stack/buildcache/foundation/sles15/x86_64_v3
 
 $ spack -e environments/gcc/core install -j 64
-$ spack -e environments/gcc/core buildcache push --update-index \
+$ spack -e environments/gcc/core buildcache push --update-index --unsigned \
        file:///shared/stack/buildcache/foundation/sles15/x86_64_v3
 
 # Fan out the four remaining lanes
@@ -4649,7 +4822,7 @@ real-world evidence (a deployed system, a measured workload) to settle.
 | Release artifact storage | Lockfiles (`spack.lock` per lane) and the release manifest are committed to the source repository under `releases/<tag>/`. Build-cache contents are *not* committed — they live on the buildcache mirror (file URL or S3-compatible). Build logs are CI/Ansible artifacts, attached to the release record but not committed. | Build-cache contents grow past the source repo's practical size for some other reason; revisit per-system. |
 | Repo layout split | `cray-*` vs `linux-*` at the top level is **not** the split. The repository is system-agnostic; per-system reality lives in `profile.yaml` and per-platform behavior lives in the scopes the render step selects. | Never — this is the generic-repo decision. |
 | Core sharing across compilers | **Per-lane Core** is the committed model — each compiler builds its own Core view at its own path. Cross-compiler shared Core is a future, evidence-gated optimization (see §Per-Lane Core, Not Shared Core). | Measured overlap across compiler Cores is large and expensive enough to justify the `include_concrete`/foundation-cache extraction work. Until then, per-lane Core stays. |
-| GPU lane Core composition | The GPU lane uses its own compiler's Core (`rocmcc/gpu-craympich` ↔ `rocmcc/core`, `gcc/gpu-craympich` ↔ `gcc/core`). No separate "gpu-core" layer. | Never — this falls out of the per-lane Core model. |
+| GPU lane Core composition | The GPU lane uses its own compiler's Core. Under the committed Option B default the GPU lane is GCC-hosted, so `gcc/gpu-craympich-<arch>` ↔ `gcc/core`. Named exception lanes follow the same rule with their own host compiler: a ROCmCC exception lane uses `rocmcc/core`, an NVHPC exception lane uses `nvhpc/core`. No separate "gpu-core" layer in any case. | Never — this falls out of the per-lane Core model. |
 | GPU vs. MPI as lane kinds | **GPU is its own lane kind, not an MPI sub-type.** A GPU lane is a *superset* of the matching MPI lane (it contains the same MPI-aware science libraries plus GPU-arch-pinned packages) and is pinned to one GPU class via `runtime_node_type`. One GPU lane per GPU class on a system. GPU lanes are not "MPI + a GPU add-on layer" — there is no GPU sub-load; users pick exactly one lane, and the GPU lane has everything that lane needs. See §Why GPU Is A Separate Lane Kind. | A real workload pattern materially benefits from a GPU-no-MPI sub-kind, which has not been observed yet. |
 | ClusterInspector module enumeration | **Three-phase hybrid: auto-discover by name pattern, narrow with operator hints, verify by load-and-probe.** The hints file lives in source control at `systems/<system>/inspector-hints.yaml` and is the committed override mechanism (CLI flags exist for one-off probes but the hints file is what persists). See §Module Enumeration: Auto-Discovery Plus Hints. | A site exposes externals through something other than modules (rare); add the appropriate discovery mechanism. The hints + verify model still applies. |
 | Host compiler for GPU lanes | **GNU host by default.** GNU + CUDA on NVIDIA, GNU + ROCm on AMD. NVHPC, ROCmCC, and AOCC appear only as narrow exception lanes scoped to codes that specifically need them (OpenACC/CUDA Fortran/`-stdpar` for NVHPC; AMD-vendor codes for ROCmCC; CPU-bound host code for AOCC). See §Host-Compiler Policy For GPU Lanes. | A specific code's programming model demands the vendor compiler; that lane is added without changing the default. |
