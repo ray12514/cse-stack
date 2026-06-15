@@ -44,18 +44,23 @@ concept.
 | **Stack** | The curated software environment the framework produces. A single repository can produce several stacks; the immediate one is CSE. Synonyms used informally: *software environment*, *user environment*. |
 | **Profile** | The system-facts document (`profile.yaml`). Platform reality only; no package intent. |
 | **Stack file** | The stack-intent document (`stack.yaml`). Stack policy only; no detected system facts. |
-| **Package set** | A named list of root specs grouped by purpose (`core-foundation`, `science-full`, `science-gpu`). One file per set under `package-sets/`. Referenced by name from `stack.yaml.lanes[*].package_set`. |
+| **Package set** | A named list of root specs grouped by purpose (`core-foundation`, `science-full`, `<stack>-apps`, etc.). One file per set under `package-sets/`. Referenced by name from `stack.yaml.builds[*].package_set`. |
 | **Template set** | The collection of Jinja-style templates the render step expands. Versioned by name (`v6`) and selected by `stack.yaml.templates.set`. |
+| **Template contract** | `templates/<set>/contract.yaml`. The finite vocabulary accepted by a template set for build classes, toolchains, node selectors, and target policies. `stack.yaml` names these values; the contract defines what they mean. |
+| **Stack defaults** | `templates/<set>/stack-defaults.yaml`. Template-owned defaults merged under a user's `stack.yaml` so package managers do not repeat module, externals, buildcache, and release boilerplate. |
+| **`per_system` block** | Optional system-scoped narrowing inside `stack.yaml`. It intersects a generic build request with profile names for one target system without polluting the portable top-level build intent. |
+| **Starter stack** | A small copy-and-edit `stack.yaml` under `stacks/_starters/` that shows a common adoption shape such as one package, CPU+GPU app, or CSE-style package-set reuse. |
 | **Lane** | A single Spack environment representing one (compiler, kind) pairing within a stack. Examples: `gcc/core`, `cce/serial`, `cce/mpi-craympich`, `gcc/gpu-craympich-gfx90a`. A lane has its own `spack.yaml`, its own lockfile, its own view, and its own module root. |
-| **Lane kind** | One of `core` / `serial` / `mpi` / `gpu`. The kind controls which scopes the lane includes and which package set it expands. |
+| **Lane kind** | A template-selected lane category. The default taxonomy is `core` / `serial` / `mpi` / `gpu`, but a simple stack may use only one payload lane and no separate Core. The kind controls which scopes the lane includes and which package-set blocks it expands. |
 | **Front-door module** | The single user-facing module that selects a lane. Loading the front-door module prepends the lane's MODULEPATH and (for site-external lanes) the platform modules the lane depends on. Example: `CSE/CCE/mpi-craympich`. |
+| **Direct application module** | A public package/application module that users load without a separate lane selector. It carries its lane's provenance, conflicts, and runtime external module loads directly. Example: `fun3d/14.2-gpu-gfx90a`. |
 | **Scope** | A directory of Spack config files (`packages.yaml`, `toolchains.yaml`, etc.) that a lane's `include::` list pulls in. Lives under `templates/configs/<scope-name>/` in source and `configs/<scope-name>/` in the rendered workspace. |
 | **Common scope** | `configs/common/`. The scope every lane includes. Holds `concretizer.yaml`, `mirrors.yaml`, foundation `require:` pins, and other policy that applies to every lane. |
 | **Platform scope** | Any scope whose contents come from platform/system facts (`configs/vendor/cray/`, `configs/os/rhel8/`, `configs/mpi/cray-mpich/`, `configs/gpu/amd-rocm/`). |
 | **Render workspace** | The on-disk tree the render step produces — `configs/` + `environments/` + manifest — that Spack reads. Ephemeral by design; regeneratable from sources. |
 | **Release** | One concretized, built, verified copy of the stack with a unique tag (e.g. `2026.06`). Source records live under `releases/<tag>/<system>/<stack>/`; runtime trees live under `/shared/stack/releases/<tag>/<system>/<stack>/`. The `current` symlink points at the active runtime release. |
-| **Foundation cache** | The build-cache lane that holds Core builds. Keyed by OS/glibc + Spack/package-repo generation + baseline target (e.g. `foundation/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/x86_64_v3`). An optional profile-ABI token may be inserted when one mirror spans incompatible site/vendor external surfaces. Read by every lane on a matching system. |
-| **Science cache** | The build-cache lane that holds science (serial/MPI/GPU) builds. Keyed by the same OS/glibc + generation boundary; compiler/MPI/target appear in the directory label for human readability, not as reuse boundaries. |
+| **Foundation cache** | The build-cache lane that holds Core builds when a stack renders Core lanes. Keyed by OS/glibc + Spack/package-repo generation + baseline target (e.g. `foundation/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/x86_64_v3`). An optional profile-ABI token may be inserted when one mirror spans incompatible site/vendor external surfaces. Read by payload lanes on a matching system when the stack has Core/foundation lanes. |
+| **Payload cache** | The build-cache lane that holds non-Core package builds (CSE calls these science serial/MPI/GPU builds). Keyed by the same OS/glibc + generation boundary; compiler/MPI/target appear in lane names and manifests for human readability, not as reuse boundaries. |
 | **Projected view** | A symlink tree generated by Spack that exposes installed packages at clean `{name}/{version}` paths instead of raw hashed install prefixes. The user-facing surface of a lane. |
 | **`include::`** | The double-colon Spack directive that *replaces* the built-in include list. The committed isolation mechanism for production lanes. |
 | **Toolchain** | A named bundle of compiler-and-MPI-provider constraints declared in `toolchains.yaml` and applied to a spec as `%toolchain_name`. The mechanism that pins compiler-matched MPI flavors (the canonical case: Cray cray-mpich's per-PrgEnv builds). |
@@ -72,7 +77,7 @@ concept.
 | Separate intent from platform reality | `profile.yaml` describes the system. `stack.yaml` describes the desired stack. |
 | Keep config isolation explicit | Production environments use `include::` to read only selected stack scopes plus Spack defaults. |
 | Keep helper tools optional | ClusterInspector, render helpers, and Ansible automate steps but do not define the model. |
-| Prefer lane separation | Core, serial, MPI, and GPU lanes should have separate environments, lockfiles, views, modules, and build-cache lanes where useful. |
+| Prefer lane separation where useful | Variant-rich stacks should separate Core, serial, MPI, GPU, or site-specific payload lanes. Simple stacks can use one lane and direct package modules. |
 | Make visible paths clean | Views or symlink trees should expose stable paths instead of raw hash-heavy Spack install prefixes. |
 | Save solver results | `spack.lock` is the reproducibility artifact for a concrete release. |
 | Prove manually first | Build and inspect the rendered environment before wrapping it in larger automation. |
@@ -116,10 +121,11 @@ profile.yaml + stack.yaml + package-sets/ + templates/ + release vars
                               │
        ┌────────────┬────────────┬────────────┬────────────┐
        ▼            ▼            ▼            ▼            ▼
-   install     projected     front-door     spack.lock   build cache
-    tree         views        modules        per lane    foundation
-   (hashed)    {name}/        + package                  + science
-              {version}        modules                   lanes
+   install     projected     public        spack.lock   build cache
+    tree         views        entry        per lane     foundation
+   (hashed)    {name}/        modules                   + payload
+              {version}       + package                  lanes
+                              modules
                                                           │
                                                           ▼
                                             release-manifest.yaml
@@ -138,9 +144,9 @@ and what users and other systems see.
 saved**: `spack.lock` per lane, the release manifest, and the build-cache
 contents. Everything else is regeneratable.
 
-**One thing in this picture is committed-and-immutable**: the rendered
-workspace is *deterministic* — same inputs yield byte-identical output — but
-it is *ephemeral*. It can be deleted and re-rendered at any time. Treat the
+**One generated tree in this picture is deterministic but ephemeral**: the
+rendered workspace should be byte-identical for the same inputs, but it is not
+committed source. It can be deleted and re-rendered at any time. Treat the
 workspace as a build artifact, not a source artifact.
 
 **Two things in this picture are optional**: the render step itself (a human
@@ -233,8 +239,8 @@ committed minimum and note what to validate on the deployed version.
 | `include::` isolation (this design's committed isolation mechanism) | 1.1 | Override form; Spack defaults always retained. |
 | `toolchains.yaml` with `when: "%c"` conditional syntax | 1.1 | Newest part of the toolchains feature; validate exact syntax on deployed version. |
 | Compiler-as-dependency (language-virtual providers) | 1.1 | Allows toolchains to name a compiler that is itself a Spack-built spec. |
-| `concretizer: reuse: false` for pipeline-driving environments | 1.1 | Distinct from the build-time `reuse: true` used in science lanes. |
-| `concretizer: unify: when_possible` | 1.1 | Required for multi-version science lanes (strict `unify: true` collapses versions). |
+| `concretizer: reuse: false` for pipeline-driving environments | 1.1 | Distinct from the build-time `reuse: true` used in payload lanes. |
+| `concretizer: unify: when_possible` | 1.1 | Required for multi-version payload lanes (strict `unify: true` collapses versions). |
 | POSIX jobserver and live terminal UI (`-j` as the single concurrency knob) | 1.2 | On 1.1 the new installer existed only as an experimental preview via `spack config add config:installer:new`. |
 | Spec groups (`group:` / `needs:` / `override:`) | 1.2 | Compact multi-version manifests; on 1.1 list every version explicitly. |
 | `spack.lock` as a stable cross-release artifact | 1.1 | The release reproducibility artifact this design saves. |
@@ -253,8 +259,8 @@ seconds; the cost of a silent feature mismatch is a misleading build.
 
 ## Repository Layout
 
-The repository layout should be generic enough to cover Cray systems and regular
-Linux systems without creating unrelated structures for each platform.
+The repository layout should be generic enough to cover Cray systems and generic
+Linux HPC systems without creating unrelated structures for each platform.
 
 ```text
 repo/
@@ -267,7 +273,7 @@ repo/
   package-sets/
     core-foundation.yaml
     science-full.yaml
-    science-gpu.yaml
+    <other-stack-set>.yaml
   templates/
     configs/
       common/
@@ -290,6 +296,22 @@ between facts, stack intent, reusable templates, package sets, and rendered
 output.
 
 ## Durable Inputs
+
+Package managers should not have to learn every repository concept before their
+first successful build. The design has an adoption ladder; each tier or optional
+extension is a valid workflow, not a throwaway tutorial.
+
+| Tier | Files the package manager writes | Use when |
+|---|---|---|
+| Tier 0 — manual Spack | One `spack.yaml` environment | First proof, debugging, or a maintainer who wants no renderer yet. |
+| Tier 1 — starter stack | One `stack.yaml` with inline `specs:` | One package or a small application stack. This is the normal starting point. |
+| Tier 2 — narrowed stack | Same `stack.yaml`, plus optional `per_system:` | Same stack intent across systems, but one deployment needs fewer compilers, MPI providers, or GPU arches. |
+| Optional — package-set reuse | `stack.yaml` plus optional `package-sets/<name>.yaml` | Large stacks where the same root spec list is shared by multiple build requests, such as CSE using `science-full` for serial, MPI, and GPU lanes. |
+
+Most package managers should start from `stacks/_starters/`, edit `name:` and
+`builds[*].specs`, then render. Template contracts and stack defaults are
+framework-maintainer files; package managers select the names they define but do
+not normally edit them.
 
 ### `profile.yaml`
 
@@ -394,11 +416,21 @@ gpu_toolkit_modules:                            # O - standalone GPU toolkit mod
   # Populated when the system exposes GPU toolkits as standalone modules
   # separable from a vendor PrgEnv (e.g., `rocm/<v>`, `cudatoolkit/<v>`).
   # The committed default Cray-PE GPU lane (Option B) loads the GNU
-  # PrgEnv plus the standalone toolkit module from this list.
+  # PrgEnv plus the standalone toolkit module from this list. For ROCm,
+  # this module is also the source for the Spack component externals below.
   rocm:
     version: "6.0.0"
     module: rocm/6.0.0
     prefix: /opt/rocm-6.0.0
+    spack_components:                           # representative ROCm 5/6 component externals
+      - { package: hip,          prefix: /opt/rocm-6.0.0/hip }
+      - { package: hsa-rocr-dev, prefix: /opt/rocm-6.0.0 }
+      - { package: comgr,        prefix: /opt/rocm-6.0.0 }
+      - { package: rocblas,      prefix: /opt/rocm-6.0.0 }
+      - { package: hipblas,      prefix: /opt/rocm-6.0.0 }
+      - { package: hipsparse,    prefix: /opt/rocm-6.0.0 }
+      - { package: rocprim,      prefix: /opt/rocm-6.0.0/rocprim }
+      - { package: llvm-amdgpu,  prefix: /opt/rocm-6.0.0 }
   cudatoolkit:                                  # NVIDIA equivalent on NVIDIA systems
     version: "12.4"
     module: cudatoolkit/12.4
@@ -497,6 +529,7 @@ capabilities:                                   # R - derived flags the stack co
     - { compiler: cce,    lane: serial,           runtime_node_types: [cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
     - { compiler: cce,    lane: mpi-craympich,    runtime_node_types: [cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
     - { compiler: gcc,    lane: core,             runtime_node_types: [login, cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
+    - { compiler: gcc,    lane: serial,           runtime_node_types: [cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
     - { compiler: gcc,    lane: mpi-craympich,    runtime_node_types: [cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
     # GPU lanes default to GCC host (Cray PE Option B: PrgEnv-gnu + standalone
     # rocm toolkit module). See §Host-Compiler Policy and §Cray PE + GPU.
@@ -566,6 +599,12 @@ Profile rules:
   is the sanctioned exception (HPE genuinely ships per-compiler builds at
   distinct prefixes), and it is expressed by separate `flavors:` keys rather
   than by attaching a compiler to one spec.
+- ROCm component externals are platform facts about the installed ROCm tree, not
+  stack root specs. They may be listed explicitly in
+  `gpu_toolkit_modules.rocm.spack_components`, or supplied by a checked-in
+  versioned component template keyed by the profile's ROCm version and prefix.
+  If neither source can produce a coherent component set, AMD GPU lanes fail
+  validation rather than pretending `rocm` is a single Spack external.
 
 The render step treats absent optional keys as defaults. A profile whose
 `node_types` entries all have `gpu: null` produces a workspace with no GPU
@@ -580,104 +619,142 @@ compilers such as CCE and PE GCC would incorrectly fail validation.
 
 ### `stack.yaml`
 
-`stack.yaml` declares desired stack behavior. It is the durable stack
-contract, and it is **platform-portable** — one stack file can drive
-multiple platforms because the render step picks which lanes apply based
-on what the profile declares.
+`stack.yaml` declares desired stack behavior. It is the durable stack contract,
+and it is **platform-portable** — one stack file can drive multiple platforms
+because the render step resolves generic build requests against the selected
+`profile.yaml`.
 
-Lane entries may name provider-specific lanes. Profile-backed providers such as
-`mpi-craympich` and `mpi-site` require matching facts in the profile.
-Stack-built providers such as `mpi-openmpi` are satisfiable from stack templates
-and package policy; they do **not** require an entry in `profile.mpi[]`. Lanes
-whose profile-backed providers are not declared in the profile are **skipped**
-at render time with an info-level log entry — not an error. So a stack file can
-list both `mpi-craympich` and `mpi-openmpi` lanes; on a generic Linux HPC system
-the craympich lane is skipped, while the Spack-built OpenMPI lane can still
-render.
-A skipped lane becomes an error only if the lane carries `required: true`, which
-a stack maintainer sets when the lane's absence on a given system should fail
-the render rather than be silently dropped.
+The source stack file should not normally list concrete lane names such as
+`gcc-gpu-craympich-gfx90a`. Those names are target-system consequences: they
+come from the compiler inventory, MPI/provider policy, node types, CPU targets,
+and GPU architecture facts in the profile. The source file says "build this
+payload as CPU and GPU," "use direct modules," or "expand one build per GPU
+architecture." The render step turns those requests into concrete lanes.
 
-Top-level stanzas (`externals.*`, `targets.*`, `modules.*`) stay
-genuinely platform-agnostic: they express policy in terms of categories
+Do not confuse package sets with Spack `packages.yaml`. Package sets are source
+inputs that list root packages and supported versions. Rendered `packages.yaml`
+files are target-system Spack config: externals, providers, target preferences,
+GPU toolkit components, and buildable policy derived from `profile.yaml` plus
+the policies in this stack file.
+
+Top-level stanzas (`externals.*`, `modules.*`) stay genuinely
+platform-agnostic: they express policy in terms of categories
 (`compilers: prefer_platform`) that the render step resolves against the
-profile.
+profile. Build requests use only names accepted by the selected template
+contract.
 
 It should answer questions like:
 
-- What lanes should be built?
-- What package sets should each lane use?
-- What targets should each lane prefer?
+- What build requests should be expanded?
+- What inline specs or package sets should each request use?
+- Which target classes should each request run on?
+- How should ambiguous target matches expand?
 - What module naming and exposure policy should users see?
 - What externals policy should convert profile facts into Spack config?
 - What build-cache lanes and release artifacts should be saved?
 
-The full reference schema follows. Required keys are marked **R**; optional
-keys are marked **O**.
+The minimum Tier 1 stack file is intentionally small. It uses normal Spack root
+spec strings under `specs:` and relies on the selected template set's defaults
+for modules, externals, buildcache, and release policy.
+
+```yaml
+# stacks/my-app/stack.yaml — minimum renderable stack
+schema_version: 1
+name: my-app
+
+templates:
+  set: app-direct-v1
+
+builds:
+  - name: payload
+    class: cpu
+    toolchain: app-default
+    nodes: cpu
+    expand: one
+    specs:
+      - hdf5@1.14.5
+      - netcdf-c@4.9.2
+```
+
+That is the normal adoption path: copy a starter, edit `name` and Spack `specs`,
+adjust `class`, `toolchain`, `nodes`, or `expand` only when the starter's default
+shape is not the one you want, then render. The selected template contract must
+define those names. The full reference schema follows for stack owners and
+CSE-scale stacks. Required keys in source `stack.yaml` are marked **R**; optional
+keys are marked **O**. Optional keys may still be required after merging with
+`templates/<set>/stack-defaults.yaml`; if neither the source stack nor the
+defaults supplies a required value, render fails.
 
 ```yaml
 schema_version: 1                               # R - stack schema version
 name: cse                                       # R - stack name; appears in paths and modules
 
-profile_contract:                               # R - which profile schema this stack consumes
+profile_contract:                               # O - defaulted by template set when omitted
   schema_version: 1                             # R - render rejects mismatched profile schema
 
 templates:                                      # R - which template set to render against
   set: v6                                       # R - template set name; matches templates/ on disk
 
-modules:                                        # R - user-visible module strategy
+modules:                                        # O - user-visible module strategy; normally from stack-defaults.yaml
   format: tcl                                   # R - mandatory baseline; always `tcl` (only valid value)
   additional_formats: []                        # O - optional add-ons; e.g. [lmod] to also emit Lua tree
-  init_module: cse-init                         # R - bootstrap/init module users may load first
+  exposure: front_door                          # O - front_door (default) | direct
+  init_module: cse-init                         # O - bootstrap/init module; null if module_root is already on MODULEPATH
   module_root: CSE                              # R - user-facing lane-module root, e.g. CSE/GCC/mpi-openmpi
+  publish_root: null                            # O - existing site MODULEPATH root for direct publication
   hierarchy_style: collapsed                    # O - collapsed (default) | granular (Lmod-only)
   expose_provenance: true                       # O - default true; emits STACK_PACKAGE_PROVENANCE
 
-targets:                                        # R - target policy by class
-  foundation: x86_64_v3                         # R - portable baseline for Core
-  science_default: runtime_preferred            # R - symbolic optimized target; resolves from lane.runtime_node_type cpu.preferred
-  hard_require: false                           # O - false (preference) | true (require: target=...); default false
+builds:                                         # R - generic build requests, not resolved lanes
+  - name: core                                  # R - request name; appears as source_build in generated lanes
+    class: core                                 # R - key in templates/<set>/contract.yaml build_classes
+    package_set: core-foundation                # O - mutually exclusive with specs; package-set file stem
+    specs: null                                 # O - mutually exclusive with package_set; inline Spack root specs
+    toolchain: cse-core                         # R - key in template contract toolchains
+    nodes: cpu                                  # R - key in template contract node_selectors
+    expand: one                                 # R - one | per_node_type | per_cpu_target | per_gpu_arch
+    publish: true                               # O - default true; false skips public module/view publication
+    required: false                             # O - default false; true → render errors if unsatisfied
 
-lanes:                                          # R - the matrix the render step expands
-  - name: gcc-core                              # R - identifier; used in env paths and module names
-    compiler: gcc                               # R - must match a compiler the profile can satisfy
-    lane: core                                  # R - provider-qualified lane identifier
-    kind: core                                  # R - strict enum: core | serial | mpi | gpu
-    package_set: core-foundation                # R - which package-set file to expand into specs
-    target: foundation                          # R - foundation | science_default | <named target>
-    runtime_node_type: cpu_compute              # R - which profile.node_types entry the lane runs on
-    publish: true                               # O - default true; false skips view/module regeneration
-    required: false                             # O - default false; true → render errors if the lane cannot be satisfied
-
-  - name: cce-mpi-craympich
-    compiler: cce
-    lane: mpi-craympich
-    kind: mpi
+  - name: serial                                # CSE serial payload request
+    class: serial
     package_set: science-full
-    target: science_default
-    runtime_node_type: cpu_compute              # MPI lane targets a CPU compute class
+    specs: null
+    toolchain: cse-serial-default
+    nodes: cpu
+    expand: one
     publish: true
 
-  # GPU lanes default to GCC host (Cray PE Option B). One lane per GPU class.
-  - name: gcc-gpu-craympich-gfx90a               # one lane per GPU class — names are explicit
-    compiler: gcc
-    lane: gpu-craympich-gfx90a
-    kind: gpu
-    package_set: science-gpu
-    target: science_default
-    runtime_node_type: gpu_compute_mi250x        # GPU lane targets the matching GPU class
+  - name: mpi                                   # CSE-style payload request
+    class: mpi
+    package_set: science-full
+    specs: null
+    toolchain: cse-mpi-default
+    nodes: cpu
+    expand: one
     publish: true
 
-  - name: gcc-gpu-craympich-gfx942
-    compiler: gcc
-    lane: gpu-craympich-gfx942
-    kind: gpu
-    package_set: science-gpu
-    target: science_default
-    runtime_node_type: gpu_compute_mi300a        # second GPU class gets its own lane
+  - name: gpu                                   # CSE-style GPU payload request
+    class: gpu
+    package_set: science-full
+    specs: null
+    toolchain: cse-gpu-default
+    nodes: gpu
+    expand: per_gpu_arch
     publish: true
 
-externals:                                      # R - platform-agnostic externals policy
+per_system:                                     # O - system-scoped narrowing; ignored for other profile.system.name values
+  example-cray:
+    builds:
+      mpi:
+        compilers: [gcc, cce]                   # subsets of profile/contract-resolved candidates only
+        mpi: [cray-mpich]
+      gpu:
+        compilers: [gcc]
+        mpi: [cray-mpich]
+        gpu_arch: [gfx90a]
+
+externals:                                      # O - platform-agnostic externals policy; normally from stack-defaults.yaml
   compilers: prefer_platform                    # R - prefer_platform | build_all | mixed
   mpi: prefer_platform                          # R - prefer_platform | build_all | mixed
   openssl: system                               # R - system (force external) | stack_built
@@ -690,14 +767,14 @@ foundation_pins:                                # O - libs the common scope must
   xz:    "5.4.6"
   zstd:  "1.5.6"
 
-buildcache:                                     # O - build-cache lane policy
-  spack_generation: "spack-{spack_version}/repo-{package_repo_generation}"
-  foundation_lane: "foundation/{os_id}/glibc-{glibc}/{spack_generation}/{baseline_target}"
-  science_lane:    "science/{os_id}/glibc-{glibc}/{spack_generation}/{system}/{compiler}-{lane}/{target}"
+buildcache:                                     # O - build-cache lane policy; normally from stack-defaults.yaml
+  spack_generation: "spack-{spack_version}/repo-{package_repo_generation}" # R when buildcache is set
+  foundation_lane: "foundation/{os_id}/glibc-{glibc}/{spack_generation}/{baseline_target}" # O - only when Core/foundation lanes exist
+  payload_lane:    "payload/{os_id}/glibc-{glibc}/{spack_generation}/{system}" # R when buildcache is set
   signed: false                                 # O - default false; true requires key configuration
   push_after_every_step: true                   # O - default true
 
-release:                                        # R - what to save per release
+release:                                        # O - what to save per release; normally from stack-defaults.yaml
   save_lockfiles: true                          # R - keep spack.lock per lane
   save_manifest: true                           # R - emit release-manifest.yaml
   retain_previous: 2                            # O - default 2; previous releases kept loadable
@@ -722,37 +799,304 @@ reaches Spack config follows this map.
 | `templates.set` | which `templates/` subtree is used |
 | `modules.format` | the mandatory baseline format — always `tcl` |
 | `modules.additional_formats` | optional extra formats to also emit (e.g. `[lmod]` on Lmod sites) |
-| `modules.init_module` | bootstrap/init module name users may load first, e.g. `cse-init` |
-| `modules.module_root` | user-facing lane-module root, e.g. `CSE` in `CSE/GCC/mpi-openmpi` |
+| `modules.exposure` | whether users enter through stack-owned front-door lane modules (`front_door`) or direct package/application modules (`direct`) |
+| `modules.init_module` | optional bootstrap/init module name users may load first, e.g. `cse-init`; null when the public module root is already in MODULEPATH |
+| `modules.module_root` | user-facing module namespace, e.g. `CSE` in `CSE/GCC/mpi-openmpi` or `fun3d` in `fun3d/14.2-gpu-gfx90a` |
+| `modules.publish_root` | optional existing site MODULEPATH root where public modules are published or symlinked |
 | `modules.expose_provenance` | whether `setenv STACK_PACKAGE_PROVENANCE` is emitted |
-| `targets.foundation` | `configs/target/<baseline>/packages.yaml` rendered into core lanes |
-| `targets.science_default` | symbolic optimized target resolved per lane from `profile.node_types[lanes[*].runtime_node_type].cpu.preferred` |
-| `targets.hard_require` | `target: [...]` vs `require: target=...` in the target scope |
-| `lanes[*]` | one `environments/<compiler>/<lane>/spack.yaml` per entry |
-| `lanes[*].package_set` | which `package-sets/<name>.yaml` is expanded into the lane's specs |
-| `lanes[*].target` | which target scope the lane includes |
-| `lanes[*].runtime_node_type` | which `profile.node_types` entry supplies the lane's CPU target and GPU block; render validates the name exists and that `role` is `runtime` or `both` |
+| `builds[*]` | source build requests expanded into one or more resolved lanes |
+| `builds[*].specs` | inline Spack root specs expanded into each generated lane; mutually exclusive with `package_set` |
+| `builds[*].package_set` | optional reusable `package-sets/<name>.yaml` expanded into each generated lane; mutually exclusive with `specs` |
+| `builds[*].class` | key into the template contract's `build_classes`; determines lane kind, spec kind (`package_set_kind`), default target policy, and required capabilities |
+| `builds[*].toolchain` | key into the template contract's `toolchains`; determines compiler/MPI/GPU-toolkit resolution policy |
+| `builds[*].nodes` | key into the template contract's `node_selectors`; determines which `profile.node_types` entries are eligible |
+| `builds[*].expand` | global expansion rule for multiple eligible node matches |
+| `per_system.<system>.builds.<name>` | optional subset-only narrowing after the contract resolves eligible compilers, MPI providers, and GPU arches |
 | `externals.compilers` | `configs/vendor/<family>/packages.yaml` content for compilers |
 | `externals.mpi` | `configs/mpi/<provider>/packages.yaml` content for MPI |
 | `externals.openssl` / `externals.curl` | `configs/os/<os>/packages.yaml` system-external declarations |
 | `externals.fabric_userspace` | UCX/libfabric `buildable` posture in fabric scope |
-| `externals.gpu_toolkit` | CUDA/ROCm `buildable` posture in GPU scope |
+| `externals.gpu_toolkit` | CUDA external posture and ROCm component-external posture in GPU scope |
 | `foundation_pins.<lib>` | `require:` lines in the common scope |
 | `buildcache.spack_generation` | path token separating incompatible Spack/package-repo generations |
-| `buildcache.foundation_lane` | mirror path key for foundation cache |
-| `buildcache.science_lane` | mirror path key for science cache |
+| `buildcache.foundation_lane` | mirror path key for foundation cache; required only when the stack builds Core/foundation lanes |
+| `buildcache.payload_lane` | mirror path key for payload cache |
 | `release.save_lockfiles` | whether `spack.lock` is copied into `releases/<date>/` |
 | `release.save_manifest` | whether `release-manifest.yaml` is emitted |
 | `release.promotion` | whether Ansible swaps the `current` symlink automatically or waits for approval |
+
+Source Contract Rubric:
+
+| Field | Allowed values | Meaning |
+|---|---|---|
+| `modules.format` | `tcl` | Tcl modulefiles are the mandatory baseline. |
+| `modules.exposure` | `front_door`, `direct` | Whether users load a lane selector first or load public package/application modules directly. |
+| `modules.publish_root` | `null` or absolute path | Existing site MODULEPATH root used for direct publication or site-managed symlinks. |
+| `builds[*].specs` | List of Spack root spec strings, or a map keyed by spec kind (`any`, `serial`, `mpi`, `gpu`, etc.) | Inline package roots and versions for this build request. Recommended for small stacks. |
+| `builds[*].package_set` | Filename stem under `package-sets/` | Optional reuse mechanism for root specs. Use when the same spec list is shared across multiple build requests. Mutually exclusive with `specs`. |
+| `builds[*].class` | Any key in `templates/<set>/contract.yaml.build_classes` | Named build class such as `core`, `cpu`, `gpu`, `mpi`, or another template-defined class. |
+| `builds[*].toolchain` | Any key in `templates/<set>/contract.yaml.toolchains` | Named toolchain policy. The contract, not `stack.yaml`, defines compiler/MPI/GPU-toolkit behavior. |
+| `builds[*].nodes` | Any key in `templates/<set>/contract.yaml.node_selectors` | Named node-selection policy. The contract defines how it matches `profile.node_types`. |
+| `builds[*].expand` | `one`, `per_node_type`, `per_cpu_target`, `per_gpu_arch` | Global expansion rule for multiple matched node types. |
+| `builds[*].publish` | `true`, `false` | Whether public modules/views are generated for lanes from this request. |
+| `builds[*].required` | `true`, `false` | Whether an unsatisfied request fails render instead of being skipped with an explanation. |
+| `per_system.<system>.builds.<name>.compilers` | List of normalized compiler IDs from the matching profile | Optional subset of compilers after contract resolution. Unknown values are errors for the matching system. |
+| `per_system.<system>.builds.<name>.mpi` | List of MPI provider names from the matching profile or template contract | Optional subset of MPI providers after contract resolution. Unknown values are errors for the matching system. Note: this is a list of provider names (subset semantics), distinct from `externals.mpi` at the top level, which is a single posture scalar (`prefer_platform` / `build_all` / `mixed`). |
+| `per_system.<system>.builds.<name>.gpu_arch` | List of GPU architecture labels from `profile.node_types[*].gpu.arch_target` | Optional subset of GPU architectures after contract resolution. Unknown values are errors for the matching system. |
+
+`one` expansion means "exactly one match is expected." If the selector matches
+zero entries, the request is skipped unless `required: true`. If it matches more
+than one node type, render fails and asks the maintainer to choose a more
+explicit expansion rule. `per_gpu_arch` means one lane per distinct GPU
+architecture label in the matched node types; `per_cpu_target` means one lane per
+distinct CPU target; `per_node_type` means one lane per matching node type.
+Toolchain fan-out is separate: a template contract may define a toolchain that
+expands across multiple compilers or MPI providers. That behavior is named in the
+contract and then selected from `stack.yaml` by `builds[*].toolchain`.
+
+The key rule is that `stack.yaml` contains names, not resolver expressions. A
+value such as `cse-gpu-default` or `fun3d-default` is allowed only because the
+selected template contract defines it. Raw implementation strings such as
+`prefer_gnu`, `provider:cray-mpich`, or `node_type:gpu_compute_mi250x` belong in
+the template contract or profile, not in the normal stack file.
+
+Every build request must provide exactly one source of root specs: either inline
+`specs:` or `package_set:`. Inline specs are ordinary Spack root specs; users
+should write package versions and semantic variants such as `+mpi`, `~mpi`,
+`+rocm`, or `+cuda` exactly as the package recipe defines them. System-specific
+target details such as `target=zen3`, `cuda_arch=90`, or
+`amdgpu_target=gfx90a` should normally come from the profile and rendered GPU or
+target scopes, not from inline specs.
+
+System-specific names are forbidden in the generic build request fields. The
+`per_system:` block is the one explicit exception. A `per_system` entry is
+applied only when its key matches `profile.system.name`; all other entries are
+ignored for that render. It can only narrow candidates already produced by the
+template contract and profile. It never widens the contract, never invents a
+compiler/MPI/GPU arch, and never changes package roots.
+
+`per_system:` narrows only `builds:`. `externals.*`, `foundation_pins.*`,
+`buildcache.*`, and `release.*` stay platform-portable policy and cannot be
+overridden per system. A deployment that needs different policy on different
+systems has three options depending on what differs: use profile-derived path
+tokens (when the policy can be expressed as a profile fact such as `{os_id}` or
+`{system}` in a buildcache path), adopt a different template set (when several
+deployments share the same alternative policy and it belongs in
+`stack-defaults.yaml`), or maintain a separate `stack.yaml` (when only one
+deployment differs and the policy is genuinely stack-level intent).
+
+### Template Contract Files
+
+Every template set ships a contract file:
+
+```text
+templates/<set>/contract.yaml
+```
+
+The contract is source-controlled and reviewed with the templates. It is the
+rubric for accepted `stack.yaml` values. A stack file that names a class,
+toolchain, or node selector not present in the selected contract fails validation
+before any Spack files are rendered.
+
+Example app contract:
+
+```yaml
+# templates/app-direct-v1/contract.yaml
+schema_version: 1
+
+build_classes:
+  cpu:
+    lane_kind: cpu                              # rendered environment template kind
+    package_set_kind: cpu                       # spec-source `kinds:` entry required
+    default_target: payload_default             # target_policies key below
+    requires: [runtime_cpu]
+
+  gpu:
+    lane_kind: gpu
+    package_set_kind: gpu
+    default_target: payload_default
+    requires: [runtime_gpu, gpu_toolkit]
+
+toolchains:
+  app-default:
+    compiler: prefer_gnu                        # generic starter-stack default
+    mpi: prefer_platform
+    gpu_toolkit: when_required_by_class
+
+  fun3d-default:
+    compiler: prefer_gnu                        # contract-owned resolver policy
+    mpi: prefer_platform
+    gpu_toolkit: when_required_by_class
+
+node_selectors:
+  cpu:
+    match: runtime_without_gpu
+
+  gpu:
+    match: runtime_with_gpu
+
+target_policies:
+  payload_default:
+    resolve: runtime_preferred                  # profile.node_types[*].cpu.preferred
+    hard_require: false
+```
+
+Example CSE contract:
+
+```yaml
+# templates/v6/contract.yaml (CSE excerpt)
+schema_version: 1
+
+build_classes:
+  core:
+    lane_kind: core
+    package_set_kind: core
+    default_target: foundation
+    requires: [runtime_cpu]
+
+  serial:
+    lane_kind: serial
+    package_set_kind: serial
+    default_target: payload_default
+    requires: [runtime_cpu]
+
+  mpi:
+    lane_kind: mpi
+    package_set_kind: mpi
+    default_target: payload_default
+    requires: [runtime_cpu, mpi]
+
+  gpu:
+    lane_kind: gpu
+    package_set_kind: gpu
+    default_target: payload_default
+    requires: [runtime_gpu, mpi, gpu_toolkit]
+
+toolchains:
+  cse-core:
+    compiler: each_cse_core_compiler
+    mpi: none
+    gpu_toolkit: none
+
+  cse-serial-default:
+    compiler: each_cse_serial_compiler
+    mpi: none
+    gpu_toolkit: none
+
+  cse-mpi-default:
+    compiler: each_cse_mpi_compiler
+    mpi: platform_then_stack_mpi
+    gpu_toolkit: none
+
+  cse-gpu-default:
+    compiler: gnu_host_default
+    mpi: platform_mpi_required
+    gpu_toolkit: prefer_platform
+
+node_selectors:
+  cpu: { match: runtime_without_gpu }
+  gpu: { match: runtime_with_gpu }
+
+target_policies:
+  foundation:
+    resolve: baseline_x86_64_v3
+    hard_require: false
+
+  payload_default:
+    resolve: runtime_preferred
+    hard_require: false
+```
+
+The resolver policy names inside the contract (`each_cse_mpi_compiler`,
+`platform_then_stack_mpi`, `gnu_host_default`) are reviewed implementation
+vocabulary for this template set. The source `stack.yaml` never spells out
+`gcc`, `cce`, `cray-mpich`, `gfx90a`, or `zen3`; those are selected later from
+the profile and recorded in the resolved lane plan.
+
+Template contracts may be generic across many stacks, but they are still finite:
+the renderer validates names, spec-kind compatibility, required
+capabilities, and expansion behavior against this file before looking at Spack.
+If a new workflow needs a new word, add it to the template contract with a clear
+meaning; do not smuggle it into `stack.yaml` as an ad hoc value.
+
+### Stack Defaults Merge Rules
+
+Every template set also ships defaults:
+
+```text
+templates/<set>/stack-defaults.yaml
+```
+
+The source `stack.yaml` must name `templates.set` so the renderer knows which
+contract and defaults to load. Render then merges
+`templates/<set>/stack-defaults.yaml` underneath the user's `stack.yaml` before
+validation. User keys always win.
+
+Merge rules:
+
+- Maps merge recursively.
+- Lists replace; they do not concatenate.
+- Scalars replace.
+- `builds:` is a list and therefore comes from the user stack unless a starter
+  intentionally omits it for documentation purposes.
+- `per_system:` maps merge by system name and build name.
+
+Template defaults carry the boilerplate most package managers should not repeat:
+`profile_contract`, `modules`, `externals`, `foundation_pins`, `buildcache`,
+`release`, helper recommendations, and any template-specific default values. The
+defaults file is versioned and reviewed with the template set. It is not a
+per-stack customization file; if many stacks need a different default, create a
+new template set or update the template set deliberately.
+
+The release manifest records the user `stack.yaml` digest plus the selected
+`stack-defaults.yaml` and `contract.yaml` digests so a rendered release can be
+reproduced exactly.
+
+During render, `builds:` becomes a resolved release plan. The plan is generated
+output, not source policy:
+
+```yaml
+resolved_lanes:
+  - name: gcc-gpu-craympich-gfx90a
+    source_build: gpu
+    compiler: gcc
+    lane: gpu-craympich-gfx90a
+    kind: gpu
+    package_set: science-full
+    target: zen3
+    runtime_node_type: gpu_compute_mi250x
+    gpu_arch: gfx90a
+```
+
+The rendered `environments/<compiler>/<lane>/spack.yaml`, target scopes, GPU
+scopes, modulefiles, views, lockfiles, and build-cache paths are all derived from
+that resolved plan plus package sets, templates, and the profile.
+
+### Starter Stacks
+
+The repository should ship starter stack files under `stacks/_starters/`. A
+package manager copies the closest starter to `stacks/<name>/stack.yaml`, edits
+the stack name and specs, and renders. Starters are documentation and examples,
+not a new schema.
+
+| Starter | Shape | When to pick |
+|---|---|---|
+| `single-package.yaml` | One build, inline specs, no Core | One or two packages, direct modules, fastest Tier 1 path. |
+| `cpu-gpu-app.yaml` | CPU and GPU builds, inline specs | One application with CPU and GPU variants. |
+| `multi-system-narrowed.yaml` | Inline specs plus `per_system:` | Same stack across multiple systems with per-deployment narrowing. |
+| `cse-style-reuse.yaml` | Multiple builds sharing package sets | Large stacks where the same spec list drives several build classes. |
+
+The starter files should stay short. If a starter needs pages of boilerplate,
+that boilerplate belongs in `templates/<set>/stack-defaults.yaml` instead.
 
 Stack rules:
 
 - It is stack intent, not detected system state.
 - It is platform-portable. Top-level policy stanzas (`externals.*`,
-  `targets.*`, `modules.*`) carry no platform-specific blocks; the
-  render step resolves them against the profile. Lane entries may name
-  platform-specific providers; lanes whose providers are absent from
-  the profile are skipped at render (or flagged as errors if marked
+  `modules.*`) and build requests carry no detected system facts;
+  the render step resolves them against the profile through the selected template
+  contract. The contract may encode provider-specific behavior, but unsupported
+  profile-backed providers are skipped at render (or flagged as errors if marked
   `required: true`).
 - It should be sufficient to explain the generated stack layout. Anything that
   shows up in the rendered workspace must be traceable to a key here, to a
@@ -760,25 +1104,59 @@ Stack rules:
 - It should remain valid if a human renders the files manually.
 - It should avoid hidden policy in scripts or playbooks.
 
-`modules.init_module` and `modules.module_root` are deliberately separate. The
-init module is the optional bootstrap surface (`module load cse-init`) that can
-set `MODULEPATH` to the current release. The module root is the user-facing lane
-namespace (`CSE/GCC/mpi-openmpi`) exposed after initialization. Keeping them
-separate prevents `cse-init` from being confused with the lane-module prefix.
+`modules.init_module`, `modules.module_root`, and `modules.exposure` are
+deliberately separate. For a CSE-style multi-lane stack, the init module is the
+optional bootstrap surface (`module load cse-init`) that can set `MODULEPATH` to
+the current release, and `modules.module_root` is the user-facing lane namespace
+(`CSE/GCC/mpi-openmpi`) exposed after initialization. For a direct application
+stack, `modules.init_module` can be null because the site already has
+`modules.publish_root` in MODULEPATH; users load modules such as
+`fun3d/14.2-gpu-gfx90a` directly. Keeping these separate prevents bootstrap
+modules, lane namespaces, and direct application module names from being
+conflated.
 
-### Package Set Files
+### Package Sets — Optional Spec Reuse
 
 A package set is a named list of root specs. Sets live under
-`package-sets/<name>.yaml` and are referenced by `stack.yaml.lanes[*].package_set`.
-A lane gets its spec list from exactly one set. Pulling the spec list out of
-`stack.yaml` keeps the stack file focused on policy and lets multiple lanes
-share the same set when their intent is the same.
+`package-sets/<name>.yaml` and are referenced by
+`stack.yaml.builds[*].package_set`. Package sets are optional. A small stack
+should usually inline `builds[*].specs` directly in `stack.yaml`; that keeps the
+maintainer at one YAML file. Use a package set when the same root spec list is
+shared across multiple build requests, such as CSE using `science-full` for
+serial, MPI, and GPU lanes.
 
-Package sets are the **only** source of versioned root specs. If the stack ships
-three HDF5 versions, those `hdf5@...` roots live in the package set, not in
-`stack.yaml`. `stack.yaml.foundation_pins` is separate: it pins common-scope
-dependency policy such as `zlib`, `xz`, or `zstd`; it does not define science
-root versions.
+Root specs come from exactly one source per build request: inline
+`builds[*].specs` or a referenced package set. If the stack ships three HDF5
+versions inline, those `hdf5@...` roots live under that build's `specs:`. If the
+same list is reused across several build requests, move it to a package set and
+reference it by name. `stack.yaml.foundation_pins` is separate: it pins
+common-scope dependency policy such as `zlib`, `xz`, or `zstd`; it does not
+define payload root versions.
+
+Inline specs can be a flat list:
+
+```yaml
+builds:
+  - name: payload
+    class: serial
+    specs:
+      - hdf5@1.14.5
+      - netcdf-c@4.9.2
+```
+
+or a package-set-kind map when one build class needs `any` plus a specific block:
+
+```yaml
+builds:
+  - name: mpi
+    class: mpi
+    specs:
+      any:
+        - gsl@2.8
+      mpi:
+        - hdf5@1.14.5+mpi+fortran
+        - parallel-netcdf@1.13.0
+```
 
 Sets fall into three tiers, declared in the file itself:
 
@@ -789,8 +1167,8 @@ Sets fall into three tiers, declared in the file itself:
 | `experimental` | A set being tried out. May change or be deleted without notice. |
 
 The tier guards against accidental promotion of test sets to production —
-a `stack.yaml` lane that references a `smoke` set should fail render-time
-validation unless the stack file explicitly opts in.
+a `stack.yaml` build request that references a `smoke` set should fail render-time
+validation unless the render invocation or release variables explicitly opt in.
 
 Schema:
 
@@ -800,11 +1178,11 @@ name: science-full                              # R - matches the filename stem
 tier: canonical                                 # R - canonical | smoke | experimental
 description: |                                  # R - human-readable purpose
   Full curated science library set: HDF5/NetCDF/PnetCDF (multi-version),
-  TAU, and the common build tools needed at build time.
+  TAU, and performance-portability roots used by CSE payload lanes.
 
-kinds: [serial, mpi]                            # R - which lane kinds this set is valid for
+kinds: [serial, mpi, gpu]                       # R - package-set kinds this set can satisfy
 
-specs:                                          # R - root specs by lane-kind constraint
+specs:                                          # R - root specs by package-set kind constraint
   any:                                          # specs identical across every kind in `kinds`
     - gsl@2.8
   serial:                                       # specs only for serial-kind lanes
@@ -821,6 +1199,16 @@ specs:                                          # R - root specs by lane-kind co
     - netcdf-c@4.9.0+mpi
     - parallel-netcdf@1.13.0
     - tau+mpi
+  gpu:                                          # GPU lanes are MPI-capable plus GPU-sensitive roots
+    - hdf5@1.14.5+mpi+fortran
+    - hdf5@1.14.4+mpi+fortran
+    - hdf5@1.12.3+mpi+fortran
+    - netcdf-c@4.9.2+mpi
+    - netcdf-c@4.9.0+mpi
+    - parallel-netcdf@1.13.0
+    - tau+mpi
+    - kokkos+rocm
+    - raja+rocm
 
 provenance_hints:                               # O - override the render-step provenance derivation
   cray-mpich: Platform-backed                   #     (otherwise derived from packages.yaml)
@@ -831,32 +1219,36 @@ notes: |                                        # O - free-form notes for mainta
   until the next refresh; revisit when 1.14.x lands.
 ```
 
-The render step expands the set by selecting `specs.any` plus the
-lane-kind-specific block (`specs.serial` for a serial lane, `specs.mpi` for
-an MPI lane) and emits the result into the lane's `spack.yaml` `specs:`
-list. `specs.any` is only for roots that are literally identical for every kind
-the set supports. Dual-build packages such as HDF5 and NetCDF belong only in
-the kind-specific blocks. After expansion, duplicate root specs by package name
-and major variant class are a render-time validation error unless the package
-set marks an explicit override. The toolchain decoration (`%cce_craympich`
-etc.) is applied by the render step from the lane's compiler-and-MPI pairing,
-not from the package set; sets stay compiler-agnostic so the same set is usable
-across lanes.
+The render step expands inline specs and package sets the same way. A flat list
+is emitted as-is. A map selects `specs.any` plus the block named by the build
+class's `package_set_kind` in the template contract (`specs.serial` for a serial
+class, `specs.mpi` for an MPI class, `specs.gpu` for a GPU class) and emits the
+result into the generated lane's `spack.yaml` `specs:` list. `specs.any` is only
+for roots that are literally identical for every kind the set supports.
+Dual-build packages such as HDF5 and NetCDF belong only in the
+package-set-kind-specific blocks. After expansion, duplicate root specs by
+package name and major variant class are a render-time validation error unless
+the spec source marks an explicit override. The toolchain decoration
+(`%cce_craympich` etc.) is applied by the render step from the resolved lane's
+compiler-and-MPI pairing, not from the inline spec or package set; spec sources
+stay compiler-agnostic so the same list is usable across lanes.
 
-Three canonical sets ship with the stack out of the gate:
+CSE ships these canonical sets out of the gate:
 
 - **`core-foundation`** — build tools and foundation libraries: `cmake`,
   `ninja`, `pkgconf`, `git`, `zlib-ng+compat`, `xz`, `zstd`, and the
   `miniforge` user environment. Used by every `<compiler>/core` lane.
 - **`science-full`** — multi-version HDF5/NetCDF/PnetCDF, plus TAU and the
-  performance-portability layers (`kokkos`, `raja`) without GPU variants.
-  Used by serial and MPI lanes.
-- **`science-gpu`** — GPU-flavored Kokkos/RAJA with backend and arch
-  variants applied by the GPU scope, plus the MPI-aware HDF5/NetCDF the GPU
-  lane needs. Used by GPU lanes.
+  performance-portability layers (`kokkos`, `raja`). It contains serial, MPI,
+  and GPU-specific root blocks; GPU backend and architecture variants are
+  applied by the GPU scope. Used by CSE serial, MPI, and GPU lanes.
+
+Other stacks may define much smaller sets and may use only one payload lane. A
+curated application stack with no compiler/MPI/GPU variants does not need a
+separate Core lane or serial/MPI/GPU taxonomy just to use this framework.
 
 Smoke sets used for CI live alongside (`smoke-hdf5-mpi`, `smoke-cuda-only`,
-etc.) but are never referenced by a `stack.yaml` lane in production.
+etc.) but are never referenced by a production `stack.yaml` build request.
 
 ## Rendered Release Workspace
 
@@ -957,7 +1349,7 @@ templates just because it appears in this design note; prove it with
 ### Multi-Version Policy and the Foundation Single-Version Rule
 
 The stack carries **multiple versions** of important science libraries so users
-are not forced onto a single version. As a working target, science lanes carry
+are not forced onto a single version. As a working target, payload lanes carry
 at least the latest three versions of HDF5, NetCDF, and the other libraries
 users pin to. This is what makes `unify: when_possible` necessary rather than
 strict `unify: true`: strict unification forces one coherent assignment across
@@ -966,7 +1358,7 @@ wants three HDF5 versions. `when_possible` deduplicates shared deps where they
 agree and permits independent version sub-DAGs where they do not, which is the
 behavior the multi-version policy needs.
 
-Multi-version is a **science-lane concern only**. Core stays single-version
+Multi-version is a **payload-lane concern only**. Core stays single-version
 because there is no user reason to expose multiple CMakes, and the foundation
 stable-ABI libraries (zlib, xz, zstd, and any others a deployed-system DAG
 inspection adds) are pinned **single-version** with explicit `require:` lines
@@ -1012,17 +1404,19 @@ internally and it is not view-projected because most user codes do not
 Reserve the rule for libraries users actually link directly (zlib being the
 common case); leave the rest as private transitive deps that RPATH isolates.
 
-The set of libraries that belong on the pinned list is derived per-system, not
-hard-coded. The procedure is a once-per-build-cycle dry run: concretize a lane
-(`spack -e <lane> spec --json`), read the low-level link deps at the bottom of
-the DAG, filter by dependency type to keep only link-time candidates a user
-could compile against, then check soname stability per library (zlib qualifies;
-OpenSSL does not, and is also not view-exposed anyway). Externals — for
-example cray-mpich — do not expand their internal library closure into the
-DAG, so anything they drag at runtime is invisible to spec-based discovery;
-note that as a known blind spot. The hard part of this work (which libraries
-are ABI-safe to pin) is stable and carries forward across cycles; the
-discovery itself gets cheaper each cycle.
+The set of libraries that belong on the pinned list is curated by stack
+maintainers and should be small. DAG inspection is an audit tool for changing
+that list or onboarding a substantially different system, not a task every
+package manager performs for every package update. The audit procedure is:
+concretize representative lanes (`spack -e <lane> spec --json`), read the
+low-level link deps at the bottom of the DAG, filter by dependency type to keep
+only link-time candidates a user could compile against, then check soname
+stability per library (zlib qualifies; OpenSSL does not, and is also not
+view-exposed anyway). Externals — for example cray-mpich — do not expand their
+internal library closure into the DAG, so anything they drag at runtime is
+invisible to spec-based discovery; note that as a known blind spot. The hard
+part of this work (which libraries are ABI-safe to pin) is stable and should not
+change often.
 
 The multi-version stack lives inside **one environment per lane**, not one
 environment per version. Splitting each version into its own environment was
@@ -1076,7 +1470,7 @@ you intended to happen does not happen.*
 
 | Environment kind | `reuse:` | `unify:` | Rationale |
 |---|---|---|---|
-| Science lane (serial / MPI / GPU) | `true` | `when_possible` | Pull finished binaries from the foundation cache (no rebuild of CMake/Ninja/zlib per lane); allow multi-version science libs to coexist. |
+| Payload lane (serial / MPI / GPU / application) | `true` | `when_possible` | Pull finished binaries from the foundation cache when a Core/foundation lane exists; allow multi-version user-facing packages to coexist. |
 | Core / foundation lane | `true` | `when_possible` | Same reuse posture; `when_possible` is harmless here because Core is single-version by policy. |
 | Pipeline-driving env (input to `spack ci generate`) | `false` | `when_possible` | With `reuse: true`, `spack ci generate` will not emit rebuild jobs for specs whose hashes changed but whose old hashes still appear in the cache — the intended rebuilds silently do not happen. Pipeline envs *must* set `reuse: false` so changed definitions produce rebuild jobs. |
 | Bootstrap / compiler-build env | `true` | `when_possible` | The compiler is the only meaningful spec here; reuse is still useful for the build-time deps (Autotools chain, perl, etc.). |
@@ -1086,14 +1480,14 @@ The two `reuse:` postures are not in conflict. **Build-time `reuse: true`**
 pulls finished binaries from the cache to avoid recompiling unchanged work.
 **Pipeline-generation `reuse: false`** must be off so that changed
 definitions produce the rebuild jobs that the pipeline is supposed to
-emit. The science lane is the build-time case; the pipeline env is the
+emit. The payload lane is the build-time case; the pipeline env is the
 generation case; they are separate environments serving different purposes,
 and they each set the value appropriate to their purpose.
 
 `unify: when_possible` is the committed default for every kind because the
 foundation single-version rule (which strict unification would have
 covered) is enforced explicitly via `require:` in the common scope, and the
-science lanes carry multi-version stacks that strict unification would
+payload lanes carry multi-version stacks that strict unification would
 collapse. `when_possible` deduplicates shared deps where they agree without
 forcing them where they disagree, which is exactly the posture this design
 needs.
@@ -1112,15 +1506,15 @@ AMD GPU nodes. Versions and prefixes are examples; the actual values come from
 
 Major lanes:
 
-- CCE + Cray MPICH for MPI science packages.
+- CCE + Cray MPICH for CSE MPI science packages.
 - GCC + Cray MPICH where a GNU lane is desired.
-- ROCmCC + Cray MPICH for AMD GPU packages.
+- GCC + Cray MPICH + ROCm toolkit/component externals for default AMD GPU packages.
 - Core/foundation packages at a portable target.
 
 ### Cray Core Lane
 
 Core holds build tools and neutral libraries. It uses the portable target, not
-the optimized science target.
+the optimized payload target.
 
 ```yaml
 # environments/cce/core/spack.yaml
@@ -1147,8 +1541,8 @@ spack:
 
 ### Cray Serial Lane
 
-The serial lane carries science packages built without MPI. Build tools do not
-belong here because they live in Core.
+The serial lane carries CSE science packages built without MPI. Build tools do
+not belong here because they live in Core.
 
 ```yaml
 # environments/cce/serial/spack.yaml
@@ -1173,8 +1567,8 @@ spack:
 
 ### Cray MPI Lane
 
-The MPI lane carries MPI-enabled science packages. On Cray, the MPI provider is
-Cray MPICH external, not a Spack-built MPI.
+The MPI lane carries CSE MPI-enabled science packages. On Cray, the MPI provider
+is Cray MPICH external, not a Spack-built MPI.
 
 ```yaml
 # environments/cce/mpi-craympich/spack.yaml
@@ -1203,11 +1597,11 @@ spack:
 ### Cray GPU Lane
 
 GPU lanes include GPU runtime scopes and carry GPU-sensitive packages. The
-committed default is the Option B assembly (GCC host + standalone ROCm
-toolkit module + GCC-flavor cray-mpich); the lane shows that. One lane
-per GPU class — `gfx90a` here, with a parallel `gfx942` lane added when a
-second GPU class is present. Toolchain decoration is `%gcc_craympich`,
-not `%rocmcc_craympich`, because the host compiler is GCC.
+committed default is the Option B assembly (GCC host + standalone ROCm toolkit
+module + ROCm component externals in Spack + GCC-flavor cray-mpich); the lane
+shows that. One lane per GPU class — `gfx90a` here, with a parallel `gfx942`
+lane added when a second GPU class is present. Toolchain decoration is
+`%gcc_craympich`, not `%rocmcc_craympich`, because the host compiler is GCC.
 
 ```yaml
 # environments/gcc/gpu-craympich-gfx90a/spack.yaml
@@ -1240,7 +1634,9 @@ spack:
 ```
 
 The lane's front-door module loads `PrgEnv-gnu` + `gcc-native/13` +
-`rocm/<v>` + `cray-mpich/<v>` at runtime (Option B), not `PrgEnv-amd`.
+`rocm/<v>` + `cray-mpich/<v>` at runtime (Option B), not `PrgEnv-amd`. The
+Spack GPU scope still declares the ROCm component packages individually; the
+runtime module is not a stand-in for a single `rocm` Spack external.
 A second GPU class (MI300A) gets its own parallel lane:
 `environments/gcc/gpu-craympich-gfx942/spack.yaml` with the same shape and
 `amdgpu_target=gfx942`, targeting `runtime_node_type: gpu_compute_mi300a`.
@@ -1267,12 +1663,13 @@ MPI lanes work. There is no separate Core layer for GPU lanes because
 there is no need for one — the host compiler is the compiler, and the
 Core built for that compiler is the Core the GPU lane reuses.
 
-This composition rule means a system with a GPU lane has, for that compiler, a
-core environment plus a `gpu-<provider>` lane environment. A system with both
-serial/MPI lanes *and* a GPU lane under the same compiler has serial, MPI, and
-GPU lane environments all composing with the one `<compiler>/core` for that
-compiler. The user picks exactly one of the three at a time (the lane conflict
-rule); Core is always present.
+For a CSE-like multi-lane stack, this composition rule means a system with a GPU
+lane has, for that compiler, a core environment plus a `gpu-<provider>` lane
+environment. A system with both serial/MPI lanes *and* a GPU lane under the same
+compiler has serial, MPI, and GPU lane environments all composing with the one
+`<compiler>/core` for that compiler. The user picks exactly one payload lane at a
+time (the lane conflict rule); Core is present for that compiler. A simple stack
+with one payload lane can choose not to render a separate Core lane at all.
 
 ### Cray Compiler Externals
 
@@ -1496,10 +1893,69 @@ resolve multiple MPI providers.
 The manual workflow is the reference model. Automation must be a wrapper around
 this process, not a replacement for it.
 
+### Tier 0 Manual Quickstart
+
+Tier 0 skips `stack.yaml` and the renderer entirely. It is the shortest path to
+prove a package on a system and the clearest demonstration that the generated
+workspace is just Spack input.
+
+Choose the scopes by hand:
+
+| Scope | Carries | Include when |
+|---|---|---|
+| `configs/common` | concretizer, mirrors, common pins | Always. |
+| `configs/os/<os>` | OS externals such as OpenSSL/curl | Always for production lanes. |
+| `configs/target/<target>` | CPU target preference or requirement | Always, using the runtime node's CPU target. |
+| `configs/vendor/<family>` | Vendor compiler/platform config | Cray PE or other vendor compiler stacks. |
+| `configs/mpi/<provider>` | MPI provider and toolchain policy | MPI-enabled builds. |
+| `configs/gpu/<vendor>` | GPU toolkit externals and arch variants | GPU-enabled builds. |
+
+Then write one Spack environment directly:
+
+```yaml
+# environments/aocc/mpi-site/spack.yaml — hand-written Tier 0 example
+spack:
+  include::
+    - ../../../configs/common
+    - ../../../configs/mpi/site-openmpi
+    - ../../../configs/target/zen3
+    - ../../../configs/os/sles15
+  specs:
+    - hdf5@1.14.5+mpi+fortran %aocc_site_openmpi
+    - netcdf-c@4.9.2+mpi %aocc_site_openmpi
+  view:
+    default:
+      root: /shared/stack/views/example-linux/manual/aocc/mpi-site
+      projections:
+        all: "{name}/{version}"
+      link: roots
+      link_type: symlink
+```
+
+The `%aocc_site_openmpi` decoration on each spec names a toolchain defined in
+`configs/mpi/site-openmpi/toolchains.yaml`; toolchains belong to the MPI
+provider scope, not to the environment. A Tier 0 author copies that toolchain
+file in alongside the other scopes — see §Detailed Scenario: Generic Linux HPC
+With Site MPI for the file's contents and the rationale.
+
+Run Spack directly:
+
+```bash
+$ spack -e environments/aocc/mpi-site concretize
+$ spack -e environments/aocc/mpi-site install -j 64
+```
+
+Tier 0 does not produce the full release metadata automatically. When the same
+shape needs repeatable releases, move to Tier 1 by copying a starter
+`stack.yaml`; the renderer writes the environment above from `profile.yaml`, the
+starter stack, template defaults, and the template contract.
+
+### Procedural Checklist
+
 ```text
 1. Write or review systems/<system>/profile.yaml.
-2. Write or review stacks/<stack>/stack.yaml.
-3. Materialize the rendered release workspace.
+2. If using Tier 1 or above, write or review stacks/<stack>/stack.yaml.
+3. Materialize the rendered release workspace, or hand-write the Tier 0 Spack environment.
 4. Inspect the selected `include::` scopes.
 5. Run `spack -e <env> config scopes -vp` and `spack -e <env> config blame`.
 6. Run `spack -e <env> concretize`.
@@ -1530,9 +1986,11 @@ a text editor — produces a valid workspace.
 |---|---|---|
 | `profile.yaml` | `systems/<system>/profile.yaml` | Platform facts. |
 | `stack.yaml` | `stacks/<stack>/stack.yaml` | Stack intent. |
-| Package sets | `package-sets/<name>.yaml`, all referenced by `stack.yaml.lanes[*].package_set` | Root specs. |
+| Stack defaults | `templates/<set>/stack-defaults.yaml` | Template-owned defaults merged under `stack.yaml`. |
+| Package sets | `package-sets/<name>.yaml`, only when referenced by `stack.yaml.builds[*].package_set` | Optional reusable root specs. |
+| Template contract | `templates/<set>/contract.yaml` | Accepted names and resolver meanings for `stack.yaml.builds[*].class`, `toolchain`, and `nodes`. |
 | Templates | `templates/<set>/configs/...` and `templates/<set>/environments/...` | Jinja-style templates the step expands. |
-| Release vars | Command-line or environment | `release_tag`, `output_dir`, build-cache mirror URLs, optional overrides. |
+| Release vars | Command-line, environment, or source-info file | `release_tag`, `output_dir`, build-cache mirror URLs, source repo URL/commit/dirty state, optional overrides. Helper convenience defaults are acceptable only when the resulting values are treated as explicit render inputs. |
 
 ### Outputs
 
@@ -1542,7 +2000,7 @@ a text editor — produces a valid workspace.
 | `configs/<scope>/...` | inside the workspace | Rendered config scopes. |
 | `environments/<compiler>/<lane>/spack.yaml` | inside the workspace | Rendered lane environments. |
 | `release-manifest.yaml` | inside the workspace | Provenance for the release (schema specified in Release Artifacts). |
-| Render log | stderr or a log file | Human-readable record of which lanes were rendered and why anything was skipped. |
+| Render log | stderr or a log file | Human-readable record of which lanes were generated and which build requests were skipped. |
 
 ### Invariants
 
@@ -1558,7 +2016,7 @@ whole design.
 | **No SSH and no remote copy.** The step writes only inside `--output`. | Distribution to target systems is Ansible's job (or a human's `rsync`); not the render step's. |
 | **No `--install`, no promotion.** The step never invokes Spack and never swaps the `current` symlink. | Render produces inputs; build and promotion are separate stages. |
 | **No partial output on failure.** If validation fails or any template fails to render, the step deletes its partial output and exits non-zero with a useful error. | A half-rendered workspace is worse than none; the next step would consume invalid input. |
-| **Render-time validation.** Schema-validate `profile.yaml` and `stack.yaml`; cross-check `stack.yaml.profile_contract.schema_version` against the profile; check that every `stack.yaml.lanes[*].package_set` exists; check that every `package_set` lane-kind is compatible with the lane that references it; check that the platform externals the stack requests (`prefer_platform`) are actually present in the profile. | Catch errors at the cheapest moment. |
+| **Render-time validation.** Schema-validate `profile.yaml`, merged `stack.yaml`, package sets, stack defaults, and the selected template contract; cross-check `stack.yaml.profile_contract.schema_version` against the profile; check that every build request carries exactly one of `specs` or `package_set`; check that referenced package sets exist; check that every build request names contract-defined `class`, `toolchain`, and `nodes` values; check that every spec source kind is compatible with the contract build class; check that contract resolver policies, node selectors, and matching `per_system` narrowing can resolve against the profile or templates. | Catch errors at the cheapest moment. |
 | **Renderer identity.** The render step records its own name and version in `release-manifest.yaml.templates.render_tool`. | A reader can identify the exact tool that produced a workspace. |
 
 Manual rendering uses the same manifest field: `render_tool.name: manual` and
@@ -1611,10 +2069,18 @@ function render(profile_path, stack_path, package_sets_dir, templates_dir,
 
     # ── Inputs ────────────────────────────────────────────────────────────
     profile = load_yaml(profile_path)
-    stack   = load_yaml(stack_path)
+    raw_stack = load_yaml(stack_path)
+    require(raw_stack.templates.set, "stack.yaml must name templates.set")
+    template_dir = templates_dir / raw_stack.templates.set
+
+    defaults = load_yaml(template_dir / "stack-defaults.yaml")
+    contract = load_yaml(template_dir / "contract.yaml")
+    stack = merge_defaults(defaults, raw_stack)  # recursive maps, list replacement
 
     validate_schema(profile, "profile.v1")
+    validate_schema(defaults, "stack_defaults.v1")
     validate_schema(stack,   "stack.v1")
+    validate_schema(contract, "template_contract.v1")
 
     require(stack.profile_contract.schema_version == profile.schema_version,
             "profile schema does not match stack.profile_contract")
@@ -1622,35 +2088,62 @@ function render(profile_path, stack_path, package_sets_dir, templates_dir,
     require(profile.system.name == release_vars.system_name_or(profile.system.name),
             "system name override mismatch")
 
-    sets = {}
-    for lane in stack.lanes:
-        set_file = package_sets_dir / (lane.package_set + ".yaml")
-        require(set_file.exists, "missing package set: " + lane.package_set)
-        s = load_yaml(set_file)
-        validate_schema(s, "package_set.v1")
-        require(lane.kind in s.kinds,
-                "package set " + s.name + " is not valid for kind " + lane.kind)
-        if s.tier != "canonical":
-            require(release_vars.allow_noncanonical,
-                    "lane " + lane.name + " uses non-canonical set " + s.name)
-        sets[s.name] = s
+    spec_sources = {}
+    for build in stack.builds:
+        require(build.class in contract.build_classes,
+                "unknown build class: " + build.class)
+        require(build.toolchain in contract.toolchains,
+                "unknown toolchain: " + build.toolchain)
+        require(build.nodes in contract.node_selectors,
+                "unknown node selector: " + build.nodes)
+
+        cls = contract.build_classes[build.class]
+        require(exactly_one(build.specs, build.package_set),
+                "build " + build.name + " must set exactly one of specs or package_set")
+
+        if build.specs:
+            spec_source = make_inline_spec_source(build.name, build.specs, cls.package_set_kind)
+        else:
+            set_file = package_sets_dir / (build.package_set + ".yaml")
+            require(set_file.exists, "missing package set: " + build.package_set)
+            spec_source = load_yaml(set_file)
+            validate_schema(spec_source, "package_set.v1")
+            if spec_source.tier != "canonical":
+                require(release_vars.allow_noncanonical,
+                        "build " + build.name + " uses non-canonical set " + spec_source.name)
+
+        require(cls.package_set_kind in spec_source.kinds,
+                "spec source " + spec_source.name + " is not valid for class " + build.class)
+        spec_sources[build.name] = spec_source
 
     rendered_lanes = []
-    skipped_lanes = []
-    for lane in stack.lanes:
-        reason = unsatisfied_lane_reason(lane, profile)
-        if reason is None:
-            rendered_lanes.append(lane)
-        elif lane.required:
-            fail("required lane " + lane.name + " cannot render: " + reason)
+    skipped_builds = []
+    build_names = {build.name for build in stack.builds}
+    narrowing = stack.per_system.get(profile.system.name, {})
+    narrowing_builds = narrowing.get("builds", {})
+    require(set(narrowing_builds.keys()).issubset(build_names),
+            "matching per_system block names an unknown build")
+    for build in stack.builds:
+        lanes, reason_code, reason = resolve_build_request(build, contract, profile, template_dir)
+        lanes, narrowing_result = apply_per_system_narrowing(
+            lanes, narrowing_builds.get(build.name, {}), profile)
+        if narrowing_result.emptied:
+            reason_code = "per_system_empty"
+            reason = narrowing_result.reason
+        if lanes:
+            rendered_lanes.extend(lanes)
+        elif build.required:
+            fail("required build " + build.name + " cannot render: " + reason)
         else:
-            skipped_lanes.append({"lane": lane.name, "reason": reason})
+            skipped_builds.append({"build": build.name,
+                                   "reason_code": reason_code,
+                                   "reason": reason})
 
-    require(rendered_lanes, "no stack lanes can render for profile " + profile.system.name)
+    require(rendered_lanes, "no stack builds can render for profile " + profile.system.name)
 
     # ── Context ───────────────────────────────────────────────────────────
-    ctx = build_render_context(profile, stack, sets, rendered_lanes,
-                               skipped_lanes, release_vars)
+    ctx = build_render_context(profile, stack, defaults, contract, spec_sources, rendered_lanes,
+                               skipped_builds, release_vars)
     # ctx is a frozen dict. Nothing in it reads ambient state, $HOME, $PATH,
     # or `module list`. Two renders with the same ctx produce the same bytes.
 
@@ -1667,7 +2160,7 @@ function render(profile_path, stack_path, package_sets_dir, templates_dir,
     for scope_name in required_scopes(profile, rendered_lanes):
         # scope_name examples: common, os/rhel8, target/zen3, target/x86_64_v3,
         # vendor/cray, mpi/cray-mpich, gpu/amd-rocm
-        src = templates_dir / "configs" / scope_name
+        src = template_dir / "configs" / scope_name
         dst = pending / "configs" / scope_name
         render_template_tree(src, dst, ctx)
 
@@ -1675,19 +2168,19 @@ function render(profile_path, stack_path, package_sets_dir, templates_dir,
     for lane in rendered_lanes:
         lane_ctx = ctx | {
             "lane":     lane,
-            "specs":    expand_package_set(sets[lane.package_set], lane),
+            "specs":    expand_spec_source(spec_sources[lane.source_build], lane, contract),
             "scopes":   scopes_for_lane(lane, stack, profile),
             "toolchain": toolchain_for_lane(lane),
             "view_root": view_root(profile, stack, lane, release_vars),
             "runtime_modules": runtime_modules_for_lane(lane, profile),
         }
-        src = templates_dir / "environments" / lane.kind / "spack.yaml.j2"
+        src = template_dir / "environments" / lane.kind / "spack.yaml.j2"
         dst = pending / "environments" / lane.compiler / lane.lane / "spack.yaml"
         render_template(src, dst, lane_ctx)
 
     # ── Release manifest ─────────────────────────────────────────────────
     write_yaml(pending / "release-manifest.yaml",
-               build_manifest(ctx, pending, rendered_lanes, skipped_lanes))
+               build_manifest(ctx, pending, rendered_lanes, skipped_builds))
 
     # ── Commit ──────────────────────────────────────────────────────────
     atomic_rename(pending, workspace, replace=release_vars.overwrite)
@@ -1704,10 +2197,11 @@ function render(profile_path, stack_path, package_sets_dir, templates_dir,
 #     so a reader can identify what produced the workspace.
 ```
 
-The functions called by `render` (`unsatisfied_lane_reason`, `required_scopes`,
-`scopes_for_lane`, `toolchain_for_lane`, `runtime_modules_for_lane`,
-`view_root`, `expand_package_set`, `build_manifest`) are pure transformations
-of the frozen context. None of them touches the host.
+The functions called by `render` (`merge_defaults`, `resolve_build_request`,
+`apply_per_system_narrowing`, `required_scopes`, `scopes_for_lane`,
+`toolchain_for_lane`, `runtime_modules_for_lane`, `view_root`,
+`expand_spec_source`, `build_manifest`) are pure transformations of the frozen
+context. None of them touches the host.
 
 ### Failure modes the render step catches
 
@@ -1716,13 +2210,28 @@ are cheaper to fix here:
 
 - Missing required profile key.
 - Profile schema mismatch with `stack.yaml.profile_contract`.
-- `stack.yaml.lanes[*].package_set` references a nonexistent file.
-- A lane's `kind` is not in the package set's `kinds` list.
-- A required lane references a compiler the normalized compiler inventory does not declare.
-- A required GPU lane is requested but no matching `profile.node_types[*].gpu` block exists.
-- A required Cray lane is requested but the profile has no `vendor_cray:` block.
-- A site-external lane's runtime modules cannot be resolved (the named
+- Missing or invalid `templates/<set>/contract.yaml`.
+- Missing or invalid `templates/<set>/stack-defaults.yaml`.
+- A build request has neither `specs:` nor `package_set:`, or has both.
+- `stack.yaml.builds[*].package_set` references a nonexistent file.
+- A build request names a `class`, `toolchain`, or `nodes` value not present in the selected template contract.
+- A build request's contract class requires a spec kind that the inline specs or package set cannot satisfy.
+- A required build request resolves through the contract to a compiler/provider the profile or templates cannot satisfy.
+- A required GPU build request resolves through the contract but no matching `profile.node_types[*].gpu` block exists.
+- A matching `per_system.<profile.system.name>` narrowing block names a compiler, MPI provider, or GPU arch absent from the profile or resolved candidates.
+- A matching `per_system.<profile.system.name>.builds` block names a build absent from `stack.yaml.builds[*].name`.
+- A matching `per_system` narrowing block empties a required build request.
+- A generated site-external lane's runtime modules cannot be resolved (the named
   modules are not declared on any external in the profile).
+
+When a non-required build is emptied by `per_system` narrowing or by any other
+condition above that does not fail render, the render step writes a
+`skipped_builds[*]` entry carrying a stable `reason_code` (one of
+`per_system_empty`, `nodes_unmatched`, `requires_unsatisfied`,
+`template_not_supported`) plus a human-readable `reason`. Downstream tooling
+matches on `reason_code`; the `reason` text is free-form. Partial narrowing
+that drops some lanes from a build without emptying it is recorded under
+`templates.applied_narrowing` in the manifest, not under `skipped_builds`.
 
 ## ClusterInspector — Specification
 
@@ -2376,10 +2885,10 @@ roles:
     delegate_to: "{{ select_build_host(profile.node_types) }}"
     tasks:
       - for lane in rendered_lanes:
-          run: spack -e {{ release_dir }}/environments/{{ lane.compiler }}/{{ lane.lane }} concretize
-          run: spack -e {{ release_dir }}/environments/{{ lane.compiler }}/{{ lane.lane }} fetch -D
+          run: spack -e {{ release_dir }}/{{ lane.env_path }} concretize
+          run: spack -e {{ release_dir }}/{{ lane.env_path }} fetch -D
           collect_artifact: spack.lock
-              → "{{ release_dir }}/{{ lane.compiler }}/{{ lane.lane }}/spack.lock"
+              → "{{ release_dir }}/{{ lane.env_path }}/spack.lock"
 
   - role: install-core
     tasks:
@@ -2391,7 +2900,7 @@ roles:
             target_class: "{{ lane.runtime_node_type }}"
             scheduler_args: "{{ scheduler_args_for(target_class) }}"
           submit_scheduler:
-            env: "{{ release_dir }}/environments/{{ lane.compiler }}/{{ lane.lane }}"
+            env: "{{ release_dir }}/{{ lane.env_path }}"
             args: "{{ scheduler_args }}"     # e.g. --partition=gpu --constraint=mi250x
             command: |
               spack -e <env> install -j {{ build_jobs }} \
@@ -2400,7 +2909,7 @@ roles:
       - wait_all
       - for lane in core_lanes:
           assert: install exit code == 0
-          run: spack -e <env> buildcache push --update-index --unsigned {{ lane.buildcache_push_url }}
+          run: spack -e <env> buildcache push --update-index --unsigned {{ buildcache_push_url_for(lane, release_manifest) }}
 
   - role: install-lanes
     tasks:
@@ -2409,7 +2918,7 @@ roles:
             target_class: "{{ lane.runtime_node_type }}"
             scheduler_args: "{{ scheduler_args_for(target_class) }}"
           submit_scheduler:
-            env: "{{ release_dir }}/environments/{{ lane.compiler }}/{{ lane.lane }}"
+            env: "{{ release_dir }}/{{ lane.env_path }}"
             args: "{{ scheduler_args }}"
             command: |
               spack -e <env> install -j {{ build_jobs }} \
@@ -2426,19 +2935,19 @@ roles:
           run: spack -e <env> verify manifest -a
           run: spack -e <env> env view regenerate
           run: spack -e <env> module tcl refresh -y
-          run: generate front-door modules from the stack-owned template for {{ lane.name }}
-          run: spack -e <env> buildcache push --update-index --unsigned {{ lane.buildcache_push_url }}
+          run: generate exposure-mode modules from the stack-owned template for {{ lane.name }}
+          run: spack -e <env> buildcache push --update-index --unsigned {{ buildcache_push_url_for(lane, release_manifest) }}
       - write_yaml:
           dest: "{{ release_dir }}/release-manifest.yaml"
           content: "{{ build_manifest(stack, profile, release, lane_results) }}"
 
   - role: verify-user
     tasks:
-      - for lane in rendered_lanes:
+      - for public_entry in rendered_public_entries:
           run_clean_shell: |
             module use {{ release_dir }}/modules
-            module load {{ stack.modules.module_root }}/{{ lane.compiler }}/{{ lane.lane }}
-            {{ site_smoke_test_command }} {{ lane.name }}
+            module load {{ public_entry.module_name }}
+            {{ site_smoke_test_command }} {{ public_entry.lane_name }}
       - assert: all user and runtime checks passed
 
   - role: promote
@@ -2480,7 +2989,7 @@ stack_name:    cse
 build_jobs:    64
 modules_tool:  tcl
 
-buildcache_mirror:        file:///shared/stack/buildcache/science/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray
+buildcache_mirror:        file:///shared/stack/buildcache/payload/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray
 foundation_mirror:        file:///shared/stack/buildcache/foundation/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/x86_64_v3
 site_smoke_test_command:  /shared/stack/tests/smoke.sh
 
@@ -2541,12 +3050,104 @@ configs/gpu/amd-rocm/packages.yaml
 configs/gpu/nvidia-cuda/packages.yaml
 ```
 
+### GPU Toolkit Scopes: CUDA Versus ROCm
+
+CUDA and ROCm do not have the same Spack external shape.
+
+CUDA can usually be represented by one `cuda` external package plus a
+`cuda_arch` default in `packages.yaml`:
+
+```yaml
+packages:
+  all:
+    variants: cuda_arch=90
+  cuda:
+    buildable: false
+    externals:
+      - spec: cuda@12.4
+        prefix: /opt/cray/pe/cudatoolkit/12.4
+```
+
+ROCm is different. Spack decomposes ROCm into component packages, so
+`configs/gpu/amd-rocm/packages.yaml` must declare a coherent set of component
+externals for the installed ROCm version. A `rocm/<version>` module is useful
+for the front-door runtime environment, but it is not a sufficient Spack
+external by itself.
+
+Representative ROCm 5/6 shape:
+
+```yaml
+packages:
+  all:
+    variants: amdgpu_target=gfx90a
+
+  hip:
+    buildable: false
+    externals:
+      - spec: hip@6.0.0
+        prefix: /opt/rocm-6.0.0/hip
+
+  hsa-rocr-dev:
+    buildable: false
+    externals:
+      - spec: hsa-rocr-dev@6.0.0
+        prefix: /opt/rocm-6.0.0
+
+  comgr:
+    buildable: false
+    externals:
+      - spec: comgr@6.0.0
+        prefix: /opt/rocm-6.0.0
+
+  rocblas:
+    buildable: false
+    externals:
+      - spec: rocblas@6.0.0
+        prefix: /opt/rocm-6.0.0
+
+  hipblas:
+    buildable: false
+    externals:
+      - spec: hipblas@6.0.0
+        prefix: /opt/rocm-6.0.0
+
+  hipsparse:
+    buildable: false
+    externals:
+      - spec: hipsparse@6.0.0
+        prefix: /opt/rocm-6.0.0
+
+  rocprim:
+    buildable: false
+    externals:
+      - spec: rocprim@6.0.0
+        prefix: /opt/rocm-6.0.0/rocprim
+
+  llvm-amdgpu:
+    buildable: false
+    externals:
+      - spec: llvm-amdgpu@=6.0.0
+        prefix: /opt/rocm-6.0.0
+        extra_attributes:
+          compilers:
+            c: /opt/rocm-6.0.0/bin/amdclang
+            cxx: /opt/rocm-6.0.0/bin/amdclang++
+```
+
+That list is representative, not universal. The exact component list is a
+versioned template input for the stack and should be copied from Spack's current
+ROCm external guidance or from a vetted site configuration, then adjusted to the
+installed ROCm version and prefixes. `spack external find` may discover some
+ROCm packages, but it is not relied on to produce a complete, internally
+consistent ROCm component set. ROCm 7 should be revalidated before reusing the
+ROCm 5/6 list.
+
 Lane environments choose scopes with `include::`; they do not duplicate all
 platform policy inline.
 
 ## Lane Model
 
-Recommended lane kinds:
+Common lane kinds:
 
 | Lane kind | Purpose |
 |---|---|
@@ -2555,9 +3156,17 @@ Recommended lane kinds:
 | MPI | User-facing MPI-enabled libraries and MPI provider policy. |
 | GPU | GPU-enabled packages and performance portability layers. |
 
-Core packages can include build tools and stable tools such as CMake, Ninja,
-pkgconf, Git, and selected Python tools. Packages that are ABI-sensitive,
-compiler-sensitive, MPI-linked, or GPU-runtime-sensitive should stay in lanes.
+These are the default template categories used by CSE-like stacks. They are not
+a requirement that every stack use all four. A small curated application stack
+may have one payload lane, no serial/MPI split, no GPU lane, and no separate Core
+lane; users can then load the stack's package modules directly after the site
+adds the module root. Variant-rich stacks should use front-door lane modules so
+users choose exactly one compiler/MPI/GPU surface before loading packages.
+
+When a stack uses Core, Core packages can include build tools and stable tools
+such as CMake, Ninja, pkgconf, Git, and selected Python tools. Packages that are
+ABI-sensitive, compiler-sensitive, MPI-linked, or GPU-runtime-sensitive should
+stay in payload lanes.
 
 ### Per-Compiler Core, Not Shared Core
 
@@ -2731,10 +3340,10 @@ module load hdf5                            # MPI HDF5, from the GPU lane's view
 module load kokkos                          # GPU-pinned, from the GPU lane's view
 ```
 
-Two module loads. The same shape as a plain MPI user. The lane *choice*
-is wider on a system with multiple GPU classes (six lanes instead of
-four), but the *user actions* are unchanged. The front-door module is
-the single point that hides the per-lane runtime module fan-out
+Two module loads. The same shape as a plain MPI user. The lane *choice* is wider
+on a system with multiple GPU classes (for example eight CSE lanes instead of
+the smaller CPU-only menu), but the *user actions* are unchanged. The front-door
+module is the single point that hides the per-lane runtime module fan-out
 (`PrgEnv-gnu` + `rocm/<v>` + `cray-mpich/<v>` for a GPU lane vs. just
 `PrgEnv-gnu` + `cray-mpich/<v>` for an MPI lane).
 
@@ -2783,16 +3392,71 @@ The growth shape:
   the same architecture reuses the existing MPI lane (the lane is keyed
   to compiler + lane-kind + GPU class, not to CPU partition identity).
 
-Eight lanes on a fully-populated Cray is the realistic ceiling for the
-first deployments. Six is the typical case (Cray with one CPU partition
-and one GPU class). The user sees these as a flat menu of front-door
-module names; they pick the one that matches their partition and
-compiler preference.
+Eight lanes on a fully-populated Cray with two GPU classes is the realistic
+ceiling for the first deployments. Seven is the typical one-GPU-class Cray case;
+six is the CPU-only Cray case. The user sees these as a flat menu of front-door
+module names; they pick the one that matches their partition and compiler
+preference.
 
-### Deriving Core Membership
+### Curating Core Membership
 
-User-facing package exposure is a stack decision. Dependency placement can often
-be derived from the concretized DAG:
+User-facing package exposure is a stack decision, and Core membership is a
+curated stack-maintainer decision. Package managers should not have to rediscover
+Core when they add or update payload packages. They normally edit payload
+package sets; the existing `core-foundation` set is part of the stack template
+contract.
+
+The reason is the same as the multi-version rule above: payload lanes carry
+multiple HDF5/NetCDF/etc. versions, and their dependency closures can pull
+different versions of low-level libraries. Exposing those low-level libraries
+through Core only works when Core stays unambiguous for a user's fresh compile.
+The stack's job is not just to build itself; it is to give users a coherent
+environment they can compile against after loading one front-door lane.
+
+Reference stacks and public build-cache inventories are useful evidence, but not
+authority. `cache.spack.io`, E4S inventories, `spack-stack`, and lab/site configs
+can show which packages appear repeatedly across supported stacks, releases,
+targets, variants, and dependency graphs. Use that as seed data for maintainer
+review. Do not register those public caches as production reuse sources for this
+stack, and do not promote a package to Core merely because it appears in a public
+cache. A public cache answers "what was built somewhere"; Core answers "what do
+we intentionally expose to users in every lane on this system."
+
+Maintainer audit workflow when changing Core or onboarding a substantially
+different system:
+
+1. Start from the existing `core-foundation` set plus reference evidence from
+   public stack inventories (`cache.spack.io` stack/dependency views, E4S,
+   `spack-stack`, lab configs), not from an arbitrary list of convenient
+   utilities.
+2. Compare those candidates against the canonical payload package sets.
+3. Concretize representative payload lanes with all requested user-facing
+   versions.
+4. Inspect the concrete dependency closures and identify dependencies shared
+   across the payload roots.
+5. Promote a dependency to Core only if it is safe to expose with every lane in
+   that compiler column: build-only tool, user tool, or stable C/ABI dependency
+   that can be pinned to one version without breaking the payload solves.
+6. Keep dependencies in the lane, or private behind RPATH, when the payload
+   closure genuinely needs multiple versions or when the dependency is MPI-,
+   GPU-, Fortran-module-, or C++-ABI-sensitive.
+7. If the evidence justifies a Core change, update
+   `package-sets/core-foundation.yaml` and the single-version ABI pins in
+   `stack.yaml.foundation_pins` / `configs/common` through normal stack review.
+
+The default answer for a new dependency is conservative: leave it in the lane or
+private behind RPATH. Promote it to Core only when a concrete solve and
+user-compile check prove that exposing it does not create ambiguity.
+
+An installed transitive dependency is not automatically user-facing. If `hdf5`
+pulls in `libfoo`, HDF5 can still work because its binaries and exported metadata
+point at the concrete dependency. If users need to compile directly against
+`libfoo`, then `libfoo` must become an explicit root package in Core or in the
+appropriate serial/MPI/GPU lane. That exposure change may reuse the already-built
+concrete spec or buildcache entry, but it is still a deliberate package-set
+change, not an accident of something being present in the Spack install tree.
+
+Dependency placement can often be classified from the concretized DAG:
 
 - Build-only dependencies are Core candidates because they produce no linked ABI.
 - Plain-C stable-ABI link dependencies may be Core candidates.
@@ -2802,7 +3466,9 @@ be derived from the concretized DAG:
 - GPU-backend packages stay in the GPU lane.
 
 This keeps Core from becoming a catch-all. Core means "safe to compose across
-lanes on this system," not "small utility package."
+lanes on this system," not "small utility package." A package that is useful but
+would put two versions of the same user-linkable dependency on the compile path
+does not belong in Core; it belongs in the lane that needs it.
 
 ### Lane Composition At Module Load
 
@@ -2924,6 +3590,8 @@ GPU modeling rules:
 
 - The kernel driver is a platform fact and runtime ceiling, not a Spack package to build.
 - The toolkit/runtime version must be compatible with that ceiling.
+- CUDA can usually be one Spack `cuda` external; ROCm must be a coherent set of
+  component externals (`hip`, `hsa-rocr-dev`, `comgr`, `rocblas`, etc.).
 - GPU architecture target is a build axis. Profile fields use arch labels such as `sm_90`, `gfx90a`, or `gfx942`; rendered Spack specs use variants such as `cuda_arch=90` or `amdgpu_target=gfx90a`.
 - GPU lanes should carry GPU-sensitive packages, not Core.
 
@@ -2960,11 +3628,11 @@ support, and provider build options belong in `spack.yaml` specs and
 
 ### Toolchain Propagation And Foundation Reuse
 
-Compiler propagation should be scoped to lane roots and science subtrees, not to
+Compiler propagation should be scoped to lane roots and payload subtrees, not to
 the whole foundation. The committed model is **per-compiler Core** (see
 §Per-Compiler Core, Not Shared Core): each compiler builds its own Core, including its own
 build tools (CMake, Ninja) and its own foundation stable-ABI libraries (zlib,
-xz, zstd). Binary reuse happens *within* a compiler — a CCE science lane
+xz, zstd). Binary reuse happens *within* a compiler — a CCE payload lane
 reuses CCE's Core build of CMake — not *across* compilers. The hash carries
 the compiler, so cross-compiler reuse is not what the foundation cache is
 doing.
@@ -2973,7 +3641,7 @@ The desired behavior is:
 
 ```text
 Each compiler's Core builds at the baseline (x86_64_v3) target.
-Each science lane reuses its own compiler's Core from the foundation cache.
+Each payload lane reuses its own compiler's Core from the foundation cache.
 Compiler/MPI-sensitive packages build in the lane.
 ```
 
@@ -3195,10 +3863,12 @@ module load rocm/6.0.0          # GPU toolkit only, no host-compiler override
 ```
 
 Two module loads give: GNU host compiler, the GPU toolkit's headers and
-libraries, and the GNU-matched cray-mpich flavor. The host compiler is
-GCC (matching the host-compiler policy); the GPU toolkit provides HIP,
-nvcc, the device libraries, and the GPU runtime. This is the
-**recommended way** to assemble Cray PE + GPU lanes.
+libraries, and the GNU-matched cray-mpich flavor. The host compiler is GCC
+(matching the host-compiler policy); the GPU toolkit module provides the runtime
+environment. For CUDA, the Spack scope can usually point at one `cuda` external.
+For ROCm, the Spack scope must additionally declare the ROCm component externals
+that packages depend on. This is the **recommended way** to assemble Cray PE +
+GPU lanes.
 
 **Option C: PrgEnv-cray + GPU toolkit module.**
 
@@ -3257,6 +3927,14 @@ gpu_toolkit_modules:                           # standalone toolkit modules (Opt
     version: "6.0.0"
     module: rocm/6.0.0
     prefix: /opt/rocm-6.0.0
+    spack_components:
+      - { package: hip,          prefix: /opt/rocm-6.0.0/hip }
+      - { package: hsa-rocr-dev, prefix: /opt/rocm-6.0.0 }
+      - { package: comgr,        prefix: /opt/rocm-6.0.0 }
+      - { package: rocblas,      prefix: /opt/rocm-6.0.0 }
+      - { package: hipblas,      prefix: /opt/rocm-6.0.0 }
+      - { package: hipsparse,    prefix: /opt/rocm-6.0.0 }
+      - { package: rocprim,      prefix: /opt/rocm-6.0.0/rocprim }
   cudatoolkit:                                 # on NVIDIA systems
     version: "12.4"
     module: cudatoolkit/12.4
@@ -3372,7 +4050,7 @@ These are the things that bite on the first run if they are not stated.
 (typically a common GCC) can be built. Each stack-built compiler must be
 in the foundation cache before that compiler's Core can be built against
 it. Each compiler's Core must be in the foundation cache before its
-science lanes can reuse it. These checkpoints are sequential per
+payload lanes can reuse it. These checkpoints are sequential per
 compiler chain; do not try to parallelize within a chain. The neck is
 cheap (a compiler plus a handful of tools); the cost of parallelizing it
 is far higher than the time saved. Different compiler chains *can* run
@@ -3484,31 +4162,50 @@ Rationale:
 The stack can still support Lmod-specific behavior later, but the minimum common
 output should be Tcl.
 
-Front-door lane modules should:
+There are two supported exposure modes:
+
+- **`front_door`** for variant-rich stacks. Users first load one lane selector
+  such as `CSE/GCC/mpi-craympich`, then load package modules from the lane's
+  package module root. This is the CSE default because compiler/MPI/GPU variants
+  must conflict cleanly.
+- **`direct`** for small application stacks. Public package/application modules
+  are published directly under an existing site MODULEPATH root, for example
+  `fun3d/14.2-cpu-zen3` or `fun3d/14.2-gpu-gfx90a`. There may still be multiple
+  rendered lanes behind those modules, but users do not load a separate stack
+  gate first.
+
+Front-door lane modules, when `modules.exposure: front_door`, should:
 
 - Set stack identity variables such as release, stack name, compiler, and lane.
 - Prepend the lane package module root to `MODULEPATH`.
 - Prepend the compiler's Core module root to `MODULEPATH` (per-compiler Core, so
   every lane composes with its own compiler's Core).
-- Prepend clean view paths when needed.
+- Set view metadata such as `STACK_VIEW`; package modules, not front-door
+  modules, prepend package-specific paths from clean views.
 - Declare conflicts with other mutually exclusive lane modules.
 - Load required platform modules for module-provided externals (see Lane
   Runtime Module Requirements below).
 
-Package modules should:
+Direct or lane package modules should:
 
 - Expose package-specific roots from clean views.
 - Avoid broad implicit dependency pollution.
 - Make provenance visible (see Provenance In Modulefiles below).
+- In `direct` exposure mode, carry the runtime external module loads and
+  conflicts that a front-door lane module would otherwise carry.
 
-Module generation has two explicit outputs: lane front-door modules and package
-modules. `spack -e <env> module tcl refresh -y` may generate the package modules
-only if `modules.yaml` templates/projections emit the documented roots-only,
-view-based, provenance-bearing behavior. Otherwise a stack module generator owns
-package modules too. Front-door modules are stack-owned in either case; Spack's
-stock module refresh does not know the lane conflict/runtime-module policy by
-itself. The publish step must verify both outputs exist before user workflow
-verification runs.
+Module generation outputs depend on the exposure mode. In `front_door` mode the
+release publishes stack-owned lane front-door modules plus package modules. In
+`direct` mode the release publishes public package/application modules directly
+under `modules.publish_root` or a release-tagged directory that the site symlinks
+into `modules.publish_root`. `spack -e <env> module tcl refresh -y` may generate
+package modules only if `modules.yaml` templates/projections emit the documented
+roots-only, view-based, provenance-bearing behavior. Otherwise a stack module
+generator owns package modules too. Front-door modules are stack-owned when
+`front_door` exposure is selected. In `direct` mode, stack-owned direct modules
+carry the conflict/runtime-module policy because no separate lane selector
+exists. The publish step must verify the outputs required by the selected
+exposure mode before user workflow verification runs.
 
 ### Lane Runtime Module Requirements
 
@@ -3524,36 +4221,38 @@ external the lane was built on. The rule is structural, not platform-specific:
   module-provided MPI launcher's search.
 - **Prefix-only site external → no automatic module load.** A site MPI declared
   only by stable `prefix:` is exposed through the lane's view and package
-  modules. The front-door module loads an MPI module only when the consumed
-  profile external declares one in `modules:`.
+  modules. The lane's public entry module loads an MPI module only when the
+  consumed profile external declares one in `modules:`.
 - **Spack-built lane → self-contained.** A lane where the compiler is
   Spack-built and the MPI is Spack-built is fully RPATH'd, the compiler
   driver is on the lane's view PATH, and no system modules need to be
-  loaded for users to compile or run. The front-door module declares no
+  loaded for users to compile or run. The public entry module declares no
   platform module prereqs.
 
-The front-door module for a site-external lane must either `module load` the
+The public entry module for a site-external lane must either `module load` the
 external's declared modules or declare them as prerequisites so a user without
-them loaded sees a clear error rather than a missing-library failure. The
-runtime module list is per-lane data: the render step takes it from
-`profile.yaml` (the `modules:` lists on the externals the lane consumes) and
-emits the corresponding `module load` or `prereq` lines into the rendered
-front-door module template.
+them loaded sees a clear error rather than a missing-library failure. In
+`front_door` exposure mode, that public entry is the lane module. In `direct`
+exposure mode, each public application module for that lane carries the same
+loads or prerequisites. The runtime module list is per-lane data: the render
+step takes it from `profile.yaml` (the `modules:` lists on the externals the
+lane consumes) and emits the corresponding `module load` or `prereq` lines into
+the rendered front-door module template or direct application module template.
 
-The Cray case is the canonical worked example: a CCE + cray-mpich lane's
-front-door module must establish `PrgEnv-cray` and `cray-mpich/<version>` at
-load time, because (1) the CCE compiler driver is found through the PrgEnv,
-(2) cray-mpich's `mpirun` and shared libraries are exposed through its
-module, and (3) the matched PrgEnv guarantees a user fresh compile with the
-PE wrappers resolves to the same `ofi/<flavor>` cray-mpich the lane was built
-against. The same rule applies to a generic Linux HPC AOCC + site-OpenMPI lane:
-the front-door module loads `aocc/4.2.0` if AOCC is module-provided; it loads an
-OpenMPI module only if the site-OpenMPI external declares one. A prefix-only site
-OpenMPI is exposed through the stack's view/package-module paths instead.
+The Cray case is the canonical worked example: a CCE + cray-mpich lane's public
+entry module must establish `PrgEnv-cray` and `cray-mpich/<version>` at load
+time, because (1) the CCE compiler driver is found through the PrgEnv, (2)
+cray-mpich's `mpirun` and shared libraries are exposed through its module, and
+(3) the matched PrgEnv guarantees a user fresh compile with the PE wrappers
+resolves to the same `ofi/<flavor>` cray-mpich the lane was built against. The
+same rule applies to a generic Linux HPC AOCC + site-OpenMPI lane: the public
+entry module loads `aocc/4.2.0` if AOCC is module-provided; it loads an OpenMPI
+module only if the site-OpenMPI external declares one. A prefix-only site OpenMPI
+is exposed through the stack's view/package-module paths instead.
 
 Verify per lane with `ldd` on a built binary whether PE/site runtime
-libraries resolve via RPATH (front-door module can be light) or require the
-external's `LD_LIBRARY_PATH` (front-door module must load the external's
+libraries resolve via RPATH (public entry module can be light) or require the
+external's `LD_LIBRARY_PATH` (public entry module must load the external's
 modules). The answer is per-system and worth recording on the first build
 of a new lane.
 
@@ -3650,7 +4349,7 @@ prepend-path MODULEPATH "/shared/stack/releases/2026.06/example-cray/cse/modules
   (`Platform-backed`, `Site-external`, or `Stack-built`) so the class is
   visible without loading the module.
 - **Conflict block.** Lists every other front-door module on the system.
-  The render step generates this list from `stack.yaml.lanes` so it stays
+  The render step generates this list from the resolved lane plan so it stays
   in sync; do not hand-maintain it. Conflicts give the lane-switch
   semantics — `module swap` works, `module load` of a second lane fails
   loudly — without relying on Lmod's `family` directive (which is
@@ -3946,16 +4645,16 @@ The rule:
 - **Key the cache by Spack/package-repo generation.** Spack hashes and package
   metadata change across tool upgrades. A generation token keeps old and new
   binary namespaces readable without pretending they are the same cache.
-- **Compiler, MPI, target, GPU runtime are directory labels for human
-  readability**, not reuse boundaries. They go in the path because
-  `science/cray-rhel/cce-mpi-craympich/zen3` is easier for a human to scan
-  than a hash, but the hash is what the solver matches against.
-- **Within one OS/glibc, register every compatible cache lane as a read
-  source.** A CCE MPI lane reads the foundation cache lane, which holds
+- **Compiler, MPI, target, GPU runtime are lane labels for human readability**,
+  not reuse boundaries. They appear in lane names, manifests, logs, and optional
+  per-lane mirror layouts. The default payload mirror is the parent
+  system/release path; Spack's hash is what the solver matches against.
+- **Within one OS/glibc, register every compatible cache mirror as a read
+  source.** A CCE MPI lane reads the foundation cache mirror, which holds
   both CCE-built and GCC-built Core binaries (each compiler builds its
   own Core under per-compiler Core). The CCE lane pulls the `%cce`-hashed
   CMake; the GCC lane pulls the `%gcc`-hashed CMake. They share the
-  cache *lane* but not the *binaries*. The hash decides what gets
+  cache mirror but not the *binaries*. The hash decides what gets
   pulled; the bucket placement only affects whether the lane can *see*
   the binary at all.
 
@@ -3980,25 +4679,24 @@ Recommended axes for the cache directory label (humans), in order:
 | OS / glibc | **Reuse boundary** | Real runtime incompatibility; structural separation. |
 | Spack version / package repo | **Reuse boundary** | Hashes change across Spack/package-repo bumps; mixing produces miss-after-miss. |
 | External ABI digest | Optional reuse boundary | Use only when one mirror serves same-OS systems with incompatible external compiler/MPI/fabric/GPU-toolkit surfaces. |
-| Lane class (foundation / science) | Organizational label | Helps humans see what the cache holds. |
+| Lane class (foundation / payload) | Organizational label | Helps humans see what the cache holds. |
 | System name | Organizational label | Distinguishes caches when one mirror serves many systems. |
-| Compiler / MPI / target / GPU arch | Organizational label | Readability only; the hash, not the path, decides selection. |
+| Compiler / MPI / target / GPU arch | Optional organizational label | Readability only in lane names and optional per-lane mirror subdirectories; the hash, not the path, decides selection. |
 
-Example lane naming, with the labels read accordingly:
+Example mirror roots, with the labels read accordingly:
 
 ```text
 buildcache/foundation/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/x86_64_v3
 buildcache/foundation/sles15/glibc-2.31/spack-1.1.1/repo-2026.06/x86_64_v3
-buildcache/science/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray/cce-mpi-craympich/zen3
-buildcache/science/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray/gcc-mpi-craympich/zen3
-buildcache/science/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray/gcc-gpu-craympich/gfx90a
+buildcache/payload/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray
+buildcache/payload/sles15/glibc-2.31/spack-1.1.1/repo-2026.06/example-sles
 ```
 
 The lane on a Cray RHEL8/glibc-2.28 system registers the matching foundation
-bucket and every matching science lane under the same OS/glibc and
-Spack/package-repo generation, regardless of which compiler appears in the
-directory label, so any compatible binary is reachable. If `profile_abi` is
-configured, the lane also requires that token to match.
+bucket and the matching payload mirror under the same OS/glibc and
+Spack/package-repo generation, so any compatible binary in that parent mirror is
+reachable. If `profile_abi` is configured, the lane also requires that token to
+match.
 
 The optional `profile_abi` path segment is a digest of the external ABI surface
 the profile exposes: external compiler/MPI/fabric/GPU-toolkit names, versions,
@@ -4047,11 +4745,11 @@ Performance tiering:
 
 | Class | Examples | Microarch payoff | Default placement |
 |---|---|---|---|
-| SIMD / compute-bound | FFTW, BLAS/LAPACK, dense kernels | High | Optimized science lane |
-| I/O-bound | HDF5, NetCDF, PnetCDF | Usually modest | Start in optimized science lane for simplicity |
+| SIMD / compute-bound | FFTW, BLAS/LAPACK, dense kernels | High | Optimized payload lane |
+| I/O-bound | HDF5, NetCDF, PnetCDF | Usually modest | Start in optimized payload lane for simplicity |
 | Neutral tooling | CMake, Ninja, pkgconf, Git | None | Core / baseline |
 
-Start with a single optimized science lane per system target. Split I/O
+Start with a single optimized payload lane per system target. Split I/O
 libraries back to baseline only if rebuild time or cache duplication becomes a
 measured problem.
 
@@ -4095,7 +4793,7 @@ the lifecycle explicit without doubling the lookup surface.
 
 | Phase | Written by | Fields populated |
 |---|---|---|
-| `draft` | render step | source-derived: profile/stack/package-set digests, render-tool identity, explicit `rendered_at` release var, lane definitions (env path, kind, compiler, target, package_set, runtime_node_type), planned install/view/module paths, planned buildcache destinations |
+| `draft` | render step | source-derived: profile/stack/package-set digests, render-tool identity, explicit `rendered_at` release var, lane definitions (env path, kind, compiler, target, spec source, runtime_node_type), planned install/view/module paths, planned buildcache destinations |
 | `final` | publish step | adds: build host, lockfile digests per lane, provenance summary per lane, runtime modules per lane, actual buildcache push destinations + lanes pushed, verification results, promoted_at / promoted_by, previous_release |
 
 A draft manifest is valid input to Ansible's deploy roles; the publish
@@ -4136,23 +4834,30 @@ stack_file:
   path: "stacks/cse/stack.yaml"
   digest: "sha256:f421a7..."
 
-package_sets:                                  # one entry per set referenced by stack.yaml
+package_sets:                                  # one entry per unique package_set file; empty if all specs are inline
   - name: core-foundation
     path: "package-sets/core-foundation.yaml"
     digest: "sha256:5510dc..."
   - name: science-full
     path: "package-sets/science-full.yaml"
     digest: "sha256:99a1be..."
-  - name: science-gpu
-    path: "package-sets/science-gpu.yaml"
-    digest: "sha256:c734e1..."
 
 templates:
   set: v6                                      # from stack.yaml.templates.set
-  digest: "sha256:e2a5e0..."                   # sha256 of the rendered template tree, sorted
+  digest: "sha256:e2a5e0..."                   # sha256 of renderable templates under templates/<set>, sorted
+  defaults_digest: "sha256:6f1b9c..."          # sha256 of templates/<set>/stack-defaults.yaml
+  contract_digest: "sha256:58c1a3..."          # sha256 of templates/<set>/contract.yaml
   render_tool:                                 # which render step produced this workspace
     name:    stack-render                      # or manual
     version: "0.4.2"                           # null when name is manual
+  applied_narrowing:                           # null when no per_system block matched profile.system.name
+    system: example-cray                       # which per_system.<system> key matched
+    builds:                                    # one entry per build that was narrowed
+      gpu:
+        dropped_lanes: ["gcc-gpu-craympich-gfx942"]
+        axis: gpu_arch
+        kept:    ["gfx90a"]
+        dropped: ["gfx942"]
 
 # ── Build-context (filled at publish; null in draft) ────────────────────
 spack:
@@ -4173,12 +4878,13 @@ build_host:
 # ── Lanes (rendered lanes only; skeleton at render; lockfile/install/provenance/runtime_modules at publish) ──
 lanes:                                         # one entry per environment in the release
   - name: gcc-core
+    source_build: core                          # render-filled; stack.yaml.builds[*].name
     env_path: "environments/gcc/core"          # render-filled
     kind: core                                 # render-filled
     compiler: gcc                              # render-filled
     target: x86_64_v3                          # render-filled
     runtime_node_type: cpu_compute             # render-filled
-    package_set: core-foundation               # render-filled
+    spec_source: "package_set:core-foundation" # render-filled; inline stacks use inline:<build>
     view_root: "/shared/stack/releases/2026.06/example-cray/cse/views/gcc/core"    # render-filled (planned path)
     package_module_root: "/shared/stack/releases/2026.06/example-cray/cse/modules/gcc/core" # render-filled (planned path)
     # publish-filled fields below
@@ -4190,9 +4896,10 @@ lanes:                                         # one entry per environment in th
       platform_backed: 0
       site_external: 0
       spack_built: 0
-    runtime_modules: []                        # platform modules the front-door must load
+    runtime_modules: []                        # platform modules the public entry module must load
 
   - name: cce-mpi-craympich
+    source_build: mpi
     env_path: "environments/cce/mpi-craympich"
     kind: mpi
     compiler: cce
@@ -4203,18 +4910,19 @@ lanes:                                         # one entry per environment in th
     install_root: "/shared/stack/spack/opt/linux-rhel8-zen3/cce-17.0.1"
     view_root: "/shared/stack/releases/2026.06/example-cray/cse/views/cce/mpi-craympich"
     package_module_root: "/shared/stack/releases/2026.06/example-cray/cse/modules/cce/mpi-craympich"
-    package_set: science-full
+    spec_source: "package_set:science-full"
     provenance_summary:
       stack_built: 18
       platform_backed: 1                       # cray-mpich
       site_external: 0
       spack_built: 0
-    runtime_modules:                           # platform modules the front-door loads
+    runtime_modules:                           # platform modules the public entry module loads
       - PrgEnv-cray
       - cce/17.0.1
       - cray-mpich/8.1.29
 
   - name: gcc-gpu-craympich-gfx90a              # Cray PE + GPU lane assembly Option B:
+    source_build: gpu
     env_path: "environments/gcc/gpu-craympich-gfx90a"   #   GNU host + ROCm toolkit module
     kind: gpu
     compiler: gcc                              # GNU host per the host-compiler policy
@@ -4225,10 +4933,10 @@ lanes:                                         # one entry per environment in th
     install_root: "/shared/stack/spack/opt/linux-rhel8-zen3/gcc-13.3.0"
     view_root: "/shared/stack/releases/2026.06/example-cray/cse/views/gcc/gpu-craympich-gfx90a"
     package_module_root: "/shared/stack/releases/2026.06/example-cray/cse/modules/gcc/gpu-craympich-gfx90a"
-    package_set: science-gpu
+    spec_source: "package_set:science-full"
     provenance_summary:
       stack_built: 12
-      platform_backed: 2                       # cray-mpich + ROCm toolkit externals
+      platform_backed: 8                       # cray-mpich + ROCm component externals (example count)
       site_external: 0
       spack_built: 0
     runtime_modules:                           # Option B: PrgEnv-gnu + standalone rocm + cray-mpich
@@ -4237,9 +4945,14 @@ lanes:                                         # one entry per environment in th
       - rocm/6.0.0
       - cray-mpich/8.1.29
 
-skipped_lanes:                                 # render-filled; empty if every stack lane rendered
-  - name: cce-gpu-craympich-gfx90a
-    reason: "lane not declared in profile capabilities"
+skipped_builds: []                             # render-filled; empty if every requested build rendered.
+                                               # Non-empty entries carry { build, reason_code, reason }
+                                               # where reason_code is one of:
+                                               #   per_system_empty       — per_system narrowed the build to no eligible lanes
+                                               #   nodes_unmatched        — no profile.node_types entry satisfied builds[*].nodes
+                                               #   requires_unsatisfied   — contract `requires:` for the build_class cannot be met
+                                               #   template_not_supported — contract does not provide the named class/toolchain/nodes
+                                               # Downstream tooling matches on reason_code; `reason` is free-form for humans.
 
 # ── Buildcache + verification (filled at publish; planned destinations may
 #    appear in draft as `planned_destinations:` for Ansible to consult) ──
@@ -4247,9 +4960,9 @@ buildcache:
   push_destinations:                           # mirrors this release was pushed to
     - name: foundation
       url:  "file:///shared/stack/buildcache/foundation/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/x86_64_v3"
-      lanes_pushed: ["gcc-core", "cce-core", "rocmcc-core"]
-    - name: science
-      url:  "file:///shared/stack/buildcache/science/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray"
+      lanes_pushed: ["gcc-core", "cce-core"]
+    - name: payload
+      url:  "file:///shared/stack/buildcache/payload/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray"
       lanes_pushed: ["cce-mpi-craympich", "gcc-gpu-craympich-gfx90a"]
   signed: false
 
@@ -4277,7 +4990,7 @@ workflow:
 5. For each rendered lane, copy the final `spack.lock` path and sha256 digest.
 6. For each rendered lane, record `install_root`, `view_root`,
    `package_module_root`, provenance counts, and runtime modules loaded by the
-   front-door module.
+   public entry module (`front_door` lane module or direct application module).
 7. Record actual buildcache push destinations and lanes pushed.
 8. Record verification results from `spack verify ...` and site smoke tests.
 9. Fill `promoted_at` and `promoted_by` only when promotion actually happens;
@@ -4317,7 +5030,7 @@ class of failure at the cheapest moment.
 | Concrete solve | Bad concretization choices | `spack -e <env> concretize`, inspect `spack.lock` diffs |
 | Build | Build-recipe failures | `spack -e <env> install --fail-fast` |
 | Integrity | Broken install / missing libraries | `spack verify manifest`, `spack verify libraries` |
-| User workflow | Lane composition / view exposure | clean shell, load front-door, load package modules, compile smoke tests |
+| User workflow | Lane composition / view exposure | clean shell, load public entry module, load package modules when applicable, compile smoke tests |
 | Runtime | Real MPI/GPU/scheduler interaction | scheduler launch, MPI hello-world, GPU device-query, multi-node smoke test |
 
 Verification runs in the same context users will see, not in a dirty build
@@ -4328,11 +5041,15 @@ shell. For each lane:
 2. Prepend the candidate release's physical module directory directly, or load a
    release-tagged init module; do not use the global `current` symlink for
    pre-promotion verification.
-3. Load the lane front-door module (`<modules.module_root>/<compiler>/<lane>`,
-   for example `CSE/GCC/gpu-craympich-gfx90a`).
-4. Confirm the front-door loaded required platform modules for consumed externals.
+3. Load the public entry module. In `front_door` mode this is the lane module
+   (`<modules.module_root>/<compiler>/<lane>`, for example
+   `CSE/GCC/gpu-craympich-gfx90a`). In `direct` mode this is a direct package or
+   application module such as `fun3d/14.2-gpu-gfx90a`.
+4. Confirm the public entry module loaded required platform modules for consumed
+   externals.
 5. Run `spack -e <env> verify libraries` and `verify manifest -a`.
-6. Load representative package modules from that lane and run compile/smoke tests.
+6. Load representative package modules from that lane when the workflow has a
+   separate package-module step, then run compile/smoke tests.
 7. For MPI/GPU lanes, run scheduler-backed runtime smoke tests on the lane's
    `runtime_node_type`.
 ```
@@ -4529,18 +5246,18 @@ table — it is the single place the team's failure knowledge accumulates.
 | Concretization picks the wrong cray-mpich flavor | The lane's `%toolchain` does not specify `%mpi`, or the per-flavor external `%cce` / `%gcc` / `%rocmcc` tags are absent in `configs/mpi/cray-mpich/packages.yaml` | `configs/mpi/cray-mpich/toolchains.yaml`, `configs/mpi/cray-mpich/packages.yaml` |
 | Build fails with "OpenSSL not found" | `openssl: buildable: false` and no external was detected, OR the external version pin is too narrow | `configs/os/<os>/packages.yaml` — use `buildable: true` with `prefer:` |
 | Build fails with linker errors against zlib | Foundation `require:` pin missing in common scope, allowing two zlib versions | `configs/common/packages.yaml` — add `require:` on zlib |
-| `spack verify libraries` fails for a Cray build | The lane's front-door module does not load the PE modules at runtime; CSE binaries depend on PE runtime components | Front-door module template — add `module load PrgEnv-...` + `cray-mpich/...` |
-| `ldd` on a built binary shows "not found" for `libpgmath.so` or similar | Site compiler runtime not loaded; the lane is built on a module-provided external but the front-door does not load its modules | Front-door module template — add `module load <compiler-module>` |
+| `spack verify libraries` fails for a Cray build | The lane's public entry module does not load the PE modules at runtime; CSE binaries depend on PE runtime components | Module template for the selected exposure mode — add `module load PrgEnv-...` + `cray-mpich/...` |
+| `ldd` on a built binary shows "not found" for `libpgmath.so` or similar | Site compiler runtime not loaded; the lane is built on a module-provided external but the public entry module does not load its modules | Module template for the selected exposure mode — add `module load <compiler-module>` |
 | GPU runtime fails with "CUDA driver version is insufficient for CUDA runtime version" | Toolkit version exceeds the GPU driver ceiling | Check the lane's `profile.node_types[<runtime_node_type>].gpu.toolkit_ceiling`; pin CUDA in `configs/gpu/nvidia-cuda/packages.yaml` at or under it |
 | GPU build fails with "no kernel image available for execution" | Rendered Spack GPU variant (`cuda_arch=90` or `amdgpu_target=gfx90a`) does not match the lane's profile arch label (`sm_90` or `gfx90a`) from `profile.node_types[<runtime_node_type>].gpu.arch_target` | `configs/gpu/<vendor>/packages.yaml` — map the profile label to the correct Spack variant |
 | User compile finds the wrong `hdf5` headers | Two `hdf5` versions on `CPATH` — typically a stale module not unloaded, or the wrong lane loaded | Verify with `module list`; lane conflict should prevent this |
-| `module load` of two lanes simultaneously succeeds | Conflict block in front-door module is missing or stale | Front-door module template — `conflict CSE/...` for every other lane |
+| `module load` of two lanes simultaneously succeeds | Conflict block in the public entry module is missing or stale | Module template for the selected exposure mode — add conflicts for mutually exclusive lane entries |
 | User script picks `mpirun` from system PATH instead of the lane | Site MPI's `mpirun` is not exposed by the lane (Spack-built lanes put it in the view PATH; site-external lanes rely on the site module) | Confirm the lane's runtime module loads include the MPI module |
 | Cache miss on a binary the foundation already built | Cache keyed by compiler; CCE lane is reading the wrong bucket; or the foundation mirror is not registered in the lane's `mirrors.yaml` | Re-key the cache by OS/glibc (label compiler in the path, not the key); register foundation mirror in `configs/common/mirrors.yaml` |
 | `spack ci generate` produces no rebuild jobs after a stack change | Pipeline env has `reuse: true` (the default); `spack ci` must run on `reuse: false` | Pipeline env's `concretizer.yaml` — set `reuse: false` |
 | Re-render produces a diff from the last release | The render step is consulting ambient state (shell vars, `module list`, etc.) | Render step implementation — remove the ambient lookup; renders must be deterministic from `(profile, stack, sets, templates, release_vars)` |
-| Render rejects a lane with "runtime_node_type not found" | `stack.yaml.lanes[*].runtime_node_type` names a class that is not in `profile.node_types`, or names one whose `role` is `build_host` only | Add the node type to the profile (re-run inspector or hand-edit), or change the lane to point at a class with `role: runtime` / `both` |
-| GPU lane builds for the wrong arch (e.g., `gfx90a` when the node is `gfx942`) | `lanes[*].runtime_node_type` names the wrong GPU class — the render took the GPU block from the wrong `node_types` entry | Fix the lane's `runtime_node_type:` in `stack.yaml`; one lane per GPU class is the committed model, do not try to make one lane serve two GPU archs |
+| Render rejects a build with "node selector matched no runtime node type" | The contract-defined selector named by `stack.yaml.builds[*].nodes` cannot resolve to a `profile.node_types` entry with `role: runtime` or `both` | Add the node type to the profile (re-run inspector or hand-edit), choose a different contract node selector in `stack.yaml`, or fix the selector definition in `templates/<set>/contract.yaml` |
+| GPU lane builds for the wrong arch (e.g., `gfx90a` when the node is `gfx942`) | The contract node selector resolved to the wrong GPU node type, the build used the wrong expansion rule, or the profile's GPU arch label is wrong | Fix `stack.yaml.builds[*].nodes`, the contract selector, or the profile GPU block; use `expand: per_gpu_arch` when one build should produce one lane per GPU arch |
 | Different OS lanes share one cache and hashes seem to overlap | Cache lane is not keyed by OS/glibc; SLES and RHEL builds collided | Re-key cache by OS/glibc — `buildcache/foundation/<os-id>/glibc-<glibc>/<spack-generation>/<baseline>/` |
 | Two compilers' Core CMake collide in one view | One shared Core view across compilers — per-compiler Core needs per-compiler view roots | View root template — split into `views/<compiler>/core/` |
 | `module load` of a package finds a stale path that no longer exists | View was not regenerated after install | Run `spack -e <env> env view regenerate` — Ansible's `publish` role should do this automatically |
@@ -4644,35 +5361,111 @@ Commit `systems/example-cray/profile.yaml` and
 
 ### Phase 2 — Author the stack file
 
-Edit `stacks/cse/stack.yaml` to declare the lanes this release will
-build. The committed lane choices for this system: two compilers (GCC +
-CCE) × two non-GPU kinds (core, mpi) + two GPU lanes (gfx90a, gfx942 —
-Option B with GCC host). Plus core lanes for each compiler so the
-compiler's Core view exists.
+Edit `stacks/cse/stack.yaml` to declare the generic build requests this release
+will build:
 
 ```yaml
-# stacks/cse/stack.yaml (excerpt — the schema in §Durable Inputs has the rest)
-lanes:
-  - { name: gcc-core,                   compiler: gcc,  lane: core,                kind: core,   package_set: core-foundation, target: foundation,        runtime_node_type: cpu_compute,           publish: true }
-  - { name: gcc-mpi-craympich,          compiler: gcc,  lane: mpi-craympich,       kind: mpi,    package_set: science-full,    target: science_default,   runtime_node_type: cpu_compute,           publish: true }
-  - { name: gcc-gpu-craympich-gfx90a,   compiler: gcc,  lane: gpu-craympich-gfx90a, kind: gpu,   package_set: science-gpu,     target: science_default,   runtime_node_type: gpu_compute_mi250x,    publish: true }
-  - { name: gcc-gpu-craympich-gfx942,   compiler: gcc,  lane: gpu-craympich-gfx942, kind: gpu,   package_set: science-gpu,     target: science_default,   runtime_node_type: gpu_compute_mi300a,    publish: true }
-  - { name: cce-core,                   compiler: cce,  lane: core,                kind: core,   package_set: core-foundation, target: foundation,        runtime_node_type: cpu_compute,           publish: true }
-  - { name: cce-mpi-craympich,          compiler: cce,  lane: mpi-craympich,       kind: mpi,    package_set: science-full,    target: science_default,   runtime_node_type: cpu_compute,           publish: true }
+# stacks/cse/stack.yaml (excerpt)
+templates:
+  set: v6
+
+modules:
+  format: tcl
+  exposure: front_door
+  init_module: cse-init
+  module_root: CSE
+  publish_root: null
+
+builds:
+  - { name: core,   class: core,   package_set: core-foundation, toolchain: cse-core,           nodes: cpu, expand: one,          publish: true }
+  - { name: serial, class: serial, package_set: science-full,    toolchain: cse-serial-default, nodes: cpu, expand: one,          publish: true }
+  - { name: mpi,    class: mpi,    package_set: science-full,    toolchain: cse-mpi-default,    nodes: cpu, expand: one,          publish: true }
+  - { name: gpu,    class: gpu,    package_set: science-full,    toolchain: cse-gpu-default,    nodes: gpu, expand: per_gpu_arch, publish: true }
 ```
 
-Six lanes — the realistic count from §Lane Matrix Sizing for this system
-shape. Validate:
+Those names are validated against `templates/v6/contract.yaml`; none of the CPU
+targets, GPU architectures, compiler module names, or Cray MPICH prefixes are in
+the generic build requests. Without `per_system` narrowing, this example profile
+resolves to two compilers (GCC + CCE) × three non-GPU kinds (core, serial, mpi) +
+two GPU lanes (gfx90a, gfx942 — Option B with GCC host).
+
+```yaml
+# generated release plan excerpt after resolving stacks/cse/stack.yaml
+resolved_lanes:
+  - { name: gcc-core,                   compiler: gcc,  lane: core,                kind: core,   package_set: core-foundation, target: x86_64_v3, runtime_node_type: cpu_compute,           publish: true }
+  - { name: gcc-serial,                 compiler: gcc,  lane: serial,              kind: serial, package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute,           publish: true }
+  - { name: gcc-mpi-craympich,          compiler: gcc,  lane: mpi-craympich,       kind: mpi,    package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute,           publish: true }
+  - { name: gcc-gpu-craympich-gfx90a,   compiler: gcc,  lane: gpu-craympich-gfx90a, kind: gpu,   package_set: science-full,    target: zen3,      runtime_node_type: gpu_compute_mi250x,    publish: true }
+  - { name: gcc-gpu-craympich-gfx942,   compiler: gcc,  lane: gpu-craympich-gfx942, kind: gpu,   package_set: science-full,    target: zen4,      runtime_node_type: gpu_compute_mi300a,    publish: true }
+  - { name: cce-core,                   compiler: cce,  lane: core,                kind: core,   package_set: core-foundation, target: x86_64_v3, runtime_node_type: cpu_compute,           publish: true }
+  - { name: cce-serial,                 compiler: cce,  lane: serial,              kind: serial, package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute,           publish: true }
+  - { name: cce-mpi-craympich,          compiler: cce,  lane: mpi-craympich,       kind: mpi,    package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute,           publish: true }
+```
+
+Eight lanes — the fully populated CSE shape from §Lane Matrix Sizing for this
+system. Validate:
+
+If this release should build only CCE and GNU for CPU lanes, and only GNU host +
+Cray MPICH for one AMD GPU architecture, add a system-scoped narrowing block:
+
+```yaml
+per_system:
+  example-cray:
+    builds:
+      core:
+        compilers: [gcc, cce]
+      serial:
+        compilers: [gcc, cce]
+      mpi:
+        compilers: [gcc, cce]
+        mpi: [cray-mpich]
+      gpu:
+        compilers: [gcc]
+        mpi: [cray-mpich]
+        gpu_arch: [gfx90a]
+```
+
+That block is ignored when rendering any profile whose `profile.system.name` is
+not `example-cray`. On `example-cray`, it intersects the contract-generated
+candidates and drops only the excluded variants. Unknown names in the matching
+`per_system` block are render errors, not silent skips. The narrowed plan has
+seven lanes instead of eight:
+
+```yaml
+# generated release plan excerpt after resolving stacks/cse/stack.yaml with the per_system narrowing above
+resolved_lanes:
+  - { name: gcc-core,                   compiler: gcc,  lane: core,                kind: core,   package_set: core-foundation, target: x86_64_v3, runtime_node_type: cpu_compute,           publish: true }
+  - { name: gcc-serial,                 compiler: gcc,  lane: serial,              kind: serial, package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute,           publish: true }
+  - { name: gcc-mpi-craympich,          compiler: gcc,  lane: mpi-craympich,       kind: mpi,    package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute,           publish: true }
+  - { name: gcc-gpu-craympich-gfx90a,   compiler: gcc,  lane: gpu-craympich-gfx90a, kind: gpu,   package_set: science-full,    target: zen3,      runtime_node_type: gpu_compute_mi250x,    publish: true }
+  - { name: cce-core,                   compiler: cce,  lane: core,                kind: core,   package_set: core-foundation, target: x86_64_v3, runtime_node_type: cpu_compute,           publish: true }
+  - { name: cce-serial,                 compiler: cce,  lane: serial,              kind: serial, package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute,           publish: true }
+  - { name: cce-mpi-craympich,          compiler: cce,  lane: mpi-craympich,       kind: mpi,    package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute,           publish: true }
+```
+
+`gcc-gpu-craympich-gfx942` is the dropped row: the GPU build's `gpu_arch: [gfx90a]`
+narrowing intersected the contract-resolved GPU candidates and excluded the
+gfx942 lane. The `gpu` build itself remains non-empty (gfx90a survived), so no
+`skipped_builds` entry is recorded; the resolved-lanes count and the
+`templates.applied_narrowing` block in the manifest are how a reader sees the
+narrowing took effect. A `skipped_builds` entry with `reason_code:
+per_system_empty` is reserved for the stronger case where narrowing empties an
+entire build (see §Release Manifest Schema).
+
+The rest of this walkthrough uses the full 8-lane plan to keep the build/push
+examples complete; when applying the `per_system` narrowing above, omit
+`gcc/gpu-craympich-gfx942` from the rendered tree listing, the fan-out `srun`
+loop, and the verify/push loop.
 
 ```bash
 $ stack-validate \
     --profile systems/example-cray/profile.yaml \
     --stack stacks/cse/stack.yaml
 PASS  profile schema matches stack.profile_contract
-PASS  every lane.runtime_node_type resolves in profile.node_types
-PASS  every lane.compiler resolves in normalized compiler inventory
-PASS  every lane.package_set exists with kind compatible
-PASS  no profile capability missing for declared lanes
+PASS  every build request resolves or is explicitly skipped
+PASS  every resolved lane.runtime_node_type resolves in profile.node_types
+PASS  every resolved lane.compiler resolves in normalized compiler inventory
+PASS  every spec source exists and satisfies the contract spec kind
 ```
 
 ### Phase 3 — Render
@@ -4704,10 +5497,12 @@ $ tree -L 3 /shared/stack/releases/2026.06/example-cray/cse/
 ├── environments
 │   ├── cce/core/spack.yaml
 │   ├── cce/mpi-craympich/spack.yaml
+│   ├── cce/serial/spack.yaml
 │   ├── gcc/core/spack.yaml
 │   ├── gcc/gpu-craympich-gfx90a/spack.yaml
 │   ├── gcc/gpu-craympich-gfx942/spack.yaml
-│   └── gcc/mpi-craympich/spack.yaml
+│   ├── gcc/mpi-craympich/spack.yaml
+│   └── gcc/serial/spack.yaml
 └── release-manifest.yaml
 ```
 
@@ -4720,6 +5515,9 @@ configs/mpi/cray-mpich/packages.yaml:3      mpi.require: cray-mpich
 configs/mpi/cray-mpich/packages.yaml:6      cray-mpich.buildable: false
 configs/mpi/cray-mpich/packages.yaml:9      cray-mpich.externals[0].prefix: /opt/cray/pe/mpich/8.1.29/ofi/gnu/13.3
 configs/gpu/amd-rocm/packages.yaml:4        all.variants: amdgpu_target=gfx90a
+configs/gpu/amd-rocm/packages.yaml:8        hip.buildable: false
+configs/gpu/amd-rocm/packages.yaml:11       hip.externals[0].prefix: /opt/rocm-6.0.0/hip
+configs/gpu/amd-rocm/packages.yaml:16       hsa-rocr-dev.externals[0].prefix: /opt/rocm-6.0.0
 configs/target/zen3/packages.yaml:4         all.target: [zen3]
 configs/common/packages.yaml:4              zlib.require: "@1.3.1"
 ```
@@ -4730,7 +5528,7 @@ Every line traces to the rendered workspace — no `~/.spack`, no
 ### Phase 4 — Build the foundation neck
 
 Build the bootstrap compiler externals, then GCC Core, then CCE Core.
-These are the serial neck:
+This is the sequential neck:
 
 ```bash
 # On the login node (build_host):
@@ -4752,21 +5550,25 @@ $ spack -e environments/cce/core buildcache push --update-index --unsigned \
        file:///shared/stack/buildcache/foundation/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/x86_64_v3
 ```
 
-### Phase 5 — Fan out the science and GPU lanes
+### Phase 5 — Fan out the payload lanes
 
-Now that both Cores are cached, the four remaining lanes run independently.
+Now that both Cores are cached, the six remaining lanes run independently.
 Submit one Spack process per node, each lane pinned to its
 `runtime_node_type`:
 
 ```bash
 # On the login/build host, concretize and fetch every non-core lane first.
-$ for env in gcc/mpi-craympich cce/mpi-craympich \
+$ for env in gcc/serial cce/serial gcc/mpi-craympich cce/mpi-craympich \
              gcc/gpu-craympich-gfx90a gcc/gpu-craympich-gfx942; do
     spack -e environments/$env concretize
     spack -e environments/$env fetch -D
 done
 
-# CPU MPI lanes on the CPU compute partition
+# CPU serial and MPI lanes on the CPU compute partition
+$ srun -N1 -n1 --partition=cpu_compute \
+    spack -e environments/gcc/serial install -j 64 &
+$ srun -N1 -n1 --partition=cpu_compute \
+    spack -e environments/cce/serial install -j 64 &
 $ srun -N1 -n1 --partition=cpu_compute \
     spack -e environments/gcc/mpi-craympich install -j 64 &
 $ srun -N1 -n1 --partition=cpu_compute \
@@ -4789,10 +5591,10 @@ them, because the foundation lane was pushed first.
 ### Phase 6 — Verify, push, publish
 
 Per lane, run Spack integrity checks, regenerate candidate views/modules, and
-push the science cache:
+push the payload cache:
 
 ```bash
-$ for env in gcc/mpi-craympich cce/mpi-craympich \
+$ for env in gcc/serial cce/serial gcc/mpi-craympich cce/mpi-craympich \
              gcc/gpu-craympich-gfx90a gcc/gpu-craympich-gfx942; do
     spack -e environments/$env verify libraries
     spack -e environments/$env verify manifest -a
@@ -4801,7 +5603,7 @@ $ for env in gcc/mpi-craympich cce/mpi-craympich \
     spack -e environments/$env env view regenerate
     spack -e environments/$env module tcl refresh -y
     spack -e environments/$env buildcache push --update-index --unsigned \
-         file:///shared/stack/buildcache/science/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray
+         file:///shared/stack/buildcache/payload/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray
 done
 ```
 
@@ -4819,7 +5621,7 @@ $ stack-publish-manifest \
     --release-dir /shared/stack/releases/2026.06/example-cray/cse \
     --build-host  $(hostname) \
     --buildcache  foundation=file:///shared/stack/buildcache/foundation/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/x86_64_v3 \
-    --buildcache  science=file:///shared/stack/buildcache/science/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray \
+    --buildcache  payload=file:///shared/stack/buildcache/payload/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray \
     --verification-results /tmp/verify-results.yaml
 # → overwrites release-manifest.yaml with phase: final
 ```
@@ -4900,19 +5702,20 @@ is a stable on-disk install).
 
 ### Phase 2 — Author the stack file
 
-Three lanes per compiler. No GPU lanes. Two MPI options: the site MPI lane
-(for users who want the site-tuned MPI) and a Spack-built OpenMPI lane
-(for users who want a stack-owned MPI):
+The same CSE source build requests resolve differently on this profile. No GPU
+lanes render. Two MPI options remain: the site MPI lane (for users who want the
+site-tuned MPI) and a Spack-built OpenMPI lane (for users who want a stack-owned
+MPI):
 
 ```yaml
-# stacks/cse/stack.yaml (Linux excerpt)
-lanes:
-  - { name: aocc-core,             compiler: aocc, lane: core,         kind: core,   package_set: core-foundation, target: foundation,      runtime_node_type: cpu_compute, publish: true }
-  - { name: aocc-serial,           compiler: aocc, lane: serial,       kind: serial, package_set: science-full,    target: science_default, runtime_node_type: cpu_compute, publish: true }
-  - { name: aocc-mpi-site,         compiler: aocc, lane: mpi-site,     kind: mpi,    package_set: science-full,    target: science_default, runtime_node_type: cpu_compute, publish: true }
-  - { name: aocc-mpi-openmpi,      compiler: aocc, lane: mpi-openmpi,  kind: mpi,    package_set: science-full,    target: science_default, runtime_node_type: cpu_compute, publish: true }
-  - { name: gcc-core,              compiler: gcc,  lane: core,         kind: core,   package_set: core-foundation, target: foundation,      runtime_node_type: cpu_compute, publish: true }
-  - { name: gcc-mpi-openmpi,       compiler: gcc,  lane: mpi-openmpi,  kind: mpi,    package_set: science-full,    target: science_default, runtime_node_type: cpu_compute, publish: true }
+# generated release plan excerpt after resolving stacks/cse/stack.yaml
+resolved_lanes:
+  - { name: aocc-core,             compiler: aocc, lane: core,         kind: core,   package_set: core-foundation, target: x86_64_v3, runtime_node_type: cpu_compute, publish: true }
+  - { name: aocc-serial,           compiler: aocc, lane: serial,       kind: serial, package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute, publish: true }
+  - { name: aocc-mpi-site,         compiler: aocc, lane: mpi-site,     kind: mpi,    package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute, publish: true }
+  - { name: aocc-mpi-openmpi,      compiler: aocc, lane: mpi-openmpi,  kind: mpi,    package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute, publish: true }
+  - { name: gcc-core,              compiler: gcc,  lane: core,         kind: core,   package_set: core-foundation, target: x86_64_v3, runtime_node_type: cpu_compute, publish: true }
+  - { name: gcc-mpi-openmpi,       compiler: gcc,  lane: mpi-openmpi,  kind: mpi,    package_set: science-full,    target: zen3,      runtime_node_type: cpu_compute, publish: true }
 ```
 
 ```bash
@@ -4985,7 +5788,7 @@ $ wait
 ### Phase 5 — Verify, push, publish, promote
 
 Same shape as the Cray flow. Per lane: verify, regenerate view+modules,
-push science cache. Copy workspace + manifest to the release directory.
+push payload cache. Copy workspace + manifest to the release directory.
 Swap `current` after approval.
 
 The two AOCC MPI lanes differ in their front-door modules. Both load the AOCC
@@ -5012,6 +5815,249 @@ Both produce a working user surface. The choice is one of provenance
 (`Site-external` vs `Stack-built`) and is recorded per-package via the
 `STACK_PACKAGE_PROVENANCE` module env var.
 
+## Example Direct Application Stack: FUN3D
+
+This example is intentionally not a CSE-style library stack. It represents a
+package manager who owns one application stack, the site already has a public
+modulefile root in users' default `MODULEPATH`, and users expect to load FUN3D
+directly. The framework still uses the same durable inputs, render step, lane
+validation, lockfiles, and release manifest; it just chooses `modules.exposure:
+direct` and publishes application modules instead of front-door lane modules.
+
+Assumptions:
+
+- The system profile is named `example-aero` and declares one CPU compute node
+  type plus one AMD GPU node type.
+- The site already exposes `/apps/modulefiles` in users' default `MODULEPATH`.
+- The local Spack package for FUN3D defines the exact CPU/GPU variants. The
+  variant names below are illustrative and should match the real package.
+- This stack does not need a separate Core lane. Build tools and dependencies are
+  normal concretized dependencies of the FUN3D lanes.
+
+### Phase 1 — Author the stack file
+
+The stack file declares direct exposure and two generic build requests. The
+template contract for this stack defines `cpu` and `gpu` as valid build classes;
+it does not need the CSE serial/MPI/GPU taxonomy. The concrete lane names are not
+written here because they depend on the selected profile.
+
+```yaml
+# stacks/fun3d/stack.yaml (excerpt)
+schema_version: 1
+name: fun3d
+
+profile_contract:
+  schema_version: 1
+
+templates:
+  set: app-direct-v1
+
+modules:
+  format: tcl
+  exposure: direct
+  init_module: null
+  module_root: fun3d
+  publish_root: /apps/modulefiles
+  expose_provenance: true
+
+builds:
+  - name: cpu
+    class: cpu
+    toolchain: fun3d-default
+    nodes: cpu
+    expand: one
+    specs:
+      - fun3d@14.2+mpi~rocm~cuda
+      - fun3d@14.1+mpi~rocm~cuda
+    publish: true
+
+  - name: gpu
+    class: gpu
+    toolchain: fun3d-default
+    nodes: gpu
+    expand: per_gpu_arch
+    specs:
+      - fun3d@14.2+mpi+rocm
+      - fun3d@14.1+mpi+rocm
+    publish: true
+
+externals:
+  compilers: prefer_platform
+  mpi: prefer_platform
+  openssl: system
+  curl: system
+  fabric_userspace: prefer_platform
+  gpu_toolkit: prefer_platform
+
+buildcache:
+  spack_generation: "spack-{spack_version}/repo-{package_repo_generation}"
+  payload_lane: "payload/{os_id}/glibc-{glibc}/{spack_generation}/{system}"
+  signed: false
+  push_after_every_step: true
+
+release:
+  save_lockfiles: true
+  save_manifest: true
+  retain_previous: 2
+  promotion: gated_manual
+```
+
+Those `class`, `toolchain`, and `nodes` values are valid because the selected
+template contract defines them:
+
+```yaml
+# templates/app-direct-v1/contract.yaml (excerpt)
+build_classes:
+  cpu:
+    lane_kind: cpu
+    package_set_kind: cpu
+    default_target: payload_default
+    requires: [runtime_cpu]
+  gpu:
+    lane_kind: gpu
+    package_set_kind: gpu
+    default_target: payload_default
+    requires: [runtime_gpu, gpu_toolkit]
+
+toolchains:
+  fun3d-default:
+    compiler: prefer_gnu
+    mpi: prefer_platform
+    gpu_toolkit: when_required_by_class
+
+node_selectors:
+  cpu: { match: runtime_without_gpu }
+  gpu: { match: runtime_with_gpu }
+```
+
+The `specs:` strings are ordinary Spack root specs. The exact variant names must
+match the real FUN3D package recipe; `+rocm` / `~rocm` are illustrative. The GPU
+lane's rendered scope supplies the GPU architecture variant (for example
+`amdgpu_target=gfx90a`) from `profile.node_types[gpu_compute_mi250x]`, keeping
+the source stack independent of a specific system. If FUN3D later shares a long
+spec list across several builds, move those specs to a package set; do not start
+there by default.
+
+### Phase 2 — Render and build
+
+Render exactly as with CSE. On the example profile, the generic `cpu` and `gpu`
+build requests resolve to one CPU lane and one GPU lane:
+
+```bash
+$ stack-render \
+    --profile     systems/example-aero/profile.yaml \
+    --stack       stacks/fun3d/stack.yaml \
+    --release     2026.06 \
+    --output-root /shared/stack/work
+# → workspace written to /shared/stack/work/example-aero/fun3d/2026.06/
+
+$ rsync -a /shared/stack/work/example-aero/fun3d/2026.06/ \
+        /shared/stack/releases/2026.06/example-aero/fun3d/
+
+$ cd /shared/stack/releases/2026.06/example-aero/fun3d
+$ ls environments/gcc
+cpu-zen3  gpu-gfx90a
+```
+
+The generated release plan records that expansion:
+
+```yaml
+resolved_lanes:
+  - name: gcc-cpu-zen3
+    source_build: cpu
+    compiler: gcc
+    lane: cpu-zen3
+    kind: cpu
+    specs_source: inline:cpu
+    target: zen3
+    runtime_node_type: cpu_compute
+
+  - name: gcc-gpu-gfx90a
+    source_build: gpu
+    compiler: gcc
+    lane: gpu-gfx90a
+    kind: gpu
+    specs_source: inline:gpu
+    target: zen3
+    runtime_node_type: gpu_compute_mi250x
+    gpu_arch: gfx90a
+```
+
+If a different profile exposes two GPU architectures and the stack keeps
+`expand: per_gpu_arch`, the same source `stack.yaml` generates two GPU lanes. If
+the stack used `expand: one` while the node selector matched multiple GPU
+architectures, render would fail and ask the maintainer to choose an explicit
+expansion policy.
+
+Build the CPU lane on a CPU compute node and the GPU lane on the matching GPU
+node type. There is no mandatory foundation build first because this stack did
+not declare a Core lane.
+
+```bash
+$ spack -e environments/gcc/cpu-zen3 concretize
+$ spack -e environments/gcc/gpu-gfx90a concretize
+$ spack -e environments/gcc/cpu-zen3 fetch -D
+$ spack -e environments/gcc/gpu-gfx90a fetch -D
+
+$ srun -N1 -n1 --partition=compute \
+    spack -e environments/gcc/cpu-zen3 install -j 64 &
+$ srun -N1 -n1 --partition=gpu --constraint=mi250x --gpus=1 \
+    spack -e environments/gcc/gpu-gfx90a install -j 64 &
+$ wait
+```
+
+### Phase 3 — Publish direct modules
+
+Candidate module generation emits public modules named by application version and
+target, not by a CSE front-door lane:
+
+```text
+/shared/stack/releases/2026.06/example-aero/fun3d/modules/public/fun3d/
+  14.1-cpu-zen3
+  14.2-cpu-zen3
+  14.1-gpu-gfx90a
+  14.2-gpu-gfx90a
+```
+
+The release owner publishes those modulefiles or symlinks into the existing site
+root named by `modules.publish_root`. The example assumes
+`/apps/modulefiles/fun3d` already exists and is owned by the FUN3D release owner:
+
+```bash
+$ ln -sfn /shared/stack/releases/2026.06/example-aero/fun3d/modules/public/fun3d/14.1-cpu-zen3 \
+          /apps/modulefiles/fun3d/14.1-cpu-zen3
+$ ln -sfn /shared/stack/releases/2026.06/example-aero/fun3d/modules/public/fun3d/14.2-cpu-zen3 \
+          /apps/modulefiles/fun3d/14.2-cpu-zen3
+$ ln -sfn /shared/stack/releases/2026.06/example-aero/fun3d/modules/public/fun3d/14.1-gpu-gfx90a \
+          /apps/modulefiles/fun3d/14.1-gpu-gfx90a
+$ ln -sfn /shared/stack/releases/2026.06/example-aero/fun3d/modules/public/fun3d/14.2-gpu-gfx90a \
+          /apps/modulefiles/fun3d/14.2-gpu-gfx90a
+```
+
+Each direct module is generated from its lane, so it carries the same provenance,
+runtime external module loads, and conflicts that a front-door lane module would
+have carried. If the GPU lane consumed a module-provided ROCm external, for
+example, `fun3d/14.2-gpu-gfx90a` loads or prereqs the matching ROCm module. If
+the CPU and GPU FUN3D modules should not be loaded together, they conflict
+directly with each other.
+
+User workflow stays simple:
+
+```bash
+$ module avail fun3d
+$ module load fun3d/14.2-cpu-zen3
+$ fun3d --version
+
+$ module swap fun3d/14.2-cpu-zen3 fun3d/14.2-gpu-gfx90a
+$ echo $STACK_PACKAGE_PROVENANCE
+Stack-built
+```
+
+This is the same architecture as the CSE examples, but with a different module
+surface: direct application modules are the public contract, while lanes remain
+the internal mechanism that records target, GPU toolkit, lockfile, provenance,
+and build-cache separation.
+
 ## Committed Decisions And Genuinely Open Questions
 
 The design avoids unanswered questions where it can. Decisions that have a
@@ -5026,34 +6072,34 @@ real-world evidence (a deployed system, a measured workload) to settle.
 |---|---|---|
 | Helper command names | `cluster-inspector` (the read-only system probe), `stack-render` (the render helper), `stack-validate` (validate-only mode), `stack-explain` (dry-run mode), and `stack-publish-manifest` (optional final-manifest writer). Ansible playbook names follow `deploy-stack`. | A naming review happens before the helpers are user-installable; until then these names are committed. The architectural rules in §Render Step would survive a rename. |
 | Location of `stack.yaml` | `stacks/<name>/stack.yaml` (one file per stack, top-level `stacks/` directory). No system-specific overlays — system facts live in `profile.yaml` and the render step composes them. | Never, unless the design ever lets one stack be defined as a composition of two stacks; that case would need overlay syntax, but it is not on the horizon. |
-| Multiple node types per system | **One `profile.yaml` per system with a `node_types:` block** containing one entry per node class (login, CPU compute, GPU compute per GPU model, etc.). System-shared facts (OS, glibc, fabric drivers, Cray PE, modules system, shared filesystem) live at the top level; per-class facts (CPU target, GPU presence, build-stage paths, role) live inside `node_types[*]`. ClusterInspector populates this with a two-phase probe + merge model. A `stack.yaml` lane names its `runtime_node_type` explicitly — no defaulting — and the render step pulls the lane's CPU target and GPU block from that entry. | Never — one profile per system is the correct level of grouping; node-class facts scale inside it. |
-| Package-set expansion granularity | All specs live in `package-sets/<name>.yaml`. `stack.yaml.lanes[*].package_set` references one set by name; the render step expands the set into the lane's `spack.yaml`. The stack file lists *which* sets to use, never the specs themselves. | Never — this is the platform/intent split applied to specs. |
+| Multiple node types per system | **One `profile.yaml` per system with a `node_types:` block** containing one entry per node class (login, CPU compute, GPU compute per GPU model, etc.). System-shared facts (OS, glibc, fabric drivers, Cray PE, modules system, shared filesystem) live at the top level; per-class facts (CPU target, GPU presence, build-stage paths, role) live inside `node_types[*]`. A `stack.yaml` build request names a contract node selector such as `cpu` or `gpu`; the render step resolves that selector against `profile.node_types` and records the concrete `runtime_node_type` in the generated lane plan. | Never — one profile per system is the correct level of grouping; node-class facts scale inside it. |
+| Root spec source | Small stacks should put ordinary Spack root specs directly in `stack.yaml.builds[*].specs`. Reused spec lists live in `package-sets/<name>.yaml`, and `stack.yaml.builds[*].package_set` references one set by name. The render step expands either source into each generated lane's `spack.yaml`; toolchain, target, MPI, and GPU-arch decoration still comes from the profile and template contract, not from the reusable spec source. | A second reuse mechanism proves simpler than package sets; the inline-spec starter path and platform/intent split remain. |
 | Minimum Spack version | **1.1.1** is the committed floor. Newer Spack (including 1.2) is supported and benefits from the jobserver and spec groups; older Spack lacks `include::` semantics and is not supported. | Spack 1.2 stabilizes and the team adopts it as the new floor; revisit the table in §Spack Version Floor. |
-| Lmod beyond the Tcl baseline | The committed module format is **Tcl** because Lmod reads Tcl and Tcl-only systems cannot read Lua. On Lmod-equipped systems, the same install tree can additionally produce an Lmod tree via `spack -e <env> module lmod refresh -y` and serve both module roots in parallel. Lmod's `family` directive and hierarchy features are *not* relied on; the design's conflict mechanism and front-door modules give the same behavior portably. | Never for the Tcl baseline; the optional Lmod tree is per-site choice and does not affect the core design. |
+| Lmod beyond the Tcl baseline | The committed module format is **Tcl** because Lmod reads Tcl and Tcl-only systems cannot read Lua. On Lmod-equipped systems, the same install tree can additionally produce an Lmod tree via `spack -e <env> module lmod refresh -y` and serve both module roots in parallel. Lmod's `family` directive and hierarchy features are *not* relied on; the design's conflict mechanism in front-door or direct modules gives the same behavior portably. | Never for the Tcl baseline; the optional Lmod tree is per-site choice and does not affect the core design. |
 | Release artifact storage | Lockfiles (`spack.lock` per lane) and the release manifest are committed to the source repository under `releases/<tag>/<system>/<stack>/`. The runtime release tree under `/shared/stack/releases/<tag>/<system>/<stack>/` uses the same relative shape but also contains rendered Spack inputs, views, and modulefiles. Build-cache contents are *not* committed — they live on the buildcache mirror (file URL or S3-compatible). Build logs are CI/Ansible artifacts, attached to the release record but not committed. | Build-cache contents grow past the source repo's practical size for some other reason; revisit per-system. |
 | Repo layout split | `cray-*` vs `linux-*` at the top level is **not** the split. The repository is system-agnostic; per-system reality lives in `profile.yaml` and per-platform behavior lives in the scopes the render step selects. | Never — this is the generic-repo decision. |
 | Core sharing across compilers | **Per-compiler Core** is the committed model — each compiler builds its own Core view at its own path. Cross-compiler shared Core is a future, evidence-gated optimization (see §Per-Compiler Core, Not Shared Core). | Measured overlap across compiler Cores is large and expensive enough to justify the `include_concrete`/foundation-cache extraction work. Until then, per-compiler Core stays. |
-| GPU lane Core composition | The GPU lane uses its own compiler's Core. Under the committed Option B default the GPU lane is GCC-hosted, so `gcc/gpu-craympich-<arch>` ↔ `gcc/core`. Named exception lanes follow the same rule with their own host compiler: a ROCmCC exception lane uses `rocmcc/core`, an NVHPC exception lane uses `nvhpc/core`. No separate "gpu-core" layer in any case. | Never — this falls out of the per-compiler Core model. |
-| GPU vs. MPI as lane kinds | **GPU is its own lane kind, not an MPI sub-type.** A GPU lane is a *superset* of the matching MPI lane (it contains the same MPI-aware science libraries plus GPU-arch-pinned packages) and is pinned to one GPU class via `runtime_node_type`. One GPU lane per GPU class on a system. GPU lanes are not "MPI + a GPU add-on layer" — there is no GPU sub-load; users pick exactly one lane, and the GPU lane has everything that lane needs. See §Why GPU Is A Separate Lane Kind. | A real workload pattern materially benefits from a GPU-no-MPI sub-kind, which has not been observed yet. |
+| GPU lane Core composition | When a stack renders Core lanes, a GPU lane uses its own compiler's Core. Under the committed Option B default the GPU lane is GCC-hosted, so `gcc/gpu-craympich-<arch>` ↔ `gcc/core`. Named exception lanes follow the same rule with their own host compiler: a ROCmCC exception lane uses `rocmcc/core`, an NVHPC exception lane uses `nvhpc/core`. No separate "gpu-core" layer in any case; small direct application stacks may omit Core entirely. | Never — this falls out of the per-compiler Core model. |
+| GPU vs. MPI as lane kinds | **GPU is its own lane kind, not an MPI sub-type.** In CSE-style library stacks, a GPU lane is a *superset* of the matching MPI lane (it contains the same MPI-aware science libraries plus GPU-arch-pinned packages) and is pinned to one GPU class via `runtime_node_type`. One GPU lane per GPU class on a system. GPU lanes are not "MPI + a GPU add-on layer" — there is no GPU sub-load; users pick exactly one lane, and the GPU lane has everything that lane needs. See §Why GPU Is A Separate Lane Kind. | A real workload pattern materially benefits from a GPU-no-MPI sub-kind, which has not been observed yet. |
 | ClusterInspector module enumeration | **Three-phase hybrid: auto-discover by name pattern, narrow with operator hints, verify by load-and-probe.** The hints file lives in source control at `systems/<system>/inspector-hints.yaml` and is the committed override mechanism (CLI flags exist for one-off probes but the hints file is what persists). See §Module Enumeration: Auto-Discovery Plus Hints. | A site exposes externals through something other than modules (rare); add the appropriate discovery mechanism. The hints + verify model still applies. |
-| Host compiler for GPU lanes | **GNU host by default.** GNU + CUDA on NVIDIA, GNU + ROCm on AMD. NVHPC, ROCmCC, and AOCC appear only as narrow exception lanes scoped to codes that specifically need them (OpenACC/CUDA Fortran/`-stdpar` for NVHPC; AMD-vendor codes for ROCmCC; CPU-bound host code for AOCC). See §Host-Compiler Policy For GPU Lanes. | A specific code's programming model demands the vendor compiler; that lane is added without changing the default. |
-| Cray PE + GPU lane assembly | **Option B: `PrgEnv-gnu` + standalone GPU toolkit module** (`rocm/<v>`, `cudatoolkit/<v>`) + the GCC-flavor cray-mpich. The lane compiler is `%gcc_craympich`; the GPU toolkit comes from the `configs/gpu/<vendor>` scope; the front-door module loads PrgEnv-gnu + GPU toolkit module + cray-mpich at runtime. Option A (`PrgEnv-amd` / `PrgEnv-nvidia` all-in-one) appears only as the NVHPC or ROCmCC exception lane; Option C (`PrgEnv-cray` + GPU toolkit) only as the CCE-host GPU lane. | A vendor-PrgEnv-required code appears; the exception lane is added without changing the default. |
-| Concretizer `unify:` | **`unify: when_possible`** in every environment, because science lanes carry multi-version stacks and the foundation single-version rule is enforced explicitly with `require:` in the common scope. | Multi-version policy is abandoned entirely. |
-| Concretizer `reuse:` | Build-time environments (science lanes, core, foundation) → `reuse: true`. Pipeline-driving environments (input to `spack ci generate`) → `reuse: false`. See §Concretizer Posture Per Environment Kind. | Never — this is structural. |
+| Host compiler for GPU lanes | **GNU host by default.** GNU + CUDA on NVIDIA, GNU + ROCm on AMD. For ROCm this means GNU host compiler plus ROCm component externals, not ROCmCC as the host compiler. NVHPC, ROCmCC, and AOCC appear only as narrow exception lanes scoped to codes that specifically need them (OpenACC/CUDA Fortran/`-stdpar` for NVHPC; AMD-vendor codes for ROCmCC; CPU-bound host code for AOCC). See §Host-Compiler Policy For GPU Lanes. | A specific code's programming model demands the vendor compiler; that lane is added without changing the default. |
+| Cray PE + GPU lane assembly | **Option B: `PrgEnv-gnu` + standalone GPU toolkit module** (`rocm/<v>`, `cudatoolkit/<v>`) + the GCC-flavor cray-mpich. The lane compiler is `%gcc_craympich`; CUDA is usually one `cuda` external, while ROCm is rendered as component externals in `configs/gpu/amd-rocm/packages.yaml`; the lane's public entry module loads PrgEnv-gnu + GPU toolkit module + cray-mpich at runtime. Option A (`PrgEnv-amd` / `PrgEnv-nvidia` all-in-one) appears only as the NVHPC or ROCmCC exception lane; Option C (`PrgEnv-cray` + GPU toolkit) only as the CCE-host GPU lane. | A vendor-PrgEnv-required code appears; the exception lane is added without changing the default. |
+| Concretizer `unify:` | **`unify: when_possible`** in every environment, because payload lanes carry multi-version stacks and the foundation single-version rule is enforced explicitly with `require:` in the common scope. | Multi-version policy is abandoned entirely. |
+| Concretizer `reuse:` | Build-time environments (payload lanes, core, foundation) → `reuse: true`. Pipeline-driving environments (input to `spack ci generate`) → `reuse: false`. See §Concretizer Posture Per Environment Kind. | Never — this is structural. |
 | Build-cache keying | **OS/glibc + Spack/package-repo generation**, with an optional profile external-ABI token when one mirror spans incompatible same-OS site/vendor external surfaces. Compiler/MPI/target are directory labels for human readability, not reuse boundaries. See §Build-Cache Keying. | Never — the hash already enforces spec correctness, but the bucket still needs clear reuse boundaries; per-compiler keying actively strands the foundation. |
 | OpenSSL / curl provenance | **System externals** with `buildable: true` and `prefer:`/`require:` steering. The system admins patch them; the stack does not own that treadmill. Stack-built OpenSSL is a per-consumer documented exception (e.g., a consumer needs a newer API than the system ships). | The system OpenSSL falls out of vendor support entirely; revisit per-system. |
 | Cray MPICH provenance | **Platform-backed external** with per-flavor `prefix:` and `modules:`. Spack-built MPI on Cray is forbidden for production lanes; the fabric tuning lives in cray-mpich. | Never on Cray. |
 | Cray PE version pinning | The initial build-out pins to **one** PE version (the latest the profile reports), and older point releases are out of support. PE version becomes a future lane dimension when a second version needs support. | A second PE version becomes required and is added as a parallel lane. |
 | `modules:` external usage | Reserved for the **Cray PE** case (compilers + cray-mpich). Site MPI on non-vendor systems uses `prefix:` unless a concrete reason forces `modules:`. | Never as a default; case-by-case for new vendor stacks that genuinely require modules. |
-| Lane-runtime-module rule | A lane built on module-provided externals → front-door module loads them at runtime. A fully Spack-built lane → self-contained, no platform module prereqs. See §Lane Runtime Module Requirements. | Never — this is structural. |
+| Lane-runtime-module rule | A lane built on module-provided externals → its public entry module loads them at runtime (`front_door` lane module or `direct` application module). A fully Spack-built lane → self-contained, no platform module prereqs. See §Lane Runtime Module Requirements. | Never — this is structural. |
 | Provenance taxonomy | Four classes: `Stack-built`, `Platform-backed`, `Site-external`, `Spack-built`. Emitted on every package module via `STACK_PACKAGE_PROVENANCE` and a `module-whatis` suffix. | Never; the four classes cover every real source. |
 | `link:` policy on views | **`link: roots`** everywhere. Spack's default `link: all` is not used. | Never — the per-package module model depends on roots-only. |
 | Default projection | **`{name}/{version}`** in every production view. Richer projections only for collisions a single view must actually hold. | Never as the default. |
 | Promotion model | **Gated manual symlink swap.** A green build does not auto-promote. `release.promotion: gated_manual` is the committed default; `auto` is available per-stack but discouraged for production. | Never for production stacks. |
 | Previous release retention | Default **2 previous releases** kept loadable. Ansible's promote role refuses to delete a release tree if `current` points at it. | Per-stack override is fine; the default stays 2. |
-| Naming on user-facing modules | `<modules.module_root>/<compiler>/<lane>` — e.g., `CSE/CCE/mpi-craympich`. `modules.init_module` (for example `cse-init`) is only the bootstrap module that exposes the release's module root. The system name is not in the user-facing module path; it shows up in internal release directories and in `STACK_RELEASE`. | Never. |
+| Naming on user-facing modules | In `front_door` mode, lane selectors use `<modules.module_root>/<compiler>/<lane>` — e.g., `CSE/CCE/mpi-craympich`. In `direct` mode, public application modules live under `<modules.module_root>/...` with stack-defined projections such as `fun3d/14.2-gpu-gfx90a`. `modules.init_module` is only the optional bootstrap module that exposes the release's module root. The system name is not in the user-facing module path; it shows up in internal release directories and in `STACK_RELEASE`. | Never. |
 | Serial/MPI naming on packages | No suffixes — `hdf5`, not `hdf5-mpi`. The loaded lane disambiguates via MODULEPATH. | The same MODULEPATH is forced to expose both lanes simultaneously; until then, no suffixes. |
-| Module hierarchy style | **Collapsed** front-door (one module per lane) as the committed default. Lmod-native granular cascade is an optional add-on per site, not the primary surface. | Never as the default. |
+| Module hierarchy style | **Collapsed** front-door (one module per lane) is the committed default for variant-rich stacks. `direct` exposure is the committed surface for small application stacks whose package modules already belong in a site MODULEPATH root. Lmod-native granular cascade is an optional add-on per site, not the primary surface. | Never as the default for variant-rich stacks. |
 
 ### Genuinely Open Questions
 
