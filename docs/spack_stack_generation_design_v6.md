@@ -1917,12 +1917,12 @@ Then write one Spack environment directly:
 spack:
   include::
     - ../../../configs/common
-    - ../../../configs/mpi/site-openmpi
+    - ../../../configs/mpi/site-mpi
     - ../../../configs/target/zen3
     - ../../../configs/os/sles15
   specs:
-    - hdf5@1.14.5+mpi+fortran %aocc_site_openmpi
-    - netcdf-c@4.9.2+mpi %aocc_site_openmpi
+    - hdf5@1.14.5+mpi+fortran %aocc_site_mpi
+    - netcdf-c@4.9.2+mpi %aocc_site_mpi
   view:
     default:
       root: /shared/stack/views/example-linux/manual/aocc/mpi-site
@@ -1932,11 +1932,11 @@ spack:
       link_type: symlink
 ```
 
-The `%aocc_site_openmpi` decoration on each spec names a toolchain defined in
-`configs/mpi/site-openmpi/toolchains.yaml`; toolchains belong to the MPI
-provider scope, not to the environment. A Tier 0 author copies that toolchain
-file in alongside the other scopes — see §Detailed Scenario: Generic Linux HPC
-With Site MPI for the file's contents and the rationale.
+The `%aocc_site_mpi` decoration on each spec names a toolchain defined in
+`configs/mpi/site-mpi/toolchains.yaml`; toolchains belong to the MPI provider
+scope, not to the environment. A Tier 0 author copies that toolchain file in
+alongside the other scopes — see §Detailed Scenario: Generic Linux HPC With
+Site MPI for the file's contents and the rationale.
 
 Run Spack directly:
 
@@ -4852,12 +4852,14 @@ templates:
     version: "0.4.2"                           # null when name is manual
   applied_narrowing:                           # null when no per_system block matched profile.system.name
     system: example-cray                       # which per_system.<system> key matched
-    builds:                                    # one entry per build that was narrowed
+    builds:                                    # one entry per build whose narrowing dropped at least one candidate
       gpu:
         dropped_lanes: ["gcc-gpu-craympich-gfx942"]
-        axis: gpu_arch
-        kept:    ["gfx90a"]
-        dropped: ["gfx942"]
+        narrowed_by:                           # one entry per axis that actually dropped a contract-resolved candidate;
+                                               # per_system axes whose narrowing was a no-op on this profile are not recorded
+          gpu_arch:
+            kept:    ["gfx90a"]
+            dropped: ["gfx942"]
 
 # ── Build-context (filled at publish; null in draft) ────────────────────
 spack:
@@ -5403,7 +5405,7 @@ resolved_lanes:
 ```
 
 Eight lanes — the fully populated CSE shape from §Lane Matrix Sizing for this
-system. Validate:
+system.
 
 If this release should build only CCE and GNU for CPU lanes, and only GNU host +
 Cray MPICH for one AMD GPU architecture, add a system-scoped narrowing block:
@@ -5457,6 +5459,9 @@ examples complete; when applying the `per_system` narrowing above, omit
 `gcc/gpu-craympich-gfx942` from the rendered tree listing, the fan-out `srun`
 loop, and the verify/push loop.
 
+Validate the full file, including the `per_system` block when present, before
+rendering:
+
 ```bash
 $ stack-validate \
     --profile systems/example-cray/profile.yaml \
@@ -5466,6 +5471,7 @@ PASS  every build request resolves or is explicitly skipped
 PASS  every resolved lane.runtime_node_type resolves in profile.node_types
 PASS  every resolved lane.compiler resolves in normalized compiler inventory
 PASS  every spec source exists and satisfies the contract spec kind
+PASS  every per_system narrowing name resolves in the profile or contract
 ```
 
 ### Phase 3 — Render
