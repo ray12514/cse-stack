@@ -14,15 +14,16 @@ the matching schema; never the other way around.
 | Schema | Source design section | Status |
 |---|---|---|
 | `profile-v1.json` | `docs/spack_stack_generation_design_v6.md` § `profile.yaml` (line 448) | **landed** |
-| `stack-v1.json` | `docs/spack_stack_generation_design_v6.md` § `stack.yaml` (line 672) | TBD — follow-up plan |
-| `stack-defaults-v1.json` | `docs/spack_stack_generation_design_v6.md` § Stack Defaults Merge Rules (line 1255+) | TBD |
-| `template-contract-v1.json` | `docs/spack_stack_generation_design_v6.md` § Template Contract Files (line 1045) | TBD |
-| `package-set-v1.json` | `docs/spack_stack_generation_design_v6.md` § Package Sets (line 1490) | TBD |
-| `release-manifest-v1.json` | `docs/spack_stack_generation_design_v6.md` § Release Manifest Schema (line 5088) | TBD |
+| `stack-v1.json` | `docs/spack_stack_generation_design_v6.md` § `stack.yaml` (line 872+) | **landed** |
+| `stack-defaults-v1.json` | `docs/spack_stack_generation_design_v6.md` § Stack Defaults Merge Rules (line 1400+) | **landed** |
+| `template-contract-v1.json` | `docs/spack_stack_generation_design_v6.md` § Template Contract Files (line 1140) | **landed** |
+| `package-set-v1.json` | `docs/spack_stack_generation_design_v6.md` § Package Sets (line 1490) | **landed** |
+| `release-manifest-v1.json` | `docs/spack_stack_generation_design_v6.md` § Release Manifest Schema (line 5088) | **landed** |
 
-`profile-v1.json` landed as the prototype to validate the conversion
-approach. The other five follow the same conventions and ship in a
-follow-up plan.
+All six canonical schemas are now in place. They follow the same
+conventions; the validation harness under `.validation/` runs each one
+against positive and negative examples and exits 0 only when every check
+passes.
 
 ## Conventions
 

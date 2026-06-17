@@ -1,0 +1,83 @@
+# Canonical v6 (CSE) template contract.
+# Derived from docs/spack_stack_generation_design_v6.md § Template Contract Files (lines ~1255+).
+
+schema_version: 1
+
+build_classes:
+  core:
+    lane_kind: core
+    package_set_kind: core
+    default_target: foundation
+    requires: [runtime_cpu]
+
+  serial:
+    lane_kind: serial
+    package_set_kind: serial
+    default_target: payload_default
+    requires: [runtime_cpu]
+
+  mpi:
+    lane_kind: mpi
+    package_set_kind: mpi
+    default_target: payload_default
+    requires: [runtime_cpu, mpi]
+
+  gpu:
+    lane_kind: gpu
+    package_set_kind: gpu
+    default_target: payload_default
+    requires: [runtime_gpu, mpi, gpu_toolkit]
+
+toolchains:
+  cse-core:
+    compiler: each_cse_core_compiler
+    mpi: none
+    gpu_toolkit: none
+
+  cse-serial-default:
+    compiler: each_cse_serial_compiler
+    mpi: none
+    gpu_toolkit: none
+
+  cse-mpi-default:
+    compiler: each_cse_mpi_compiler
+    mpi: platform_then_stack_mpi
+    gpu_toolkit: none
+
+  cse-gpu-default:
+    compiler: gnu_host_default
+    mpi: platform_mpi_required
+    gpu_toolkit: prefer_platform
+
+  cse-craympich-cuda:
+    compiler: each_cse_mpi_compiler
+    mpi: cray-mpich
+    gpu_toolkit: cudatoolkit
+    allowed_compilers: [gcc, aocc, nvhpc]
+
+node_selectors:
+  cpu:
+    match: runtime_without_gpu
+  gpu:
+    match: runtime_with_gpu
+
+gpu_selectors:
+  mi250x:
+    vendor: amd
+    arch_target: gfx90a
+    spack:
+      amdgpu_target: gfx90a
+  a100:
+    vendor: nvidia
+    arch_target: sm_80
+    spack:
+      cuda_arch: "80"
+
+target_policies:
+  foundation:
+    resolve: baseline_x86_64_v3
+    hard_require: false
+
+  payload_default:
+    resolve: runtime_preferred
+    hard_require: false

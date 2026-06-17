@@ -1,0 +1,99 @@
+# Canonical example: draft release manifest right after `spack-composer render`.
+# Build-context fields are null (will be filled by publish-manifest after build + verify).
+
+schema_version: 1
+phase: draft
+
+release:
+  name: "2026.06"
+  rendered_at: "2026-06-14T18:42:00Z"
+  promoted_at: null
+  promoted_by: null
+
+stack:
+  name: cse
+  source_repo: "git@gitlab:stacks/spack-composer"
+  source_commit: "0375b16fdeadbeef0123456789abcdef01234567"
+  source_dirty: false
+
+profile:
+  path: "systems/example-cray/profile.yaml"
+  digest: "sha256:b13c2e0000000000000000000000000000000000000000000000000000000000"
+  system_name: "example-cray"
+
+stack_file:
+  path: "stacks/cse/stack.yaml"
+  digest: "sha256:f421a70000000000000000000000000000000000000000000000000000000000"
+
+package_sets:
+  - name: core-foundation
+    path: "package-sets/core-foundation.yaml"
+    digest: "sha256:5510dc0000000000000000000000000000000000000000000000000000000000"
+  - name: science-full
+    path: "package-sets/science-full.yaml"
+    digest: "sha256:99a1be0000000000000000000000000000000000000000000000000000000000"
+
+templates:
+  set: v6
+  digest: "sha256:e2a5e00000000000000000000000000000000000000000000000000000000000"
+  defaults_digest: "sha256:6f1b9c0000000000000000000000000000000000000000000000000000000000"
+  contract_digest: "sha256:58c1a30000000000000000000000000000000000000000000000000000000000"
+  render_tool:
+    name: "spack-composer render"
+    version: "0.4.2"
+  applied_narrowing:
+    system: example-cray
+    builds:
+      gpu:
+        dropped_lanes: ["gcc-gpu-craympich-gfx942"]
+        narrowed_by:
+          gpu_arch:
+            kept: ["gfx90a"]
+            dropped: ["gfx942"]
+
+spack: null
+build_host: null
+
+lanes:
+  - name: gcc-core
+    source_build: core
+    env_path: "environments/gcc/core"
+    kind: core
+    compiler: gcc
+    target: x86_64_v3
+    runtime_node_type: cpu_compute
+    spec_source: "package_set:core-foundation"
+    view_root: "/shared/stack/releases/2026.06/example-cray/cse/views/gcc/core"
+    package_module_root: "/shared/stack/releases/2026.06/example-cray/cse/modules/gcc/core"
+    lockfile: null
+    lockfile_digest: null
+    install_root: null
+    provenance_summary: null
+    platform_module_prereqs: null
+
+  - name: cce-mpi-craympich
+    source_build: mpi
+    env_path: "environments/cce/mpi-craympich"
+    kind: mpi
+    compiler: cce
+    target: zen3
+    runtime_node_type: cpu_compute
+    spec_source: "package_set:science-full"
+    view_root: "/shared/stack/releases/2026.06/example-cray/cse/views/cce/mpi-craympich"
+    package_module_root: "/shared/stack/releases/2026.06/example-cray/cse/modules/cce/mpi-craympich"
+    lockfile: null
+    lockfile_digest: null
+    install_root: null
+    provenance_summary: null
+    platform_module_prereqs: null
+
+skipped_builds: []
+
+buildcache:
+  planned_destinations:
+    - name: payload
+      url: "file:///shared/stack/buildcache/payload/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/example-cray"
+  signed: false
+
+verification: null
+previous_release: null

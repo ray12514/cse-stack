@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spack-composer.example/schemas/package-set-v1.json",
+  "title": "Spack stack package set (v1)",
+  "description": "A named list of root specs grouped by purpose. Referenced from stack.yaml.builds[*].package_set. Mirrors docs/spack_stack_generation_design_v6.md § Package Sets.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Package-set schema version. v1 is this file."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Set name. Must match the filename stem (e.g., a file named science-full.yaml has name: science-full)."
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["canonical", "smoke", "experimental"],
+      "description": "Tier guard. canonical = production; smoke = CI; experimental = transient. A stack.yaml build referencing a smoke set fails render-time validation unless explicitly opted in."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable purpose. Required so maintainers can identify the set at a glance."
+    },
+    "kinds": {
+      "type": "array",
+      "description": "Package-set kinds this set can satisfy. Open vocabulary; the contract resolver matches these against build_classes[*].package_set_kind. CSE uses serial/mpi/gpu/core.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "specs": {
+      "type": "object",
+      "description": "Root specs by package-set kind. Keys are either 'any' (specs identical across every kind) or a kind name appearing in `kinds`. Values are arrays of Spack spec strings.",
+      "minProperties": 1,
+      "patternProperties": {
+        "^(any|[a-z][a-z0-9_-]*)$": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "provenance_hints": {
+      "type": "object",
+      "description": "Optional overrides for the render-step provenance derivation. Keys are package names; values are provenance classes.",
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9._-]*$": {
+          "type": "string",
+          "enum": ["Stack-built", "Platform-backed", "Site-external", "Spack-built"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "notes": {
+      "type": "string",
+      "description": "Free-form notes for maintainers."
+    }
+  },
+  "required": ["schema_version", "name", "tier", "description", "kinds", "specs"],
+  "additionalProperties": false
+}

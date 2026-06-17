@@ -970,6 +970,16 @@ release:                                        # O - what to save per release; 
   retain_previous: 2                            # O - default 2; previous releases kept loadable
   promotion: gated_manual                       # O - gated_manual (default) | auto
 
+package_repositories:                           # O - internal Spack package repos to register for this stack;
+                                                #     normally inherited from stack-defaults.yaml. The user
+                                                #     stack may add new entries or replace the defaults list
+                                                #     (lists replace, per the merge rules). Render emits
+                                                #     repos.yaml from the resolved selection.
+  - name:      cse                              # R - repository name
+    namespace: cse                              # R - Spack package namespace
+    path:      package-repos/cse                # R - path under the stack source tree
+    priority:  before_builtin                   # O - before_builtin (default) | after_builtin
+
 helpers:                                        # O - maintainer recommendations on helper use
   # Values: preferred | available | disabled. These are recommendations only;
   # the manual workflow remains valid regardless. A stack can never force a
@@ -1015,6 +1025,7 @@ reaches Spack config follows this map.
 | `release.save_lockfiles` | whether `spack.lock` is copied into `releases/<date>/` |
 | `release.save_manifest` | whether `release-manifest.yaml` is emitted |
 | `release.promotion` | whether Ansible swaps the `current` symlink automatically or waits for approval |
+| `package_repositories[*]` | internal Spack package repositories registered for this stack; rendered into `repos.yaml`. Normally inherited from `stack-defaults.yaml`; user entries replace the defaults list. |
 
 Source Contract Rubric:
 

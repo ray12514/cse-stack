@@ -1,0 +1,111 @@
+# Canonical CSE multi-build stack, derived from
+# docs/spack_stack_generation_design_v6.md § stack.yaml reference schema (lines ~872-980).
+
+schema_version: 1
+name: cse
+
+profile_contract:
+  schema_version: 1
+
+templates:
+  set: v6
+
+spack:
+  version: ">=1.1.1,<1.2"
+
+modules:
+  format: tcl
+  additional_formats: []
+  exposure: front_door
+  init_module: cse-init
+  module_root: CSE
+  publish_root: null
+  hierarchy_style: collapsed
+  expose_provenance: true
+  platform_module_policy: prereq
+
+builds:
+  - name: core
+    class: core
+    package_set: core-foundation
+    specs: null
+    toolchain: cse-core
+    nodes: cpu
+    expand: one
+    publish: true
+    required: false
+
+  - name: serial
+    class: serial
+    package_set: science-full
+    specs: null
+    toolchain: cse-serial-default
+    nodes: cpu
+    expand: one
+    publish: true
+
+  - name: mpi
+    class: mpi
+    package_set: science-full
+    specs: null
+    toolchain: cse-mpi-default
+    nodes: cpu
+    expand: one
+    publish: true
+
+  - name: gpu
+    class: gpu
+    package_set: science-full
+    specs: null
+    toolchain: cse-gpu-default
+    nodes: gpu
+    expand: per_gpu_arch
+    publish: true
+
+per_system:
+  example-cray:
+    builds:
+      mpi:
+        compilers: [gcc, cce]
+        mpi: [cray-mpich]
+      gpu:
+        compilers: [gcc]
+        mpi: [cray-mpich]
+        gpu_arch: [gfx90a]
+
+externals:
+  compilers: prefer_platform
+  mpi: prefer_platform
+  openssl: system
+  curl: system
+  fabric_userspace: prefer_platform
+  gpu_toolkit: prefer_platform
+
+foundation_pins:
+  zlib: "1.3.1"
+  xz: "5.4.6"
+  zstd: "1.5.6"
+
+buildcache:
+  spack_generation: "spack-{spack_version}/repo-{package_repo_generation}"
+  foundation_lane: "foundation/{os_id}/glibc-{glibc}/{spack_generation}/{baseline_target}"
+  payload_lane: "payload/{os_id}/glibc-{glibc}/{spack_generation}/{system}"
+  signed: false
+  push_after_every_step: true
+
+release:
+  save_lockfiles: true
+  save_manifest: true
+  retain_previous: 2
+  promotion: gated_manual
+
+helpers:
+  inspector: available
+  render: available
+  ansible: available
+
+package_repositories:
+  - name: cse
+    namespace: cse
+    path: package-repos/cse
+    priority: before_builtin
