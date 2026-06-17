@@ -1,0 +1,168 @@
+# Canonical example-cray profile, derived from
+# docs/spack_stack_generation_design_v6.md § profile.yaml reference schema (lines ~470-676).
+# Used by schemas/.validation/validate.py to round-trip-test profile-v1.json.
+
+schema_version: 1
+
+system:
+  name: example-cray
+  family: cray-rhel
+  description: "Cray EX, AMD Zen 3 + MI250X"
+
+os:
+  name: rhel
+  major: 8
+  minor: 9
+  glibc: "2.28"
+
+fabric:
+  type: slingshot
+  generation: cxi
+  drivers:
+    - { name: rdma-core, version: "29.0", prefix: /usr }
+    - { name: cxi-userlibs, version: "1.0", prefix: /opt/cray/pe/cxi }
+  userspace:
+    - { name: libfabric, version: "1.20", prefix: /opt/cray/libfabric/1.20 }
+    - { name: ucx, version: "1.15", prefix: /usr }
+
+modules_system:
+  tool: tcl
+  version: "4.7"
+
+vendor_cray:
+  pe_version: "8.1.29"
+  cce:
+    version: "17.0.1"
+    prefix: /opt/cray/pe/cce/17.0.1
+    modules: [PrgEnv-cray, cce/17.0.1]
+  gcc:
+    version: "13.3.0"
+    prefix: /opt/cray/pe/gcc-native/13
+    modules: [PrgEnv-gnu, gcc-native/13]
+  rocmcc:
+    version: "6.0.0"
+    prefix: /opt/rocm-6.0.0
+    modules: [PrgEnv-amd, rocm/6.0.0]
+  cray_mpich:
+    version: "8.1.29"
+    flavors:
+      cce:
+        prefix: /opt/cray/pe/mpich/8.1.29/ofi/cray/17.0
+        modules: [cray-mpich/8.1.29]
+      gcc:
+        prefix: /opt/cray/pe/mpich/8.1.29/ofi/gnu/13.3
+        modules: [cray-mpich/8.1.29]
+      rocmcc:
+        prefix: /opt/cray/pe/mpich/8.1.29/ofi/amd/6.0
+        modules: [cray-mpich/8.1.29]
+  libsci:
+    version: "23.12.5"
+    prefix: /opt/cray/pe/libsci/23.12.5
+
+gpu_toolkit_modules:
+  rocm:
+    version: "6.0.0"
+    module: rocm/6.0.0
+    prefix: /opt/rocm-6.0.0
+    spack_components:
+      - { package: hip,          prefix: /opt/rocm-6.0.0/hip }
+      - { package: hsa-rocr-dev, prefix: /opt/rocm-6.0.0 }
+      - { package: comgr,        prefix: /opt/rocm-6.0.0 }
+      - { package: rocblas,      prefix: /opt/rocm-6.0.0 }
+      - { package: hipblas,      prefix: /opt/rocm-6.0.0 }
+      - { package: hipsparse,    prefix: /opt/rocm-6.0.0 }
+      - { package: rocprim,      prefix: /opt/rocm-6.0.0/rocprim }
+      - { package: llvm-amdgpu,  prefix: /opt/rocm-6.0.0 }
+
+filesystem:
+  install_tree_candidates:
+    - path: /shared/stack/spack/opt
+      type: lustre
+      locks_honored: true
+      free_gb: 50000
+  source_cache_candidate: /shared/stack/spack/source-cache
+  buildcache_candidate:   /shared/stack/buildcache
+
+node_types:
+  login:
+    role: build_host
+    description: "Cray login node; shared workspace, no GPU"
+    cpu:
+      detected: zen2
+      preferred: zen2
+      alternates: []
+    gpu: null
+    build_stage:
+      - path: $tempdir/$user/spack-stage
+        visibility: shared
+        writable: true
+        throughput_class: medium
+
+  cpu_compute:
+    role: runtime
+    description: "CPU compute partition, Zen3"
+    cpu:
+      detected: zen3
+      preferred: zen3
+      alternates: [zen2]
+    gpu: null
+    build_stage:
+      - path: /local_scratch/$user/spack-stage
+        visibility: compute-only
+        writable: true
+        free_gb: 800
+        free_inodes: 10000000
+        mount_opts: [rw]
+        throughput_class: fast
+      - path: $tempdir/$user/spack-stage
+        visibility: compute-only
+        writable: true
+
+  gpu_compute_mi250x:
+    role: runtime
+    description: "GPU compute, MI250X (gfx90a), Zen3 host"
+    cpu:
+      detected: zen3
+      preferred: zen3
+    gpu:
+      vendor: amd
+      driver_version: "6.0"
+      toolkit_ceiling: "6.0.0"
+      arch_target: gfx90a
+      cuda_compat_available: false
+    build_stage:
+      - path: /local_scratch/$user/spack-stage
+        visibility: compute-only
+        writable: true
+        throughput_class: fast
+
+  gpu_compute_mi300a:
+    role: runtime
+    description: "GPU compute, MI300A (gfx942), Zen4 host"
+    cpu:
+      detected: zen4
+      preferred: zen4
+    gpu:
+      vendor: amd
+      driver_version: "6.1"
+      toolkit_ceiling: "6.1.0"
+      arch_target: gfx942
+    build_stage:
+      - path: /local_scratch/$user/spack-stage
+        visibility: compute-only
+        writable: true
+        throughput_class: fast
+
+capabilities:
+  lanes_capable:
+    - { compiler: cce,    lane: core,             runtime_node_types: [login, cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
+    - { compiler: cce,    lane: serial,           runtime_node_types: [cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
+    - { compiler: cce,    lane: mpi-craympich,    runtime_node_types: [cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
+    - { compiler: gcc,    lane: core,             runtime_node_types: [login, cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
+    - { compiler: gcc,    lane: serial,           runtime_node_types: [cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
+    - { compiler: gcc,    lane: mpi-craympich,    runtime_node_types: [cpu_compute, gpu_compute_mi250x, gpu_compute_mi300a] }
+    - { compiler: gcc,    lane: gpu-craympich-gfx90a,  runtime_node_types: [gpu_compute_mi250x] }
+    - { compiler: gcc,    lane: gpu-craympich-gfx942,  runtime_node_types: [gpu_compute_mi300a] }
+    - { compiler: rocmcc, lane: core,             runtime_node_types: [gpu_compute_mi250x, gpu_compute_mi300a] }
+  gpu_lane_supported: true
+  fabric_class: vendor_tuned

@@ -24,3 +24,6 @@ profiles/*.yaml
 request.json
 manifest.json
 artifacts/
+
+# Schema validation dev venv (recreated locally, not committed)
+.schema-venv/

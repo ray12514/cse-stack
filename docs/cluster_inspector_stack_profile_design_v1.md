@@ -341,6 +341,49 @@ extras:
 Hints are inputs to the inspector, not replacements for the profile. The stack
 renderer consumes only `profile.yaml`.
 
+### Iterative Bring-Up Loop
+
+Bringing up a new system follows a short discover-narrow-verify loop. The
+first run almost never produces a final profile — module-name heuristics
+will pick up entries that look like compilers or MPIs but are not real
+choices for the stack (`gcc-data/9.3`, `gcc-toolset/12`, intermediate
+`cudatoolkit/11.x` versions). The hints file converges quickly:
+
+1. **First run, no hints.** Run `cluster-inspector profile --system <name>
+   --node-type ...` without `--hints`. The inspector auto-discovers
+   candidates, verifies the load-and-probe successes, and writes a draft
+   `profile.yaml`. Diagnostics name the rejected candidates and the
+   ambiguous ones.
+2. **Review.** Read the draft profile and the diagnostics. Decisions to
+   make: which compiler modules are real CSE compilers; which MPI
+   versions the stack supports; which GPU toolkit module is the one the
+   stack should use; which fabric userspace modules matter.
+3. **Author hints.** Write `systems/<name>/inspector-hints.yaml` with
+   `include:` lists (canonical positive sets) and `exclude_patterns:`
+   (categorical drops like `gcc-data/*`). Add `extras:` entries for
+   anything auto-discovery missed.
+4. **Re-run with hints.** `cluster-inspector profile --system <name>
+   --hints systems/<name>/inspector-hints.yaml ...`. The profile narrows
+   to the hint-approved set.
+5. **Verify and iterate.** Run `cluster-inspector verify <profile.yaml>`
+   to confirm schema and capability coverage. Repeat steps 2–4 until the
+   profile is clean.
+6. **Commit.** `profile.yaml` and `inspector-hints.yaml` go into source
+   control together. Both are durable artifacts; the hints file is the
+   committed override policy for this system.
+
+The loop typically converges in two or three rounds on a fresh Cray
+system, one or two on a generic Linux HPC system. PE upgrades and driver
+bumps after that require a hints touch-up only if the upgrade changes a
+module-naming convention; otherwise re-running the inspector against the
+same hints just refreshes versions in place.
+
+**What does not require iteration.** Node-type-specific facts (CPU
+target, GPU arch, build-stage paths) come from per-node probes and are
+not affected by the hints file. They typically land correct on the first
+run and only re-probe when the node class changes (a new GPU partition,
+a kernel/glibc bump).
+
 ## What To Extract From The Existing `clusterinspector` Repo
 
 The older repo contains useful implementation material, but its product shape is

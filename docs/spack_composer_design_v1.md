@@ -97,21 +97,25 @@ These are *not* `spack-composer`'s job:
 
 ## Runtime Distribution
 
-`spack-composer` ships as a pip-installable Python package. The packaging
-constraints differ from `cluster-inspector`:
+`spack-composer` is built on a Python-capable host (developer laptop or
+the existing CSE environment on the HPC) and shipped as a single
+self-contained artifact. Both spack-composer and cluster-inspector end
+up as one-file deployments — they get there by different mechanisms,
+but the operational property at the target is the same.
 
 | Concern | spack-composer | cluster-inspector |
 |---|---|---|
-| Target host | Maintainer laptop, CI runner, optionally a build host with Python. | Restricted HPC login or compute node, no source checkout. |
-| Distribution | `pip install spack-composer` from an internal index, or `pip install` from a wheel artifact. | Single Go binary copied onto the target. |
-| Self-contained | Python package + dependencies pinned at release time. Resource files (template contract schema, manifest schema, jinja base templates) shipped in the package and loaded via `importlib.resources`. | Resource files embedded in the Go binary via `embed`. |
-| Network | None required at runtime. Internal package index used at install time. | None required at runtime. |
+| Build host | Developer laptop or the CSE env on the HPC. Either works; both have Python and package access. | Developer laptop with Go toolchain. |
+| Runtime artifact | A single shiv-built `.pyz` (`spack-composer.pyz`) plus the `spack-build` companion script, shipped together in a release tarball. | A single Go binary. |
+| Distribution to target | `scp` the release tarball, `tar xzf`, run the `.pyz` directly. No `pip install` on the target. | `scp` the binary; run it. |
+| Self-contained | Runtime deps (PyYAML, Jinja2, MarkupSafe, fastjsonschema, click, and any others on the committed surface) are bundled inside the `.pyz`. The target needs only Python 3.9. | Resource files embedded in the Go binary via `embed`. The target needs nothing. |
+| Network | None required at runtime. None required at install time on the target. | None required at runtime. |
 | Spack required | No (`render` and `validate` never call Spack). Optional for `validate-template-set` Phase 2. | No. |
 
-The package must not read schema or template-base files from the source
-checkout. After install, the only inputs are command-line arguments, the
-stack repository the operator points at, and resource files embedded in
-the package.
+The package must not read schema or template-base files from a source
+checkout. After build, the only runtime inputs are command-line
+arguments, the stack repository the operator points at, and resource
+files embedded in the `.pyz` and loaded via `importlib.resources`.
 
 ## Implementation Language Decision
 
@@ -126,18 +130,25 @@ Rationale:
   fit for the `templates/<set>/configs/...` and `environments/...` tree.
   Go's `text/template` is less ergonomic for the macro-heavy templates a
   real template set uses.
-- Schema validation libraries (`pydantic`, `jsonschema`) are mature and
-  ergonomic for the layered YAML the renderer consumes.
-- `spack-composer` runs on laptops and CI runners. It does not need to be
-  copied onto a restricted HPC host the way `cluster-inspector` does. The
-  single-binary distribution argument that decided Go for the inspector
-  does not apply here.
+- Schema validation libraries are mature and ergonomic for the layered
+  YAML the renderer consumes. `fastjsonschema` validates against the
+  canonical JSON Schemas in `schemas/`; typed access is via plain
+  `dataclasses` or `pydantic` (decision deferred to Phase 1, see Open
+  Questions — the choice affects the `.pyz` platform matrix).
+- `spack-composer` is built on a Python-capable host and shipped to the
+  target as a self-contained `.pyz` produced by `shiv`. The
+  one-file-on-target property that decided Go for the inspector is
+  preserved for the composer through a different mechanism: shiv bundles
+  the source plus every runtime dependency wheel into a single executable
+  zipapp, so the target needs only a stdlib Python 3.9 to run it.
 - A Python tool is easier to extend from a maintainer who already maintains
   a `package.py` recipe than a Go tool would be.
 
 Stack maintainers do not need to know Go to maintain templates, but they
 will routinely read and occasionally extend `spack-composer`. Choosing
-Python keeps that path open.
+Python keeps that path open. The self-containment constraint is met at
+release time (via shiv), not at language choice — both tools satisfy the
+same "one file lands on the target" property by different means.
 
 ## Relationship To The Stack Design
 
@@ -480,9 +491,11 @@ it.
   no `os.system`, no filesystem reads outside `templates/<set>/`, no
   network. The template context is the frozen `ctx` dict from the
   pseudo-code; templates may read its keys but cannot extend it.
-- Schema validation uses `pydantic` models generated from the JSON
-  schemas under `spack_composer/schemas/`. Profile, stack, package set,
-  contract, defaults, and manifest each have a model.
+- Schema validation runs against the JSON Schemas under
+  `spack_composer/schemas/` via `fastjsonschema`. Typed access is via a
+  per-input model class (profile, stack, package set, contract,
+  defaults, manifest); whether those are `dataclasses` or pydantic
+  models is a Phase 1 decision (see Open Questions).
 - Determinism: YAML output uses a stable dumper (sorted keys at the
   per-block level chosen for review, not insertion order); template
   rendering never calls `time.time()` or `random`. Release timestamps are
@@ -683,26 +696,52 @@ invocation; `spack-build` knows nothing about template rendering.
 | Argument | Purpose |
 |---|---|
 | `--workspace <dir>` | Required. The rendered workspace produced by `spack-composer render`. |
-| `--spack-root <dir>` | Optional. Path to a Spack checkout to source. If omitted, `spack` must already be on `$PATH`. |
+| `--spack-root <dir>` | Optional. Path to a Spack checkout. The script sources `<dir>/share/spack/setup-env.sh` before any work. If omitted, `spack` must already be on `$PATH` (typical when a site module provides it). |
 | `--lanes <glob>` | Optional. Lane filter, e.g. `gcc/*` or `gcc/mpi-craympich`. Defaults to all lanes in the workspace. |
 | `--reports <dir>` | Optional. Where to write per-lane reports and the manifest-feed YAML files. Defaults to `<workspace>/reports/`. |
 | `--jobs <n>` | Optional. `spack install -j <n>` parallelism. Defaults to half the host's CPU count. |
 | `--skip-push` | Optional. Skip the buildcache push step (useful for laptop test runs). |
 | `--fail-fast` | Optional. Exit on the first lane failure instead of continuing through all lanes. Default is continue-and-report. |
 
+### Pre-flight: Spack version check
+
+Before any lane runs, the script:
+
+1. Sources `<spack-root>/share/spack/setup-env.sh` if `--spack-root` is
+   given; otherwise relies on `$PATH`.
+2. Reads `templates/<set>/stack-defaults.yaml.spack.floor` from the
+   rendered workspace (the floor is mandatory in the template defaults).
+3. Reads `stack.yaml.spack.version` from the rendered workspace (the pin
+   is optional and may tighten but never widen the floor).
+4. Runs `spack --version` and compares against floor + pin.
+5. On mismatch, exits non-zero with a clear message naming the floor, the
+   pin (if any), the discovered version, and the install path. No lane
+   work begins.
+
+The Spack version actually used is captured into `verify-results.yaml` so
+`publish-manifest` can write it into `release-manifest.yaml.build_context.spack_version`.
+
+See v6 §Spack Version Floor for the three-layer version model
+(floor / pin / root) and the recommended multi-version on-disk layout.
+
 ### Per-lane flow
 
 For each lane the script does, in order:
 
 1. `spack -e <env> concretize --force` → writes `spack.lock`.
-2. `spack -e <env> install -j <n>` → installs every spec in the lock.
-3. Smoke test: for each entry in `stack.yaml.smoke[*]` (when present in
+2. `spack -e <env> fetch -D` → populates `source_cache` from internet or
+   from a source mirror declared in `configs/common/mirrors.yaml`. See v6
+   §Source Cold-Start On A New Or Air-Gapped Site for the three supported
+   patterns (build host has internet, login-node prefetch, fully
+   air-gapped via `spack mirror create`).
+3. `spack -e <env> install -j <n>` → installs every spec in the lock.
+4. Smoke test: for each entry in `stack.yaml.smoke[*]` (when present in
    the rendered workspace's effective stack), `spack -e <env> load <spec>
    && <smoke_command>`.
-4. `ldd` walk over installed binaries — drift detector, not a deploy gate.
-5. `spack -e <env> verify --files` — cross-check installed files against
+5. `ldd` walk over installed binaries — drift detector, not a deploy gate.
+6. `spack -e <env> verify --files` — cross-check installed files against
    the manifest.
-6. `spack -e <env> buildcache push <mirror>` per buildcache mirror declared
+7. `spack -e <env> buildcache push <mirror>` per buildcache mirror declared
    in the workspace's `configs/common/mirrors.yaml` (skipped under
    `--skip-push`).
 
@@ -746,14 +785,15 @@ workspace re-uses Spack's installed prefixes and skips work.
 
 ### Distribution
 
-- Shipped in the `spack-composer` Python package under
-  `src/spack_composer/scripts/spack-build`.
-- Installed onto `$PATH` by declaring it under
-  `[project.scripts]` *or* `data_files` in `pyproject.toml` (decision
-  deferred to Phase 1; both work).
+- Lives in the `spack-composer/` repo at `scripts/spack-build`.
+- Ships alongside the `.pyz` inside the release tarball
+  (`spack-composer-X.Y.Z.tar.gz`). On the target, the tarball extracts
+  to a directory containing both `spack-composer.pyz` and `spack-build`;
+  operators add that directory to `$PATH` once.
 - The script's only runtime dependencies are `bash`, `spack`, and standard
-  POSIX utilities (`awk`, `sed`, `find`, `ldd`). No Python is required at
-  build time.
+  POSIX utilities (`awk`, `sed`, `find`, `ldd`). No Python is required to
+  execute it — the script does not invoke `spack-composer.pyz`; it is
+  the `.pyz`'s sibling, not a wrapper.
 - The script is read-only on the rendered workspace except for
   `<workspace>/spack.lock` per lane (created by concretize),
   `<workspace>/.spack-env/` per lane (created by Spack), and the
@@ -777,6 +817,19 @@ Recommended layout for the new `spack-composer/` repo:
 spack-composer/
   pyproject.toml
   README.md
+  LICENSE                             # spack-composer's own license (Apache-2.0 recommended)
+  THIRD_PARTY.toml                    # manifest of bundled runtime deps + licenses
+  THIRD_PARTY_LICENSES/               # full license text per bundled dep
+    PyYAML.txt
+    Jinja2.txt
+    MarkupSafe.txt
+    fastjsonschema.txt
+    click.txt
+    # one .txt per runtime dep on the committed surface
+  scripts/
+    build-pyz.sh                      # release build: produces dist/spack-composer-X.Y.Z.tar.gz
+    generate-third-party.py           # regenerates THIRD_PARTY.toml + license texts from resolved wheels
+    spack-build                       # companion shell script; ships alongside the .pyz in the release tarball
   src/
     spack_composer/
       __init__.py
@@ -790,8 +843,9 @@ spack-composer/
         render.py
         validate.py
         publish_manifest.py
+        licenses.py                   # `spack-composer --licenses` implementation
       model/
-        profile.py                    # pydantic models for profile.v1
+        profile.py                    # typed models for profile.v1 (dataclasses or pydantic; Phase 1 decides)
         stack.py                      # stack.v1, stack_defaults.v1
         contract.py                   # template_contract.v1
         package_set.py
@@ -832,8 +886,8 @@ spack-composer/
       resources/
         # bundled non-schema resources loaded via importlib.resources
         renderer_identity.toml        # name + version emitted into manifest
-      scripts/
-        spack-build                   # companion shell script; installed onto $PATH
+        THIRD_PARTY.toml              # copied in at build time so the .pyz is self-describing
+        THIRD_PARTY_LICENSES/         # copied in at build time
   tests/
     fixtures/
       profiles/
@@ -851,50 +905,232 @@ spack-composer/
 ```
 
 The Python package is `spack_composer`, the CLI entry point is
-`spack-composer`. Resource files (schemas, starters) are loaded with
-`importlib.resources`, so the installed package does not need to locate
-files relative to a source checkout.
+`spack-composer`. Resource files (schemas, starters, the third-party
+manifest) are loaded with `importlib.resources`, so the installed `.pyz`
+does not need to locate files relative to a source checkout. The
+`THIRD_PARTY.toml` and `THIRD_PARTY_LICENSES/` at the repo root are the
+source of truth; `scripts/build-pyz.sh` copies them into
+`src/spack_composer/resources/` immediately before the shiv step so the
+runtime `.pyz` carries them.
 
 ## Packaging Plan
 
-- `pip install spack-composer` from an internal package index, or
-  `pip install spack_composer-*.whl` from a release artifact.
-- Python ≥ 3.10. Pinned dependency set in `pyproject.toml`.
-- Console-script entry point declared in `pyproject.toml`:
-  ```toml
-  [project.scripts]
-  spack-composer = "spack_composer.cli:main"
-  ```
-- The `spack-build` shell script is shipped as part of the same wheel and
-  installed onto `$PATH` (decision deferred between `[project.scripts]`
-  shim and `data_files` placement until Phase 1; both work).
-- Release artifacts:
-  - Source distribution (`.tar.gz`).
-  - Built wheel (`.whl`).
-  - Both signed if the deployment environment requires provenance.
-- Dependencies (minimum viable):
-  - `pydantic >= 2`
-  - `jinja2`
-  - `ruamel.yaml` (preserves key ordering and round-trips comments where
-    we want them — used for manifest in-place rewrite)
-  - `jsonschema` (for the JSON Schema files alongside pydantic models)
-  - `click` *or* `argparse` (CLI; choose one in Phase 1)
-- No Spack dependency: `spack-composer` neither imports Spack nor depends
-  on a Spack install. The optional `validate-template-set --concretize`
-  shells out to `spack` if found on `PATH`; otherwise it skips the
-  concretization step.
-- No network access at runtime.
+### Dev install
+
+`pip install -e .[dev]` from a checkout. Pulls runtime deps plus dev
+extras (pytest, ruff, shiv, build). Requires internet at dev time.
+
+### Release build
+
+A single script produces the release tarball:
+
+```bash
+cd spack-composer/
+scripts/build-pyz.sh
+# → dist/spack-composer-X.Y.Z.tar.gz containing:
+#     spack-composer.pyz        (shiv-built single-file Python artifact)
+#     spack-build               (companion shell script)
+#     README                    (3-line install / run instructions)
+#     LICENSE                   (spack-composer's own license)
+#     THIRD_PARTY.toml          (bundled-deps manifest)
+#     THIRD_PARTY_LICENSES/     (full license text per bundled dep)
+```
+
+The build host may be a developer laptop or the CSE env on the HPC —
+both work, because both have Python and package access. The script:
+
+1. Resolves the runtime dep set against `pyproject.toml`.
+2. Runs `scripts/generate-third-party.py` to refresh `THIRD_PARTY.toml`
+   and `THIRD_PARTY_LICENSES/`. Fails if any dep is missing from the
+   manifest or carries a license outside the allowlist (see §License
+   Compliance).
+3. Copies `THIRD_PARTY.toml` and `THIRD_PARTY_LICENSES/` into
+   `src/spack_composer/resources/` so they ship inside the `.pyz`.
+4. Builds the wheel (`python -m build --wheel`).
+5. Builds the `.pyz` with `shiv -e spack_composer.cli:main -c
+   spack-composer -p '/usr/bin/env python3' -o
+   dist/spack-composer.pyz dist/spack_composer-*.whl`.
+6. Packs `.pyz`, `spack-build`, `README`, `LICENSE`, `THIRD_PARTY.toml`,
+   and `THIRD_PARTY_LICENSES/` into the release tarball.
+
+### Target install
+
+```bash
+scp dist/spack-composer-X.Y.Z.tar.gz user@target:/shared/stack/
+ssh user@target 'cd /shared/stack && tar xzf spack-composer-X.Y.Z.tar.gz'
+ssh user@target 'chmod +x /shared/stack/spack-composer-X.Y.Z/spack-composer.pyz'
+ssh user@target '/shared/stack/spack-composer-X.Y.Z/spack-composer.pyz --help'
+```
+
+No `pip install` on the target. No internet on the target. No
+third-party Python packages required on the target — only Python 3.9
+stdlib.
+
+### `pyproject.toml`
+
+- `requires-python = ">=3.9"`
+- `dependencies = [<committed surface>]` — see the §Runtime Distribution
+  table for the canonical list (`PyYAML`, `Jinja2`, `MarkupSafe`,
+  `fastjsonschema`, `click`; `pydantic` v2 conditional, see Open
+  Questions).
+- `[project.optional-dependencies] dev = ["pytest", "ruff", "shiv",
+  "build", ...]`.
+- `[project.scripts] spack-composer = "spack_composer.cli:main"`.
+- License: `Apache-2.0` (recommendation; final confirmation in Phase 1).
+- Build backend: `setuptools` (widely available; matches the
+  clusterinspector precedent).
+
+### Spack dependency
+
+None. `spack-composer` neither imports Spack nor depends on a Spack
+install. The optional `validate-template-set --concretize` shells out
+to `spack` if found on `$PATH`; otherwise it skips the concretization
+step.
+
+### Network access at runtime
+
+None. The `.pyz` runs entirely from the bundled wheels plus stdlib.
+
+## License Compliance
+
+The `.pyz` bundles other people's code. To redistribute it cleanly the
+repo declares what is bundled, under what license, and the build
+pipeline enforces that the license set is acceptable before producing
+a release. The shipped `.pyz` carries the third-party license texts
+alongside the code.
+
+### Allowed licenses
+
+The build pipeline accepts these SPDX identifiers by default:
+
+- `MIT`
+- `BSD-2-Clause`, `BSD-3-Clause`
+- `Apache-2.0`
+- `ISC`
+- `Python-2.0` (PSF)
+- `MPL-2.0` (case-by-case; flag for review)
+
+Excluded by default — copyleft licenses that would create
+redistribution friction:
+
+- The GPL family (`GPL-2.0`, `GPL-3.0`, `AGPL-3.0`).
+- LGPL is conditionally allowed only when dynamically linked, which is
+  rare for Python deps; flag for review.
+
+A license outside the allowlist that the team decides to ship anyway
+requires a documented exemption entry inside `THIRD_PARTY.toml` with
+the rationale.
+
+### Source-of-truth manifest
+
+`THIRD_PARTY.toml` at the repo root is authoritative. One entry per
+runtime dependency:
+
+```toml
+[meta]
+generated_by = "scripts/generate-third-party.py"
+generated_at = "2026-06-17T18:00:00Z"
+
+[[dependency]]
+name = "PyYAML"
+version = "6.0.3"
+license_spdx = "MIT"
+project_url = "https://pyyaml.org/"
+source_url = "https://github.com/yaml/pyyaml"
+license_file = "THIRD_PARTY_LICENSES/PyYAML.txt"
+copyright = "Copyright (c) 2017-2024 Ingy döt Net; Copyright (c) 2006-2016 Kirill Simonov"
+purpose = "YAML read/write"
+
+[[dependency]]
+name = "Jinja2"
+version = "3.1.4"
+license_spdx = "BSD-3-Clause"
+project_url = "https://palletsprojects.com/p/jinja/"
+source_url = "https://github.com/pallets/jinja"
+license_file = "THIRD_PARTY_LICENSES/Jinja2.txt"
+copyright = "Copyright 2007 Pallets"
+purpose = "Template rendering"
+
+# ... one block per runtime dep
+```
+
+`THIRD_PARTY_LICENSES/<name>.txt` is the unmodified license text
+extracted from each bundled wheel's `LICENSE` / `LICENSE.txt` /
+`LICENSE.rst`. Never hand-edited.
+
+### Build-time enforcement
+
+`scripts/generate-third-party.py` is the single tool that maintains
+both files. It:
+
+1. Resolves `pyproject.toml`'s runtime deps to a concrete wheel set.
+2. Inspects each wheel's metadata for name, version, and license.
+3. Cross-checks against `THIRD_PARTY.toml`:
+   - Refuses to continue if a resolved dep is missing from the
+     manifest, or vice versa.
+   - Refuses to continue if any license falls outside the allowlist
+     and has no documented exemption.
+4. Refreshes `THIRD_PARTY_LICENSES/<name>.txt` from each wheel's
+   `LICENSE` file.
+5. Rewrites `THIRD_PARTY.toml` with the regenerated entries.
+
+`scripts/build-pyz.sh` runs this script as its first step and aborts
+the release if the manifest is out of sync or any license is
+unapproved.
+
+CI runs the same script on every PR and fails the build when
+`pyproject.toml` changes a runtime dep without a matching
+`THIRD_PARTY.toml` update.
+
+### What ships inside the `.pyz`
+
+The runtime artifact contains:
+
+- spack-composer source.
+- All bundled runtime dep wheels (resolved by shiv at build time).
+- `LICENSE` (spack-composer's own).
+- `THIRD_PARTY.toml`.
+- `THIRD_PARTY_LICENSES/` directory.
+
+### `spack-composer --licenses`
+
+A top-level CLI flag prints the bundled `THIRD_PARTY.toml` content.
+Operators can audit what they're running without unpacking the `.pyz`:
+
+```bash
+$ spack-composer --licenses
+spack-composer X.Y.Z
+Apache-2.0
+
+Bundled runtime dependencies:
+  PyYAML        6.0.3   MIT          (YAML read/write)
+  Jinja2        3.1.4   BSD-3-Clause (Template rendering)
+  MarkupSafe    2.1.5   BSD-3-Clause (Jinja2 dependency)
+  fastjsonschema 2.20.0 BSD-3-Clause (JSON Schema validation)
+  click         8.1.7   BSD-3-Clause (CLI dispatch)
+
+Full license texts ship inside the .pyz at
+  spack_composer/resources/THIRD_PARTY_LICENSES/
+```
+
+This makes compliance review possible without filesystem
+archaeology.
 
 ## Implementation Plan
 
-### Phase 1 — Skeleton + Render Seam
+### Phase 1 — Skeleton + Render Seam + Release Build
 
 - Create the `spack-composer/` repo with the layout above.
+- Author the initial `THIRD_PARTY.toml` and `THIRD_PARTY_LICENSES/`
+  for the committed runtime dep surface.
+- Author `scripts/generate-third-party.py` and `scripts/build-pyz.sh`.
+- Decide pydantic-v2 vs. dataclasses + fastjsonschema (see Open
+  Questions). The decision affects the .pyz platform matrix.
+- Confirm `spack-composer`'s own license (Apache-2.0 is the
+  recommendation).
 - Implement `cli.py` with all seven subcommand stubs returning "not yet
-  implemented" except `render`.
-- Implement the schema models (profile, stack, stack-defaults, contract,
-  package-set, manifest) as pydantic v2 classes generated from / aligned
-  with the JSON schemas under `schemas/`.
+  implemented" except `render`, plus the `--licenses` top-level flag.
+- Implement the schema models from the JSON schemas under `schemas/`.
 - Implement `render` against the v6 pseudo-code, using the deterministic
   YAML dumper and Jinja2 environment described above.
 - Implement `validate` as a re-use of the render pre-checks without
@@ -907,7 +1143,15 @@ Acceptance:
 - `spack-composer validate` produces a report for the same inputs and
   catches every render-time validation failure listed in v6's render
   invariant table.
-- The installed wheel runs without the source checkout.
+- `scripts/build-pyz.sh` produces `dist/spack-composer-X.Y.Z.tar.gz`
+  from a clean checkout in one command.
+- The shipped `.pyz` runs `spack-composer --help` on a vanilla Linux
+  Python 3.9 host with no other tooling installed.
+- `spack-composer --licenses` prints the bundled `THIRD_PARTY.toml`
+  content.
+- The build pipeline refuses to produce a release when
+  `THIRD_PARTY.toml` is out of sync with `pyproject.toml` or when any
+  bundled dep license is outside the allowlist without an exemption.
 
 ### Phase 2 — Maintainer Commands
 
@@ -989,8 +1233,17 @@ Acceptance:
 - `scaffold-templates` proposes a template set that passes
   `validate-template-set` after the operator fills the TODOs.
 - `validate-template-set` runs in CI on the fixture corpus on every PR.
-- `spack-composer` runs from the installed wheel without the source
-  checkout.
+- The release tarball is produced from a clean checkout in one command
+  (`scripts/build-pyz.sh`).
+- The shipped `.pyz` runs `spack-composer --help` on a vanilla Linux
+  Python 3.9 host with no other tooling installed (no `pip install`,
+  no internet).
+- `spack-composer --licenses` prints the bundled `THIRD_PARTY.toml`
+  manifest of runtime deps and their licenses.
+- The build pipeline refuses to produce a release when
+  `THIRD_PARTY.toml` is out of sync with `pyproject.toml` or when any
+  bundled dep license is outside the allowlist without a documented
+  exemption.
 - `cse-stack`'s Cray and Generic Linux HPC end-to-end flows reproduce
   through `spack-composer`.
 
@@ -1000,9 +1253,20 @@ Acceptance:
   manifest, package-set) carries a `schema_version`. The bump policy is
   not specified yet — does a Phase 2 schema change require a tool major
   bump? Probably yes for breaking changes; defer to the first real bump.
-- **CLI library.** `click` vs `argparse`. `click` is more ergonomic for
-  multi-command tools; `argparse` is zero-dependency. Pick in Phase 1
-  and capture the choice in `pyproject.toml`.
+- **pydantic vs. dataclasses for typed models.** Pydantic v2 has a
+  Rust-compiled core; using it means the release `.pyz` is
+  platform-specific (one build per target platform/Python ABI pair).
+  Plain dataclasses + `fastjsonschema` validation keeps the `.pyz`
+  universal across platforms. Phase 1 picks based on whether the typed-
+  model ergonomics outweigh the platform-matrix cost.
+- **Target platform matrix.** If deployment targets include non-x86_64
+  architectures (ARM HPC nodes are appearing), either the release
+  pipeline produces one `.pyz` per platform OR runtime deps are
+  constrained to pure-Python only. Phase 1 records the actual target
+  list and picks.
+- **spack-composer's own license.** Apache-2.0 is the recommended
+  default (permissive, attribution-friendly, common in HPC tooling).
+  Phase 1 confirms; the choice is set in `pyproject.toml` and `LICENSE`.
 - **Provenance derivation details.** `publish-manifest` derives the
   four-class provenance per spec from lockfile + profile + contract. The
   rules for "is this spec a Platform-backed external or a Site-external

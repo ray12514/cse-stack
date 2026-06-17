@@ -301,6 +301,87 @@ dry-run of a representative lane to confirm `include::`, `toolchains.yaml when:`
 and `concretizer: reuse:` settings resolve as written. The cost of the check is
 seconds; the cost of a silent feature mismatch is a misleading build.
 
+### Three-Layer Version Model
+
+The version constraint is split across three owners so each layer keeps its
+own concern:
+
+| Layer | Owner | Says what | Where it lives |
+|---|---|---|---|
+| **Floor** | Template maintainer | Minimum Spack version the template set's features require (e.g. `include::`, `toolchains.yaml when:`). | `templates/<set>/stack-defaults.yaml` → `spack.floor` (required when the template set is published). |
+| **Pin** (optional) | Package manager | A tighter version constraint for one stack — useful when a stack has only been tested against a specific Spack version. May tighten the floor; never widens it. | `stack.yaml` → `spack.version` (optional). |
+| **Root** (operational) | Site operator / CI | Where on disk Spack actually lives. Pure operator concern; the stack source never names a path. | `spack-build --spack-root <path>`. |
+
+A stack expresses *which Spack versions are acceptable*. The site expresses
+*where to find them*. Multiple Spack installs may coexist on disk;
+`--spack-root` picks the one to use, and `spack-build` refuses to run if
+that install's `spack --version` does not satisfy floor + pin.
+
+### Acquiring And Installing Spack
+
+`spack-composer` and v6 are silent on Spack acquisition by design — it is
+an operational decision per site. The supported patterns are:
+
+**Pattern 1 — Site module.** Spack is exposed as a module on the system
+(`module load spack/1.1.3`). Common on Cray sites. After load,
+`spack --version` reports the version and `which spack` reports the prefix.
+`spack-build` uses `$PATH` (no `--spack-root` needed).
+
+**Pattern 2 — Per-version clone (recommended for sites that want multiple
+versions side-by-side).** One git clone per pinned tag, kept under a
+shared directory under operator control:
+
+```text
+/shared/stack/spack/
+  1.1.1/        # git clone https://github.com/spack/spack.git . && git checkout v1.1.1
+  1.1.3/        # git clone https://github.com/spack/spack.git . && git checkout v1.1.3
+  1.2.0/        # ...
+  current -> 1.1.3        # optional convenience symlink; never the version-of-record
+```
+
+Each clone is immutable once installed: a version bump means a new
+directory, not a `git pull` in place. The convenience symlink is for human
+convenience only — `spack-build --spack-root` always points at the
+explicit pinned directory, never the symlink, so the manifest records
+what was actually used.
+
+To install one version:
+
+```bash
+mkdir -p /shared/stack/spack/1.1.3
+git clone https://github.com/spack/spack.git /shared/stack/spack/1.1.3
+cd /shared/stack/spack/1.1.3
+git checkout v1.1.3
+# verify
+./bin/spack --version
+```
+
+**Pattern 3 — Ansible-managed clone.** Same on-disk layout as Pattern 2,
+but the clone-and-checkout is automated in an Ansible role. Recommended
+when many build hosts need the same set of versions.
+
+### Pointing Tools At A Specific Install
+
+- **`spack-build`** (the committed default driver for stacks not on Ansible):
+  pass `--spack-root /shared/stack/spack/<version>`. The script sources
+  `<spack-root>/share/spack/setup-env.sh` and then runs `spack --version`,
+  compares against `templates/<set>/stack-defaults.yaml.spack.floor` and
+  `stack.yaml.spack.version`, and refuses to run on a mismatch. The version
+  used is captured into `verify-results.yaml`; `publish-manifest` lifts it
+  into `release-manifest.yaml.build_context.spack_version`.
+- **Ansible**: either calls `spack-build` per host (delegating the check),
+  or replicates the same floor+pin check using the same two source fields
+  before invoking Spack directly.
+- **Manual workflow**: an operator running bare Spack commands by hand is
+  responsible for running `spack --version` themselves and confirming
+  against the floor and any pin. The manual path remains executable but
+  carries the version-mismatch risk that the helpers eliminate.
+
+**Buildcache signing keys** are unrelated to Spack acquisition and stay
+deferred per the §Committed Decisions row (`buildcache.signed: false` is
+the v1 default). Key bootstrap is the topic to write when the first
+multi-tenant mirror appears.
+
 ## Repository Layout
 
 The repository layout should be generic enough to cover Cray systems and generic
@@ -797,6 +878,11 @@ profile_contract:                               # O - defaulted by template set 
 
 templates:                                      # R - which template set to render against
   set: v6                                       # R - template set name; matches templates/ on disk
+
+spack:                                          # O - Spack version constraint for this stack
+  version: ">=1.1.1,<1.2"                       # O - PEP-440-style constraint or exact version
+                                                #     tightens the template set's floor; never widens it
+                                                #     enforced by spack-build before any lane runs
 
 modules:                                        # O - user-visible module strategy; normally from stack-defaults.yaml
   format: tcl                                   # R - mandatory baseline; always `tcl` (only valid value)
@@ -1317,6 +1403,10 @@ schema_version: 1                              # R - defaults schema version (sa
 
 profile_contract:                              # O - inherited by user stack unless overridden
   schema_version: 1                            # O - profile schema version this template set targets
+
+spack:                                         # R - Spack version floor for this template set
+  floor: "1.1.1"                               # R - minimum Spack version the templates' features require
+                                               #     stack.yaml.spack.version may tighten this; never widen
 
 modules: { ... }                               # O - module system defaults (init_module, root, exposure)
 externals: { ... }                             # O - mpi posture, openssl/curl externalization, etc.
@@ -2641,6 +2731,12 @@ The two helpers (`spack-build` and Ansible) own *how* Spack is invoked.
 `spack-composer` itself never calls Spack and never reads host state during
 render. The split keeps render byte-deterministic and lets each site customize
 build orchestration without forking the render engine.
+
+**Version enforcement is owned by `spack-build`** (or by Ansible when it
+drives Spack directly). Before any lane runs, the driver compares the
+selected Spack install's `spack --version` against `stack-defaults.yaml.spack.floor`
+and the optional `stack.yaml.spack.version` pin; mismatches refuse to build.
+See §Spack Version Floor for the three-layer model.
 
 ### Template Render Context
 
@@ -4726,6 +4822,60 @@ change. Concretize once, fetch against that lockfile, then install from the same
 lockfile.
 
 Do not treat the build cache as one universal bucket. Use compatibility lanes.
+
+### Source Cold-Start On A New Or Air-Gapped Site
+
+Three supported acquisition patterns, in order of operational simplicity:
+
+**Pattern A — Build host has internet.** `spack-build` (or Ansible, or a
+human) runs `spack -e <env> fetch -D` per lane between concretize and
+install. Sources land in `source_cache` on shared storage and are reused
+across lanes and across releases. This is the default; no extra
+configuration.
+
+**Pattern B — Login node has internet, compute nodes do not.** Run
+`spack -e <env> concretize` and `fetch -D` on the login node against the
+shared `source_cache`. Submit `spack -e <env> install` to the compute
+nodes; install reads sources from the shared cache without touching the
+network. `spack-build` supports this by running concretize+fetch in its
+caller's shell and install per lane through `srun` / the configured
+scheduler when the operator passes lane-runner options.
+
+**Pattern C — Fully air-gapped site.** External-facing host fetches once,
+then ships a source mirror to the site:
+
+```bash
+# On an internet-capable gateway machine, after concretizing a
+# representative set of lanes on the same Spack version as the site:
+spack mirror create -d /tmp/site-mirror -D -a   # -D = include all deps
+tar czf site-mirror.tgz -C /tmp site-mirror
+
+# Transfer site-mirror.tgz to the air-gapped site by approved means.
+
+# At the site, unpack under shared storage and declare the mirror:
+tar xzf site-mirror.tgz -C /shared/stack/spack-mirror
+# Then add the mirror to the template set's
+# configs/common/mirrors.yaml so render emits it into every lane:
+#   mirrors:
+#     site-source: file:///shared/stack/spack-mirror
+```
+
+The renderer treats mirrors as ordinary scope content. The choice
+between Patterns A/B/C is operator policy expressed through which
+mirrors are declared in the template defaults or per-stack overrides.
+`spack-composer` and `spack-build` need no air-gap-specific flags;
+Spack's mirror resolution handles the rest.
+
+**Bootstrap order on a brand-new system.** Whichever pattern is chosen,
+the first build of a fresh release does:
+
+1. `spack-build` (or Ansible) runs concretize per lane — writes the lock.
+2. `spack-build` runs `spack fetch -D` per lane — populates `source_cache`
+   from internet (A/B) or from the local mirror (C).
+3. `spack-build` runs `spack install -j <n>` per lane — reads sources from
+   `source_cache`, builds, installs into `install_tree`.
+4. Later releases reuse populated `source_cache` and skip Pattern A/B
+   internet hits for already-fetched tarballs.
 
 ### Unsigned Buildcache: Why The Default Is Correct
 
