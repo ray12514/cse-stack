@@ -25,10 +25,10 @@ This design separates five concerns:
 | Stack intent | `stack.yaml` | What should be built and exposed to users |
 | Reusable Spack model | templates, config scopes, package sets | How Spack should ingest that intent |
 | Build engine | Spack | Concretize, install, generate modules/views, build caches |
-| Helpers | ClusterInspector, render helper, Ansible | Reduce labor, but remain optional |
+| Helpers | `cluster-inspector`, `spack-composer`, Ansible | Reduce labor, but remain optional |
 
-The stack must remain understandable and buildable without ClusterInspector,
-without a render helper, and without Ansible. Those tools reduce error and
+The stack must remain understandable and buildable without `cluster-inspector`,
+without `spack-composer`, and without Ansible. Those tools reduce error and
 operator burden, but the repository layout and stack contract remain sufficient
 on their own.
 
@@ -45,15 +45,17 @@ concept.
 | **Profile** | The system-facts document (`profile.yaml`). Platform reality only; no package intent. |
 | **Stack file** | The stack-intent document (`stack.yaml`). Stack policy only; no detected system facts. |
 | **Package set** | A named list of root specs grouped by purpose (`core-foundation`, `science-full`, `<stack>-apps`, etc.). One file per set under `package-sets/`. Referenced by name from `stack.yaml.builds[*].package_set`. |
+| **Package repository** | A Spack package repository owned by the stack, such as `package-repos/cse/`. Holds internal packages and recipe overrides. It is stack source, not system fact. Render emits `repos.yaml` so Spack sees it. |
 | **Template set** | The collection of Jinja-style templates the render step expands. Versioned by name (`v6`) and selected by `stack.yaml.templates.set`. |
 | **Template contract** | `templates/<set>/contract.yaml`. The finite vocabulary accepted by a template set for build classes, toolchains, node selectors, and target policies. `stack.yaml` names these values; the contract defines what they mean. |
 | **Stack defaults** | `templates/<set>/stack-defaults.yaml`. Template-owned defaults merged under a user's `stack.yaml` so package managers do not repeat module, externals, buildcache, and release boilerplate. |
+| **Profile corpus** | The set of committed `systems/*/profile.yaml` files for known systems. Maintainers use it to assess template coverage and scaffold new template support. |
 | **`per_system` block** | Optional system-scoped narrowing inside `stack.yaml`. It intersects a generic build request with profile names for one target system without polluting the portable top-level build intent. |
 | **Starter stack** | A small copy-and-edit `stack.yaml` under `stacks/_starters/` that shows a common adoption shape such as one package, CPU+GPU app, or CSE-style package-set reuse. |
 | **Lane** | A single Spack environment representing one (compiler, kind) pairing within a stack. Examples: `gcc/core`, `cce/serial`, `cce/mpi-craympich`, `gcc/gpu-craympich-gfx90a`. A lane has its own `spack.yaml`, its own lockfile, its own view, and its own module root. |
 | **Lane kind** | A template-selected lane category. The default taxonomy is `core` / `serial` / `mpi` / `gpu`, but a simple stack may use only one payload lane and no separate Core. The kind controls which scopes the lane includes and which package-set blocks it expands. |
-| **Front-door module** | The single user-facing module that selects a lane. Loading the front-door module prepends the lane's MODULEPATH and (for site-external lanes) the platform modules the lane depends on. Example: `CSE/CCE/mpi-craympich`. |
-| **Direct application module** | A public package/application module that users load without a separate lane selector. It carries its lane's provenance, conflicts, and runtime external module loads directly. Example: `fun3d/14.2-gpu-gfx90a`. |
+| **Front-door module** | The single user-facing module that selects a lane. Loading it prepends the lane's package MODULEPATH and records/checks required platform-module prerequisites. It does not silently load platform modules unless a site explicitly enables autoload policy. Example: `CSE/CCE/mpi-craympich`. |
+| **Direct application module** | A public package/application module that users load without a separate lane selector. It carries its lane's provenance, conflicts, and platform-module prerequisite checks directly. Example: `fun3d/14.2-gpu-gfx90a`. |
 | **Scope** | A directory of Spack config files (`packages.yaml`, `toolchains.yaml`, etc.) that a lane's `include::` list pulls in. Lives under `templates/configs/<scope-name>/` in source and `configs/<scope-name>/` in the rendered workspace. |
 | **Common scope** | `configs/common/`. The scope every lane includes. Holds `concretizer.yaml`, `mirrors.yaml`, foundation `require:` pins, and other policy that applies to every lane. |
 | **Platform scope** | Any scope whose contents come from platform/system facts (`configs/vendor/cray/`, `configs/os/rhel8/`, `configs/mpi/cray-mpich/`, `configs/gpu/amd-rocm/`). |
@@ -65,7 +67,7 @@ concept.
 | **`include::`** | The double-colon Spack directive that *replaces* the built-in include list. The committed isolation mechanism for production lanes. |
 | **Toolchain** | A named bundle of compiler-and-MPI-provider constraints declared in `toolchains.yaml` and applied to a spec as `%toolchain_name`. The mechanism that pins compiler-matched MPI flavors (the canonical case: Cray cray-mpich's per-PrgEnv builds). |
 | **Provenance class** | One of `Stack-built` / `Platform-backed` / `Site-external` / `Spack-built`. Emitted into every package module via `STACK_PACKAGE_PROVENANCE` so users can see where a binary came from. |
-| **Helper** | An optional automation tool — ClusterInspector, the render helper, Ansible — that reduces operator labor but is not load-bearing for correctness. The manual workflow always remains executable. |
+| **Helper** | An optional automation tool — `cluster-inspector`, `spack-composer`, Ansible — that reduces operator labor but is not load-bearing for correctness. The manual workflow always remains executable. |
 | **Manual workflow** | The reference end-to-end procedure that uses no helpers — hand-written profile and stack files, hand-rendered (or hand-edited) workspace, hand-run `spack` commands. Every helper must be replaceable by this without changing the model. |
 
 ## Guiding Principles
@@ -76,7 +78,7 @@ concept.
 | The stack is the user interface | Users load stack modules and clean package modules. They should not need to know Spack internals. |
 | Separate intent from platform reality | `profile.yaml` describes the system. `stack.yaml` describes the desired stack. |
 | Keep config isolation explicit | Production environments use `include::` to read only selected stack scopes plus Spack defaults. |
-| Keep helper tools optional | ClusterInspector, render helpers, and Ansible automate steps but do not define the model. |
+| Keep helper tools optional | `cluster-inspector`, `spack-composer`, and Ansible automate steps but do not define the model. |
 | Prefer lane separation where useful | Variant-rich stacks should separate Core, serial, MPI, GPU, or site-specific payload lanes. Simple stacks can use one lane and direct package modules. |
 | Make visible paths clean | Views or symlink trees should expose stable paths instead of raw hash-heavy Spack install prefixes. |
 | Save solver results | `spack.lock` is the reproducibility artifact for a concrete release. |
@@ -161,6 +163,48 @@ specifies every key of `profile.yaml` and `stack.yaml`; the Render Step
 section specifies the middle arrow; the Lane Model, Tcl Module Baseline,
 Views, and Build Cache sections specify what comes out the right.
 
+## End-To-End Operating Model
+
+The framework exists so a package manager can bring ordinary Spack specs and get
+a correct stack on several different systems. The extra machinery is there to
+hide repeated system work, not to make package managers learn another Spack.
+
+| Step | Owner / tool | Artifact | Purpose |
+|---|---|---|---|
+| Probe one system | `cluster-inspector` or system owner | `systems/<system>/profile.yaml` | Record observed system facts: OS, compilers, MPI, GPU, fabric, filesystem, modules. |
+| Assess the profile corpus | `spack-composer assess-profiles` | coverage report | Compare all known profiles against existing contracts/templates and identify missing OS, MPI, GPU, compiler, or package-repo support. |
+| Scaffold new support | `spack-composer scaffold-templates` plus maintainer review | proposed template/contract stubs | Generate draft files for new observed patterns. The maintainer decides what becomes supported. |
+| Curate support policy | framework/template maintainer | `templates/<set>/contract.yaml`, config templates, defaults | Define the finite vocabulary and supported compiler/MPI/GPU combinations. |
+| Write package intent | package manager | `stacks/<stack>/stack.yaml`, optional package sets | List normal Spack specs and select build classes such as CPU, MPI, or GPU. |
+| Explain valid choices | `spack-composer explain` | human-readable menu | Show valid compiler, MPI, GPU, and node selector names for one stack/template/system. |
+| Render | `spack-composer render` or manual equivalent | `configs/`, `environments/*/spack.yaml`, manifest | Instantiate Spack input for one stack, system, and release. |
+| Build | Spack and orchestration | install tree, lockfiles, buildcache | Concretize, fetch, install, test, and cache. |
+| Publish | release tooling | views, modules, final manifest, `current` symlink | Expose the release to users after verification. |
+
+The profile can list more than the stack uses. For example, a Cray profile may
+report GCC, CCE, AOCC, NVHPC, Intel, Cray MPICH, CUDA, and ROCm. The contract
+defines which combinations the template set supports. The stack narrows that
+menu to the builds requested for a release. The render step then emits only the
+concrete lanes selected by this intersection.
+
+The maintainer-facing loop for a new or upgraded system is:
+
+```text
+profile.yaml added or updated
+        │
+        ▼
+spack-composer assess-profiles
+        │
+        ├── covered by current templates → render/build normally
+        │
+        └── gap found → scaffold templates → maintainer review → commit support
+```
+
+This keeps system onboarding explicit. A version change that follows an existing
+pattern should require only a profile update. A new OS family, MPI family, GPU
+toolkit layout, or supported compiler/GPU combination requires template or
+contract work.
+
 ## How `include::` Works
 
 `include::` is the production isolation mechanism.
@@ -180,7 +224,7 @@ Important rules:
 **Ordering rule: highest-precedence first.** Spack's include precedence gives
 entries listed earlier higher precedence. Production environments put `common`
 first when its policy must win (foundation `require:` pins,
-`unify: when_possible`, mirror declarations), followed by the selected
+concretizer policy, mirror declarations), followed by the selected
 lane/platform scopes. A lane that needs to override common policy must do so
 explicitly via an inline override in its `spack.yaml`, because inline environment
 config takes precedence over included scopes. Every `include::` example in this
@@ -221,7 +265,7 @@ spack:
 | `packages.yaml` | Externals, buildable policy, providers, targets, variants, and package requirements. |
 | `toolchains.yaml` | Named compiler/MPI/toolchain policies, especially for compiler-matched MPI externals. |
 | `config.yaml` | Install tree, source cache, build stage, misc cache, and build behavior. |
-| `concretizer.yaml` | Shared concretization policy such as `unify: when_possible`. |
+| `concretizer.yaml` | Shared concretization policy such as `unify: false`, `unify: when_possible`, and `reuse:`. |
 | `modules.yaml` | Spack-generated module behavior. Tcl is the baseline target. |
 | View | Stable symlink tree exposing installed roots without raw Spack hashes. |
 | Source cache | Local cache populated by `spack fetch -D`. |
@@ -240,7 +284,7 @@ committed minimum and note what to validate on the deployed version.
 | `toolchains.yaml` with `when: "%c"` conditional syntax | 1.1 | Newest part of the toolchains feature; validate exact syntax on deployed version. |
 | Compiler-as-dependency (language-virtual providers) | 1.1 | Allows toolchains to name a compiler that is itself a Spack-built spec. |
 | `concretizer: reuse: false` for pipeline-driving environments | 1.1 | Distinct from the build-time `reuse: true` used in payload lanes. |
-| `concretizer: unify: when_possible` | 1.1 | Required for multi-version payload lanes (strict `unify: true` collapses versions). |
+| `concretizer: unify: when_possible` | 1.1 | Optional deduplication posture for narrow application lanes; CSE-style cross-product stack lanes normally use `unify: false`. |
 | POSIX jobserver and live terminal UI (`-j` as the single concurrency knob) | 1.2 | On 1.1 the new installer existed only as an experimental preview via `spack config add config:installer:new`. |
 | Spec groups (`group:` / `needs:` / `override:`) | 1.2 | Compact multi-version manifests; on 1.1 list every version explicitly. |
 | `spack.lock` as a stable cross-release artifact | 1.1 | The release reproducibility artifact this design saves. |
@@ -274,19 +318,26 @@ repo/
     core-foundation.yaml
     science-full.yaml
     <other-stack-set>.yaml
+  package-repos/
+    cse/
+      repo.yaml
+      packages/
   templates/
-    configs/
-      common/
-      os/
-      target/
-      vendor/
-      mpi/
-      gpu/
-    environments/
-      core/
-      serial/
-      mpi/
-      gpu/
+    <set>/
+      contract.yaml
+      stack-defaults.yaml
+      configs/
+        common/
+        os/
+        target/
+        vendor/
+        mpi/
+        gpu/
+      environments/
+        core/
+        serial/
+        mpi/
+        gpu/
   docs/
   ansible/              # optional orchestration, not the source model
 ```
@@ -316,7 +367,7 @@ not normally edit them.
 ### `profile.yaml`
 
 `profile.yaml` describes observed system facts. It can be emitted by
-ClusterInspector or written by hand. It is the cross-repo contract between
+`cluster-inspector` or written by hand. It is the cross-repo contract between
 whoever produces system facts (an inspector, a sysadmin, an Ansible probe) and
 the stack repository that consumes them.
 
@@ -415,9 +466,10 @@ mpi:                                            # O - generic MPI implementation
 gpu_toolkit_modules:                            # O - standalone GPU toolkit modules (Cray PE Option B path)
   # Populated when the system exposes GPU toolkits as standalone modules
   # separable from a vendor PrgEnv (e.g., `rocm/<v>`, `cudatoolkit/<v>`).
-  # The committed default Cray-PE GPU lane (Option B) loads the GNU
-  # PrgEnv plus the standalone toolkit module from this list. For ROCm,
-  # this module is also the source for the Spack component externals below.
+  # The committed default Cray-PE GPU lane (Option B) requires the GNU
+  # PrgEnv plus the standalone toolkit module from this list. Public entry
+  # modules check/prereq those modules by default. For ROCm, this module is
+  # also the source for the Spack component externals below.
   rocm:
     version: "6.0.0"
     module: rocm/6.0.0
@@ -581,14 +633,14 @@ The `capabilities.lanes_capable` list takes the cross-product into
 account: it says which lanes can run on which node types. A `core` lane
 is broad (any class) because Core is portable; an `mpi-craympich` lane
 runs on compute classes (not login); a `gpu-craympich-gfx90a` lane runs
-only on the gfx90a class. This list is what `stack-validate` checks
+only on the gfx90a class. This list is what `spack-composer validate` checks
 `stack.yaml`'s lane declarations against.
 
 Profile rules:
 
 - It is platform reality, not package intent.
 - It must not require Ansible.
-- It must not require ClusterInspector at build time.
+- It must not require `cluster-inspector` at build time.
 - It should be reviewable and hand-editable. A profile written by hand against
   this schema is just as valid as one emitted by an inspector.
 - It must not contain the stack package list, lane policy, or build cadence.
@@ -663,7 +715,7 @@ schema_version: 1
 name: my-app
 
 templates:
-  set: app-direct-v1
+  set: v6
 
 builds:
   - name: payload
@@ -685,6 +737,57 @@ keys are marked **O**. Optional keys may still be required after merging with
 `templates/<set>/stack-defaults.yaml`; if neither the source stack nor the
 defaults supplies a required value, render fails.
 
+LAMMPS-like packages do not need a second stack language. Package managers keep
+normal Spack variants in the root specs; `spack-composer` supplies the lane's
+compiler, MPI, target, GPU arch, externals, module policy, and config scopes:
+
+```yaml
+# stacks/lammps/stack.yaml — compact multi-lane example
+schema_version: 1
+name: lammps
+
+templates:
+  set: v6
+
+modules:
+  exposure: direct
+  module_root: lammps
+
+builds:
+  - name: cpu-mpi
+    class: mpi
+    toolchain: cse-mpi-default       # contract expands to GCC/CCE + Cray MPICH on Cray
+    nodes: cpu
+    expand: one
+    specs:
+      - lammps@2024.06.27 +mpi +manybody +molecule
+
+  - name: gpu-a100
+    class: gpu
+    toolchain: cse-craympich-cuda    # contract allows AOCC host + Cray MPICH + CUDA
+    nodes: gpu
+    expand: per_gpu_arch
+    specs:
+      - lammps@2024.06.27 +mpi +kokkos +cuda
+
+per_system:
+  example-nvidia-cray:
+    builds:
+      cpu-mpi:
+        compilers: [gcc, cce]
+        mpi: [cray-mpich]
+      gpu-a100:
+        compilers: [aocc]
+        mpi: [cray-mpich]
+        gpu_arch: [a100]
+```
+
+The rendered CPU lanes decorate the same `lammps` spec with `%gcc_craympich` and
+`%cce_craympich` as appropriate. The rendered GPU lane decorates it with the
+AOCC/Cray-MPICH toolchain and the selected NVIDIA toolkit scope. A friendly
+selector such as `a100` belongs in the template contract; render maps it to the
+profile fact (`sm_80`) and Spack variant (`cuda_arch=80`).
+
 ```yaml
 schema_version: 1                               # R - stack schema version
 name: cse                                       # R - stack name; appears in paths and modules
@@ -704,6 +807,7 @@ modules:                                        # O - user-visible module strate
   publish_root: null                            # O - existing site MODULEPATH root for direct publication
   hierarchy_style: collapsed                    # O - collapsed (default) | granular (Lmod-only)
   expose_provenance: true                       # O - default true; emits STACK_PACKAGE_PROVENANCE
+  platform_module_policy: prereq                # O - prereq (default) | autoload
 
 builds:                                         # R - generic build requests, not resolved lanes
   - name: core                                  # R - request name; appears as source_build in generated lanes
@@ -804,6 +908,7 @@ reaches Spack config follows this map.
 | `modules.module_root` | user-facing module namespace, e.g. `CSE` in `CSE/GCC/mpi-openmpi` or `fun3d` in `fun3d/14.2-gpu-gfx90a` |
 | `modules.publish_root` | optional existing site MODULEPATH root where public modules are published or symlinked |
 | `modules.expose_provenance` | whether `setenv STACK_PACKAGE_PROVENANCE` is emitted |
+| `modules.platform_module_policy` | whether public entry modules check/prereq platform modules (`prereq`) or actively load them (`autoload`) |
 | `builds[*]` | source build requests expanded into one or more resolved lanes |
 | `builds[*].specs` | inline Spack root specs expanded into each generated lane; mutually exclusive with `package_set` |
 | `builds[*].package_set` | optional reusable `package-sets/<name>.yaml` expanded into each generated lane; mutually exclusive with `specs` |
@@ -885,6 +990,67 @@ deployments share the same alternative policy and it belongs in
 `stack-defaults.yaml`), or maintain a separate `stack.yaml` (when only one
 deployment differs and the policy is genuinely stack-level intent).
 
+### Template Authoring Lifecycle
+
+Template sets are not written from guesswork. They are bootstrapped from the
+profile corpus and then curated by maintainers.
+
+```text
+systems/*/profile.yaml
+        │
+        ▼
+spack-composer assess-profiles
+        │
+        ▼
+coverage report: OS families, compilers, MPIs, GPU toolkits, node classes
+        │
+        ▼
+spack-composer scaffold-templates  # optional, advisory
+        │
+        ▼
+maintainer review and support decision
+        │
+        ▼
+templates/<set>/contract.yaml + config templates + stack-defaults.yaml
+```
+
+The scaffolder may propose missing OS scopes, GPU selectors, MPI provider scopes,
+or contract additions, but it does not decide support policy. The maintainer owns
+the contract. A profile says what exists; the contract says which observed
+combinations this template set supports; `stack.yaml` says which supported
+combinations to build.
+
+A template author writes three kinds of file inside a template set:
+`contract.yaml` (see §Template Contract Files for the schema),
+`stack-defaults.yaml` (see §Stack Defaults Merge Rules for the schema), and
+Jinja templates for scopes and lane environments (see §Template Render Context
+for the variables those templates can reference). The render engine treats
+the Jinja template tree as authoritative output text; it does not permit
+templates to read host state or import files outside the template set.
+
+**Extend vs. fork a template set.** Add to an existing template set when the
+change is additive and at least two real deployments will use it (a new
+resolver-policy name, a new GPU selector, a new MPI provider scope). Create a
+new template set (`templates/<new>/`) only when the change is removing or
+contradicting something the existing set guarantees, or when one deployment
+needs a substantially different shape that would clutter the shared contract.
+The cost of a new set is real (every stack pinned to it tracks its own
+release cadence), so the default is to extend.
+
+This distinction matters for systems with many programming environments. A Cray
+profile may report GCC, CCE, AOCC, NVHPC, Intel, Cray MPICH, CUDA, and ROCm.
+That does not mean every compiler/GPU/toolkit combination is supported. The
+contract records the support matrix. The effective build menu is:
+
+```text
+profile facts ∩ template contract ∩ stack request
+```
+
+When a system changes, run the profile corpus assessment before changing
+templates. A new compiler version with the same module/prefix pattern may be a
+profile-only update. A new OS family, new MPI family, new ROCm component layout,
+or newly supported compiler/GPU combination requires contract or template work.
+
 ### Template Contract Files
 
 Every template set ships a contract file:
@@ -897,6 +1063,54 @@ The contract is source-controlled and reviewed with the templates. It is the
 rubric for accepted `stack.yaml` values. A stack file that names a class,
 toolchain, or node selector not present in the selected contract fails validation
 before any Spack files are rendered.
+
+Reference schema. Required keys are marked **R**; optional keys are marked **O**.
+
+```yaml
+schema_version: 1                              # R - contract schema version
+
+build_classes:                                 # R - map of class name → class shape
+  <name>:                                      # R - referenced from stack.yaml.builds[*].class
+    lane_kind:        <string>                 # R - matches templates/<set>/environments/<lane_kind>/
+    package_set_kind: <string>                 # R - must appear in spec source's `kinds:` list
+    default_target:   <string>                 # R - names a target_policies entry
+    requires:         [<capability>, ...]      # O - capability names; checked against profile
+                                               #     known capabilities: runtime_cpu, runtime_gpu,
+                                               #     mpi, gpu_toolkit, build_host
+
+toolchains:                                    # R - map of toolchain name → resolver policy
+  <name>:                                      # R - referenced from stack.yaml.builds[*].toolchain
+    compiler:        <resolver_policy>         # R - template-set vocabulary; see resolver-policy note below
+    mpi:             <resolver_policy>         # R - template-set vocabulary
+    gpu_toolkit:     <resolver_policy>         # R - template-set vocabulary
+    allowed_compilers: [<id>, ...]             # O - if set, narrows the compiler resolver's output
+
+node_selectors:                                # R - map of selector name → match predicate
+  <name>:                                      # R - referenced from stack.yaml.builds[*].nodes
+    match: <predicate>                         # R - template-set vocabulary; resolves against
+                                               #     profile.node_types[*] role/gpu state
+
+gpu_selectors:                                 # O - map of GPU friendly name → arch + spack vars
+  <name>:                                      # O - referenced from per_system narrowing or stack
+    vendor:      <nvidia|amd>                  # R
+    arch_target: <string>                      # R - e.g. sm_80, sm_90, gfx90a, gfx942
+    spack:                                     # O - Spack variant key/value pairs the renderer emits
+      <variant>: <string>                      # O - e.g. cuda_arch: "80", amdgpu_target: gfx90a
+
+target_policies:                               # R - map of policy name → target resolution rule
+  <name>:                                      # R - referenced from build_classes[*].default_target
+    resolve:       <resolver_policy>           # R - template-set vocabulary; resolves against
+                                               #     profile.node_types[*].cpu
+    hard_require:  <bool>                      # O - default false; true rejects target mismatches
+```
+
+**Resolver-policy names** (`each_cse_mpi_compiler`, `platform_then_stack_mpi`,
+`gnu_host_default`, `runtime_preferred`, `baseline_x86_64_v3`, etc.) are reviewed
+template-set vocabulary. The schema does not enumerate them — every template
+set declares its own — but the renderer treats any name referenced in `toolchains:`,
+`node_selectors:`, or `target_policies:` as a required vocabulary entry the
+renderer must know how to resolve. Adding a new resolver policy name means
+adding the matching resolver implementation in the same change.
 
 Example app contract:
 
@@ -934,6 +1148,13 @@ node_selectors:
 
   gpu:
     match: runtime_with_gpu
+
+gpu_selectors:
+  a100:
+    vendor: nvidia
+    arch_target: sm_80
+    spack:
+      cuda_arch: "80"
 
 target_policies:
   payload_default:
@@ -993,9 +1214,26 @@ toolchains:
     mpi: platform_mpi_required
     gpu_toolkit: prefer_platform
 
+  cse-craympich-cuda:
+    mpi: cray-mpich
+    gpu_toolkit: cudatoolkit
+    allowed_compilers: [gcc, aocc, nvhpc]
+
 node_selectors:
   cpu: { match: runtime_without_gpu }
   gpu: { match: runtime_with_gpu }
+
+gpu_selectors:
+  mi250x:
+    vendor: amd
+    arch_target: gfx90a
+    spack:
+      amdgpu_target: gfx90a
+  a100:
+    vendor: nvidia
+    arch_target: sm_80
+    spack:
+      cuda_arch: "80"
 
 target_policies:
   foundation:
@@ -1009,9 +1247,13 @@ target_policies:
 
 The resolver policy names inside the contract (`each_cse_mpi_compiler`,
 `platform_then_stack_mpi`, `gnu_host_default`) are reviewed implementation
-vocabulary for this template set. The source `stack.yaml` never spells out
-`gcc`, `cce`, `cray-mpich`, `gfx90a`, or `zen3`; those are selected later from
-the profile and recorded in the resolved lane plan.
+vocabulary for this template set. Top-level portable build requests in
+`stack.yaml` name contract terms such as `class: gpu`, `toolchain:
+cse-gpu-default`, and `nodes: gpu`. The optional `per_system` block may narrow
+those requests with friendly names exposed by `spack-composer explain`, such as
+`gcc`, `cce`, `cray-mpich`, `a100`, or `mi250x`. Raw Spack target details such as
+`cuda_arch=80`, `amdgpu_target=gfx90a`, or `target=zen3` stay in the contract and
+rendered scopes, not in ordinary package specs.
 
 Template contracts may be generic across many stacks, but they are still finite:
 the renderer validates names, spec-kind compatibility, required
@@ -1051,6 +1293,46 @@ new template set or update the template set deliberately.
 The release manifest records the user `stack.yaml` digest plus the selected
 `stack-defaults.yaml` and `contract.yaml` digests so a rendered release can be
 reproduced exactly.
+
+Reference schema. `stack-defaults.yaml` uses the same shape as `stack.yaml`
+(see §Durable Inputs / `stack.yaml`), with these constraints:
+
+- `name:` is **forbidden** in defaults. The stack name lives in the user
+  `stack.yaml` only.
+- `builds:` should be **omitted** in defaults. Build requests are user
+  intent. A starter may include an inline `builds:` for documentation, but a
+  shared defaults file should leave this empty so the user list always wins.
+- `templates.set:` is **forbidden** in defaults. The user `stack.yaml` selects
+  the template set; a defaults file cannot point at itself.
+- `profile_contract.schema_version:` **should** be set in defaults so a user
+  `stack.yaml` does not need to repeat the version. User keys still win.
+- Every other top-level key (`modules`, `externals`, `foundation_pins`,
+  `buildcache`, `release`, `package_repositories`, `per_system`,
+  `helper_recommendations`) is allowed and is the *boilerplate the package
+  manager should not have to repeat*.
+
+```yaml
+# templates/<set>/stack-defaults.yaml — reference shape
+schema_version: 1                              # R - defaults schema version (same as stack)
+
+profile_contract:                              # O - inherited by user stack unless overridden
+  schema_version: 1                            # O - profile schema version this template set targets
+
+modules: { ... }                               # O - module system defaults (init_module, root, exposure)
+externals: { ... }                             # O - mpi posture, openssl/curl externalization, etc.
+foundation_pins: { ... }                       # O - common-scope dep pins (zlib, xz, zstd, ...)
+buildcache: { ... }                            # O - mirror URLs, policy, key handling
+release: { ... }                               # O - promotion policy, release tag rules
+package_repositories: [ ... ]                  # O - default selection; user may add/replace
+per_system: { ... }                            # O - defaults for narrowing; user keys merge by system
+                                               #     and build name (per §Stack Defaults Merge Rules)
+helper_recommendations: { ... }                # O - free-form hints displayed by spack-composer explain
+```
+
+A defaults file with only `schema_version:` is valid but useless. A defaults
+file that names a template-set-specific resolver policy in `per_system:` must
+match the contract's vocabulary; the renderer will reject unknown names from
+either layer.
 
 During render, `builds:` becomes a resolved release plan. The plan is generated
 output, not source policy:
@@ -1250,6 +1532,57 @@ separate Core lane or serial/MPI/GPU taxonomy just to use this framework.
 Smoke sets used for CI live alongside (`smoke-hdf5-mpi`, `smoke-cuda-only`,
 etc.) but are never referenced by a production `stack.yaml` build request.
 
+### Internal Package Repositories
+
+Some stack packages are site-owned, and some upstream Spack packages need local
+recipe changes before upstream accepts them. Those recipes belong in stack-owned
+Spack package repositories, not in `profile.yaml`.
+
+Example source layout:
+
+```text
+package-repos/
+  cse/
+    repo.yaml
+    packages/
+      cse-foo/
+        package.py
+      lammps/
+        package.py      # local override of a builtin package, if needed
+```
+
+Package repositories are source inputs. A template set may enable a common repo
+by default in `stack-defaults.yaml`, or a stack may request one explicitly:
+
+```yaml
+package_repositories:
+  - name: cse
+    namespace: cse
+    path: package-repos/cse
+    priority: before_builtin
+```
+
+Package managers still write normal Spack specs. For an internal package, that
+might be `cse-foo@1.2.0 +mpi`. For a local override of an upstream package,
+prefer an explicit namespace when the deployed Spack syntax supports it, such as
+`cse.lammps@2024.06.27 +mpi +kokkos`, so review makes clear that the stack-owned
+recipe is in use. If unqualified names are used, repository priority must be
+recorded in the release manifest so the source of the recipe is not hidden.
+
+The render step emits a `repos.yaml` scope from the selected package
+repositories:
+
+```yaml
+repos:
+  - /rendered/workspace/package-repos/cse
+```
+
+The release manifest records each selected package repository's path, namespace,
+digest, and source commit. Build-cache keys include the Spack/package-repository
+generation because changing recipes changes concretized hashes. `cluster-inspector`
+does not probe or generate package repositories; they are stack source controlled
+by maintainers.
+
 ## Rendered Release Workspace
 
 A rendered release workspace is the environment tree Spack actually reads. It is
@@ -1282,6 +1615,7 @@ The generated workspace should be reproducible from:
 
 ```text
 profile.yaml + stack.yaml + package-sets + templates + release vars
+             + selected package repositories
 ```
 
 ## What Goes Where
@@ -1292,7 +1626,7 @@ profile.yaml + stack.yaml + package-sets + templates + release vars
 | `packages.yaml` | Externals, providers, buildable policy, targets, default variants | The full stack package list |
 | `toolchains.yaml` | Named compiler/MPI policies | Filesystem paths unless part of external definitions |
 | `config.yaml` | Install tree, caches, build stage, build jobs | Package list or module UX policy |
-| `concretizer.yaml` | `unify: when_possible`, reuse policy | Per-lane root specs |
+| `concretizer.yaml` | `unify` and `reuse` policy selected by environment shape | Per-lane root specs |
 | `modules.yaml` | Spack-generated package-module behavior | Front-door lane-module policy; those modules are stack-owned |
 | `mirrors.yaml` | Source mirror and build-cache mirror definitions | Stack software list |
 | `env_vars.yaml` | Explicit stack environment variables | Implicit shell/module state |
@@ -1303,6 +1637,17 @@ The environment manifest should include only the config scopes needed for that
 lane. Each scope remains a separate directory on disk; Spack reads and merges
 the scopes at solve time. The render step should place files, not flatten all
 scope content into a single `spack.yaml`.
+
+Config scopes are rendered from curated template files, not assembled by probing
+the live host during build. Source files live under `templates/<set>/configs/`
+as ordinary Spack config fragments, usually with `.yaml.j2` only where a profile
+or stack value must be substituted. Render writes the selected scopes to
+`configs/<scope-name>/` in the workspace, including `packages.yaml`,
+`toolchains.yaml`, `config.yaml`, `concretizer.yaml`, `modules.yaml`,
+`mirrors.yaml`, or `repos.yaml` as needed. Lane `spack.yaml` files then point at
+those rendered directories with one `include::` list. The include list, not
+ambient Spack config under `$HOME` or `/etc`, is the production isolation
+boundary.
 
 Example isolated lane manifest:
 
@@ -1327,14 +1672,17 @@ spack:
       link_type: symlink
 ```
 
-`concretizer.yaml` belongs in `configs/common` so every lane inherits the same
-base solve policy:
+`concretizer.yaml` belongs in `configs/common` so every lane inherits the
+template-selected base solve policy. A CSE-style stack-lane default can be:
 
 ```yaml
 concretizer:
-  unify: when_possible
+  unify: false
   reuse: true
 ```
+
+The value is not universal. See §Concretizer Posture Per Environment Kind for
+the committed selection rules.
 
 Two additional concretizer controls may be useful, but they are not committed
 template defaults until validated against the deployed Spack release. If a solve
@@ -1351,12 +1699,14 @@ templates just because it appears in this design note; prove it with
 The stack carries **multiple versions** of important science libraries so users
 are not forced onto a single version. As a working target, payload lanes carry
 at least the latest three versions of HDF5, NetCDF, and the other libraries
-users pin to. This is what makes `unify: when_possible` necessary rather than
-strict `unify: true`: strict unification forces one coherent assignment across
-the environment, which collapses or fails when an environment legitimately
-wants three HDF5 versions. `when_possible` deduplicates shared deps where they
-agree and permits independent version sub-DAGs where they do not, which is the
-behavior the multi-version policy needs.
+users pin to. This rules out strict `unify: true`: strict unification forces one
+coherent assignment across the environment, which collapses or fails when an
+environment legitimately wants three HDF5 versions or multiple variant builds of
+the same package. CSE-style stack lanes with deliberate cross-products should use
+`unify: false`, matching Spack's stacks tutorial. Narrow application lanes that
+do not intentionally carry duplicate package configurations may choose
+`when_possible` to deduplicate shared dependencies while still allowing the few
+duplicates that are unavoidable.
 
 Multi-version is a **payload-lane concern only**. Core stays single-version
 because there is no user reason to expose multiple CMakes, and the foundation
@@ -1470,11 +1820,12 @@ you intended to happen does not happen.*
 
 | Environment kind | `reuse:` | `unify:` | Rationale |
 |---|---|---|---|
-| Payload lane (serial / MPI / GPU / application) | `true` | `when_possible` | Pull finished binaries from the foundation cache when a Core/foundation lane exists; allow multi-version user-facing packages to coexist. |
-| Core / foundation lane | `true` | `when_possible` | Same reuse posture; `when_possible` is harmless here because Core is single-version by policy. |
-| Pipeline-driving env (input to `spack ci generate`) | `false` | `when_possible` | With `reuse: true`, `spack ci generate` will not emit rebuild jobs for specs whose hashes changed but whose old hashes still appear in the cache — the intended rebuilds silently do not happen. Pipeline envs *must* set `reuse: false` so changed definitions produce rebuild jobs. |
-| Bootstrap / compiler-build env | `true` | `when_possible` | The compiler is the only meaningful spec here; reuse is still useful for the build-time deps (Autotools chain, perl, etc.). |
-| Diagnostic / experimentation env | `false` | `when_possible` | When investigating "why did the solver pick X," `reuse: false` forces a fresh solve uninfluenced by cached binaries. |
+| CSE-style payload lane with deliberate cross-products (serial / MPI / GPU) | `true` | `false` | Pull finished binaries from the foundation cache when a Core/foundation lane exists; allow intentionally duplicated package versions and variants to coexist without solver pressure to unify them. |
+| Narrow application lane with only occasional duplicates | `true` | `when_possible` | Reuse binaries and deduplicate shared deps where they agree, while still allowing unavoidable duplicate nodes. |
+| Core / foundation lane | `true` | `false` | Same reuse posture; Core is single-version by policy, so strict deduplication is unnecessary and cross-product safety matters more. |
+| Pipeline-driving env (input to `spack ci generate`) | `false` | `false` | With `reuse: true`, `spack ci generate` will not emit rebuild jobs for specs whose hashes changed but whose old hashes still appear in the cache. Pipeline envs *must* set `reuse: false`; `unify: false` keeps CI generation aligned with stack-lane cross-products. |
+| Bootstrap / compiler-build env | `true` | `false` | The compiler is the only meaningful root spec here; reuse is still useful for the build-time deps (Autotools chain, perl, etc.). |
+| Diagnostic / experimentation env | `false` | `false` or `when_possible` | When investigating "why did the solver pick X," `reuse: false` forces a fresh solve uninfluenced by cached binaries. Pick the `unify:` posture that matches the environment being reproduced. |
 
 The two `reuse:` postures are not in conflict. **Build-time `reuse: true`**
 pulls finished binaries from the cache to avoid recompiling unchanged work.
@@ -1484,19 +1835,17 @@ emit. The payload lane is the build-time case; the pipeline env is the
 generation case; they are separate environments serving different purposes,
 and they each set the value appropriate to their purpose.
 
-`unify: when_possible` is the committed default for every kind because the
-foundation single-version rule (which strict unification would have
-covered) is enforced explicitly via `require:` in the common scope, and the
-payload lanes carry multi-version stacks that strict unification would
-collapse. `when_possible` deduplicates shared deps where they agree without
-forcing them where they disagree, which is exactly the posture this design
-needs.
+`unify: false` is the committed default for CSE-style stack lanes because those
+lanes intentionally carry cross-products: multiple package versions, CPU/GPU
+variants, and sometimes same-package builds with different feature sets. This is
+the posture shown in Spack's stacks tutorial for deliberate stacks. The
+foundation single-version rule is enforced explicitly via `require:` in the
+common scope, so it does not depend on strict unification.
 
-Reflecting on whether to ever set `unify: true`: only if the stack ever
-abandons multi-version policy entirely, which is not the current direction.
-The setting is documented for completeness; the stack ships with
-`unify: when_possible` and stays there until the multi-version policy itself
-changes.
+`unify: when_possible` remains valid for a narrow application environment that
+does not intentionally model a broad stack cross-product. `unify: true` is only
+appropriate for a lane whose root specs must share one coherent DAG; it is not a
+production default for the multi-version policy in this design.
 
 ## Detailed Scenario: Cray RHEL With Cray PE
 
@@ -1633,8 +1982,9 @@ spack:
       link_type: symlink
 ```
 
-The lane's front-door module loads `PrgEnv-gnu` + `gcc-native/13` +
-`rocm/<v>` + `cray-mpich/<v>` at runtime (Option B), not `PrgEnv-amd`. The
+The lane's front-door module checks/prereqs `PrgEnv-gnu` + `gcc-native/13` +
+`rocm/<v>` + `cray-mpich/<v>` at runtime (Option B), not `PrgEnv-amd`, unless
+the site explicitly chooses `modules.platform_module_policy: autoload`. The
 Spack GPU scope still declares the ROCm component packages individually; the
 runtime module is not a stand-in for a single `rocm` Spack external.
 A second GPU class (MI300A) gets its own parallel lane:
@@ -1967,18 +2317,18 @@ starter stack, template defaults, and the template contract.
 12. Promote only after verification passes.
 ```
 
-Any step that cannot be explained by `profile.yaml`, `stack.yaml`, templates,
-package sets, or release vars is hidden policy and should be moved into one of
-those artifacts.
+Any step that cannot be explained by `profile.yaml`, `stack.yaml`, package sets,
+selected package repositories, templates, or release vars is hidden policy and
+should be moved into one of those artifacts.
 
 ## Render Step — Specification
 
 The render step is the seam between source-of-truth (`profile.yaml`,
 `stack.yaml`, package sets, templates) and runnable Spack input (the
-rendered workspace). It is mechanical and deterministic. A render helper is
-the typical implementation, but the step itself is a *contract*: anything
-that satisfies the contract — a Python helper, a Make target, a human with
-a text editor — produces a valid workspace.
+rendered workspace). It is mechanical and deterministic. The normal
+implementation is `spack-composer render`, but the step itself is a *contract*: anything
+that satisfies the contract — a helper, a Make target, a human with a text
+editor — produces a valid workspace.
 
 ### Inputs
 
@@ -1988,6 +2338,7 @@ a text editor — produces a valid workspace.
 | `stack.yaml` | `stacks/<stack>/stack.yaml` | Stack intent. |
 | Stack defaults | `templates/<set>/stack-defaults.yaml` | Template-owned defaults merged under `stack.yaml`. |
 | Package sets | `package-sets/<name>.yaml`, only when referenced by `stack.yaml.builds[*].package_set` | Optional reusable root specs. |
+| Package repositories | `package-repos/<name>/`, when selected by stack defaults or `stack.yaml.package_repositories` | Internal packages and local recipe overrides. Render emits `repos.yaml`. |
 | Template contract | `templates/<set>/contract.yaml` | Accepted names and resolver meanings for `stack.yaml.builds[*].class`, `toolchain`, and `nodes`. |
 | Templates | `templates/<set>/configs/...` and `templates/<set>/environments/...` | Jinja-style templates the step expands. |
 | Release vars | Command-line, environment, or source-info file | `release_tag`, `output_dir`, build-cache mirror URLs, source repo URL/commit/dirty state, optional overrides. Helper convenience defaults are acceptable only when the resulting values are treated as explicit render inputs. |
@@ -2017,20 +2368,39 @@ whole design.
 | **No `--install`, no promotion.** The step never invokes Spack and never swaps the `current` symlink. | Render produces inputs; build and promotion are separate stages. |
 | **No partial output on failure.** If validation fails or any template fails to render, the step deletes its partial output and exits non-zero with a useful error. | A half-rendered workspace is worse than none; the next step would consume invalid input. |
 | **Render-time validation.** Schema-validate `profile.yaml`, merged `stack.yaml`, package sets, stack defaults, and the selected template contract; cross-check `stack.yaml.profile_contract.schema_version` against the profile; check that every build request carries exactly one of `specs` or `package_set`; check that referenced package sets exist; check that every build request names contract-defined `class`, `toolchain`, and `nodes` values; check that every spec source kind is compatible with the contract build class; check that contract resolver policies, node selectors, and matching `per_system` narrowing can resolve against the profile or templates. | Catch errors at the cheapest moment. |
+| **`prefer:` not `require:` at the all-packages level.** When the renderer writes any `packages.all:` block, it uses `prefer:` for toolchain/target steering. `require: %<family>@<v>` at the `all:` level rejects untagged externals such as glibc, openssl, curl, ncurses, perl, python, libfabric, slurm, pmix, and pals because system libraries carry no compiler tag. The `%<family>@<v>` stamp belongs on the MPI provider external only, where the ABI claim is real. | Avoids an all-level require trap that breaks otherwise valid system externals. |
+| **Render-time provenance derivation.** The renderer derives every package's provenance class (`Stack-built`, `Platform-backed`, `Site-external`, `Spack-built`) from raw facts in `profile.yaml` plus the selected contract and stack rules, not from a pre-labelled field the inspector wrote. | Keeps provenance classification in one revisable place and prevents inspector/renderer disagreement. |
 | **Renderer identity.** The render step records its own name and version in `release-manifest.yaml.templates.render_tool`. | A reader can identify the exact tool that produced a workspace. |
 
 Manual rendering uses the same manifest field: `render_tool.name: manual` and
-`render_tool.version: null`. A helper records its command name and version.
+`render_tool.version: null`. `spack-composer render` records its command name and version.
 Timestamp fields in a draft manifest are explicit release variables supplied to
-the render step. A render helper may default them for operator convenience, but
+the render step. `spack-composer render` may default them for operator convenience, but
 the render contract itself never calls the wall clock. If `rendered_at` changes,
 that is a changed input, not ambient state.
 
-### Helper-style example invocations
+### `spack-composer` Helper Commands
 
-The reference helper name is `stack-render`. Helper names are working names for
-the design and examples until a naming review, but the render contract survives a
-rename.
+The `spack-composer` repo owns the stack-side tooling. Unlike
+`cluster-inspector` (which is genuinely optional), `spack-composer` is the
+supported entry point for the render → validate → publish workflow; the
+purely manual path remains executable but is the exception.
+
+The canonical design for `spack-composer` lives in
+`docs/spack_composer_design_v1.md`: language choice (Python), repo shape,
+packaging plan, per-command algorithm sketches, and implementation phases.
+This section covers only the helper-command catalog and the render-step
+seam contract; everything else lives in the companion doc.
+
+| Command | Audience | Purpose |
+|---|---|---|
+| `spack-composer assess-profiles` | maintainer | Read the profile corpus and report template/contract coverage gaps. |
+| `spack-composer scaffold-templates` | maintainer | Generate proposed template/contract stubs for review. Never commits policy automatically. |
+| `spack-composer validate-template-set` | maintainer / CI | Render smoke stacks across profiles to prove a template set covers known systems. |
+| `spack-composer explain` | package manager | Print valid compiler, MPI, GPU, and node names for one stack/template/system. |
+| `spack-composer render` | package manager / CI | Instantiate the rendered Spack workspace. |
+| `spack-composer validate` | package manager / CI | Validate profile, stack, package sets, package repos, and template contract without writing a workspace. |
+| `spack-composer publish-manifest` | CI / package manager | Rewrite the draft `release-manifest.yaml` to `phase: final` after build, verify, and buildcache push. Records build host, lockfile digests, install provenance, platform-module prereqs, buildcache destinations, and verification results. |
 
 The helper writes the workspace under
 `<output-root>/<system>/<stack>/<release>/`. Pass the root; the helper
@@ -2038,8 +2408,18 @@ derives the rest from the profile and release vars. This matches the
 determinism guarantee (same inputs → same output path).
 
 ```bash
+# Assess the known systems before changing templates
+spack-composer assess-profiles \
+  --profiles 'systems/*/profile.yaml' \
+  --templates templates
+
+# Show a package manager the valid names for one target
+spack-composer explain \
+  --profile systems/example-cray/profile.yaml \
+  --stack stacks/cse/stack.yaml
+
 # Render a release workspace
-stack-render \
+spack-composer render \
   --profile systems/example-cray/profile.yaml \
   --stack stacks/cse/stack.yaml \
   --release 2026.06 \
@@ -2047,15 +2427,9 @@ stack-render \
 # → workspace written to /tmp/rendered/example-cray/cse/2026.06/
 
 # Validate without rendering
-stack-validate \
+spack-composer validate \
   --profile systems/example-cray/profile.yaml \
   --stack stacks/cse/stack.yaml
-
-# Explain: print the planned render context without writing files
-stack-explain \
-  --profile systems/example-cray/profile.yaml \
-  --stack stacks/cse/stack.yaml \
-  --release 2026.06
 ```
 
 ### Render step pseudo-code
@@ -2064,8 +2438,8 @@ Language-neutral; the implementation may be Python, Make, Bash, or
 something else. The shape is what matters.
 
 ```text
-function render(profile_path, stack_path, package_sets_dir, templates_dir,
-                release_vars, output_dir):
+function render(profile_path, stack_path, package_sets_dir, package_repos_dir,
+                templates_dir, release_vars, output_dir):
 
     # ── Inputs ────────────────────────────────────────────────────────────
     profile = load_yaml(profile_path)
@@ -2076,11 +2450,13 @@ function render(profile_path, stack_path, package_sets_dir, templates_dir,
     defaults = load_yaml(template_dir / "stack-defaults.yaml")
     contract = load_yaml(template_dir / "contract.yaml")
     stack = merge_defaults(defaults, raw_stack)  # recursive maps, list replacement
+    package_repos = resolve_package_repositories(stack, defaults, package_repos_dir)
 
     validate_schema(profile, "profile.v1")
     validate_schema(defaults, "stack_defaults.v1")
     validate_schema(stack,   "stack.v1")
     validate_schema(contract, "template_contract.v1")
+    validate_package_repositories(package_repos)
 
     require(stack.profile_contract.schema_version == profile.schema_version,
             "profile schema does not match stack.profile_contract")
@@ -2142,8 +2518,8 @@ function render(profile_path, stack_path, package_sets_dir, templates_dir,
     require(rendered_lanes, "no stack builds can render for profile " + profile.system.name)
 
     # ── Context ───────────────────────────────────────────────────────────
-    ctx = build_render_context(profile, stack, defaults, contract, spec_sources, rendered_lanes,
-                               skipped_builds, release_vars)
+    ctx = build_render_context(profile, stack, defaults, contract, spec_sources,
+                               package_repos, rendered_lanes, skipped_builds, release_vars)
     # ctx is a frozen dict. Nothing in it reads ambient state, $HOME, $PATH,
     # or `module list`. Two renders with the same ctx produce the same bytes.
 
@@ -2164,6 +2540,10 @@ function render(profile_path, stack_path, package_sets_dir, templates_dir,
         dst = pending / "configs" / scope_name
         render_template_tree(src, dst, ctx)
 
+    # Selected package repositories are copied or symlinked into the workspace,
+    # and configs/common/repos.yaml points Spack at those workspace paths.
+    materialize_package_repositories(package_repos, pending / "package-repos")
+
     # ── Lane environments ────────────────────────────────────────────────
     for lane in rendered_lanes:
         lane_ctx = ctx | {
@@ -2172,7 +2552,7 @@ function render(profile_path, stack_path, package_sets_dir, templates_dir,
             "scopes":   scopes_for_lane(lane, stack, profile),
             "toolchain": toolchain_for_lane(lane),
             "view_root": view_root(profile, stack, lane, release_vars),
-            "runtime_modules": runtime_modules_for_lane(lane, profile),
+            "platform_module_prereqs": platform_module_prereqs_for_lane(lane, profile),
         }
         src = template_dir / "environments" / lane.kind / "spack.yaml.j2"
         dst = pending / "environments" / lane.compiler / lane.lane / "spack.yaml"
@@ -2199,7 +2579,7 @@ function render(profile_path, stack_path, package_sets_dir, templates_dir,
 
 The functions called by `render` (`merge_defaults`, `resolve_build_request`,
 `apply_per_system_narrowing`, `required_scopes`, `scopes_for_lane`,
-`toolchain_for_lane`, `runtime_modules_for_lane`, `view_root`,
+`toolchain_for_lane`, `platform_module_prereqs_for_lane`, `view_root`,
 `expand_spec_source`, `build_manifest`) are pure transformations of the frozen
 context. None of them touches the host.
 
@@ -2214,6 +2594,8 @@ are cheaper to fix here:
 - Missing or invalid `templates/<set>/stack-defaults.yaml`.
 - A build request has neither `specs:` nor `package_set:`, or has both.
 - `stack.yaml.builds[*].package_set` references a nonexistent file.
+- A selected package repository is missing `repo.yaml`, has a duplicate
+  namespace, or would shadow builtin packages without an explicit priority.
 - A build request names a `class`, `toolchain`, or `nodes` value not present in the selected template contract.
 - A build request's contract class requires a spec kind that the inline specs or package set cannot satisfy.
 - A required build request resolves through the contract to a compiler/provider the profile or templates cannot satisfy.
@@ -2221,8 +2603,8 @@ are cheaper to fix here:
 - A matching `per_system.<profile.system.name>` narrowing block names a compiler, MPI provider, or GPU arch absent from the profile or resolved candidates.
 - A matching `per_system.<profile.system.name>.builds` block names a build absent from `stack.yaml.builds[*].name`.
 - A matching `per_system` narrowing block empties a required build request.
-- A generated site-external lane's runtime modules cannot be resolved (the named
-  modules are not declared on any external in the profile).
+- A generated site-external lane's platform-module prerequisites cannot be
+  resolved (the named modules are not declared on any external in the profile).
 
 When a non-required build is emptied by `per_system` narrowing or by any other
 condition above that does not fail render, the render step writes a
@@ -2233,539 +2615,213 @@ matches on `reason_code`; the `reason` text is free-form. Partial narrowing
 that drops some lanes from a build without emptying it is recorded under
 `templates.applied_narrowing` in the manifest, not under `skipped_builds`.
 
-## ClusterInspector — Specification
+### Driving Spack From The Rendered Workspace
 
-ClusterInspector is the read-only system inspector that produces a
+The render step ends at the rendered workspace. The build half — concretize,
+install, smoke, ldd, manifest-verify, buildcache push — has three supported
+paths:
+
+1. **`spack-build`** (the committed default for everything except Ansible-managed
+   production): a standalone shell script shipped with `spack-composer` and
+   installed onto `$PATH`. Takes `--workspace <dir>` plus optional lane filters,
+   runs Spack per lane, writes per-lane reports, and emits the three roll-up
+   files (`verify-results.yaml`, `buildcache-destinations.yaml`,
+   `platform-module-prereqs.yaml`) that `spack-composer publish-manifest`
+   consumes. See `docs/spack_composer_design_v1.md` §Companion Script:
+   `spack-build` for the CLI contract and per-lane flow.
+2. **Ansible** (the production path on multi-host clusters): see §Ansible —
+   Specification. The playbook may call `spack-build` per host or replicate
+   its loop; either is supported.
+3. **Bare Spack commands by hand** (the manual fallback): the §Example Cray
+   Flow and §Example Generic Linux HPC Flow walkthroughs show the exact
+   command sequence. This is the path that is always available without any
+   helper installed.
+
+The two helpers (`spack-build` and Ansible) own *how* Spack is invoked.
+`spack-composer` itself never calls Spack and never reads host state during
+render. The split keeps render byte-deterministic and lets each site customize
+build orchestration without forking the render engine.
+
+### Template Render Context
+
+A template author needs to know what variables `render()` makes available
+to scope templates and lane environment templates. The contract below is
+authoritative: if a template references a name not listed here, the render
+step exits non-zero (Jinja's `StrictUndefined`). Two contexts are passed:
+
+| Context | Used by | Source |
+|---|---|---|
+| `ctx` | Scope templates under `templates/<set>/configs/<scope>/...` | `build_render_context()` |
+| `lane_ctx` | Lane environment templates under `templates/<set>/environments/<lane_kind>/spack.yaml.j2` | `ctx` plus per-lane fields |
+
+Both contexts are *frozen*: templates may read keys but cannot mutate them,
+nor can they introduce side effects. Two renders with the same context bytes
+produce the same output bytes.
+
+**`ctx` keys.** Available in every template.
+
+| Key | Type | Contents |
+|---|---|---|
+| `profile` | map | Full validated `profile.yaml` content. Templates address it as `profile.system.family`, `profile.os.name`, `profile.fabric.type`, `profile.vendor_cray` (may be null), `profile.node_types`, etc. |
+| `stack` | map | Merged `stack.yaml` — template defaults underneath, user keys on top. Same shape as the user `stack.yaml`. |
+| `defaults` | map | The raw `stack-defaults.yaml` content (un-merged). Useful when a template needs to distinguish "the user asked for this" from "the default supplied this". |
+| `contract` | map | Parsed `templates/<set>/contract.yaml`. Resolver-policy names and the GPU/node selector menus live here. |
+| `package_repos` | list | Resolved package-repository selection: `{name, path, namespace, priority, source_commit}` per entry. |
+| `spec_sources` | map | Map of `build.name → resolved spec source`. An inline spec source has `{kind: "inline", kinds: [...], specs: [...]}`; a package-set spec source has the loaded `package_set.v1` content. |
+| `rendered_lanes` | list | Resolved release plan — one entry per lane that will render. Each entry carries `{name, source_build, compiler, lane, kind, package_set, target, runtime_node_type, gpu_arch (or null)}`. |
+| `skipped_builds` | list | Skip entries `{build, reason_code, reason}` for non-required builds that did not render. Empty when every requested build rendered. |
+| `applied_narrowing` | map or null | `{system, builds: {<build>: {dropped_lanes, narrowed_by}}}` when `per_system` narrowing dropped at least one candidate; `null` otherwise. |
+| `release_vars` | map | Release-time inputs the operator passed to render: `{release_tag, system_name, output_root, mirror_urls, source_repo: {url, commit, dirty}, rendered_at, overrides}`. |
+| `renderer_identity` | map | `{name, version}` of the render tool. Written into the manifest; templates may reference it for self-identification in generated comments. |
+
+**`lane_ctx` keys.** `lane_ctx` is `ctx` plus the following per-lane keys.
+Available only in lane environment templates.
+
+| Key | Type | Contents |
+|---|---|---|
+| `lane` | map | The single `rendered_lanes` entry this render is for. |
+| `specs` | list | Expanded root specs for this lane, after spec-source expansion against the build class's `package_set_kind`. |
+| `scopes` | list | Ordered list of scope paths this lane's `include::` block should reference, e.g., `["../../../configs/common", "../../../configs/os/rhel8", "../../../configs/target/zen3", "../../../configs/mpi/cray-mpich"]`. |
+| `toolchain` | map | Fully resolved toolchain for this lane: `{compiler: {name, version, spec}, mpi: {name, version, provider, spec}, gpu_toolkit: {name, version, prefix, spec or null}}`. The resolver policies named in `contract.toolchains[*]` have already been evaluated against the profile. |
+| `view_root` | string | Absolute view-root path for this lane, derived from `profile.filesystem.install_tree_candidates`, `stack.modules`, and `release_vars.release_tag`. |
+| `platform_module_prereqs` | list | Modules this lane will need at runtime because it consumes site-external providers (e.g., `["PrgEnv-gnu", "cray-mpich/8.1.29", "rocm/6.0.0"]`). Empty when the lane has no site-external dependencies. The lane's front-door modulefile reads this list to write `prereq` lines. |
+
+**Jinja environment.** The render engine constructs a single Jinja environment
+per render with these settings:
+
+- `StrictUndefined` — any reference to a missing key fails render.
+- Auto-escape **off** — output is YAML, not HTML.
+- No filesystem loader access outside `templates/<set>/`. Templates cannot
+  `include` arbitrary host paths.
+- No globals beyond what is listed here. Standard Jinja built-in filters are
+  available. A small set of safe helpers is also exposed:
+  - `to_yaml(value)` — emits a YAML-quoted scalar or block, used for
+    embedding context values into the rendered Spack config without quoting
+    errors.
+  - `spack_spec(parts)` — joins a structured spec dict into a Spack spec
+    string (e.g., `{name: "hdf5", version: "1.14.5", variants: ["+mpi"]}`
+    → `hdf5@1.14.5 +mpi`).
+  - `path_join(*parts)` — POSIX path join; never reads the host filesystem.
+
+**Templates must not.**
+
+- Reference any name not in the tables above (fails at render).
+- Call `os.environ`, read `/etc/`, `module list`, or any host state.
+- Reference `release_vars.rendered_at` in a way that affects byte-for-byte
+  determinism unless the operator passed `rendered_at` as a release variable.
+- Import other Jinja files outside `templates/<set>/`.
+- Mutate any context value. (Frozen at construction; mutation raises.)
+
+When a template needs information that is not in the context tables, the
+answer is to extend the renderer to add the field — not to read it from the
+host at render time. Render-step purity is what makes determinism testable.
+
+## cluster-inspector — Seam Contract
+
+`cluster-inspector` is the read-only system inspector that produces
 `profile.yaml`. It is *optional* by design: any human or other tool can
 produce a valid profile, and the rest of the stack does not call into
-ClusterInspector at build time.
+`cluster-inspector` at build time.
 
-### Goals
+The **canonical inspector design** lives in two companion documents:
 
-- Probe the system for every fact the profile schema requires (and the
-  optional facts that improve later decisions).
-- Emit a single `profile.yaml` that the stack repository can commit, review,
-  and edit by hand.
-- Make the inspection repeatable: running it twice on the same system
-  produces the same output (modulo timestamps).
+- `cluster_inspector_stack_profile_design_v1.md` — product boundary, CLI
+  contract, repo shape, language decision (Go), packaging plan, and
+  implementation phases.
+- `cluster_inspector_profile_extraction_map_v1.md` — field-by-field probe
+  map for every key in `profile.yaml`, with extraction, normalization,
+  confidence, and fallback rules.
+
+This section records only what the rest of the stack design depends on:
+the contract at the seam between inspector output and renderer input. If
+the two documents above ever disagree with this seam, they win for
+inspector internals and this section wins for what `profile.yaml` must
+contain.
+
+### What the renderer requires from `profile.yaml`
+
+The full reference schema is in §Durable Inputs / `profile.yaml`. The
+inspector (or a hand-author) must produce a file matching that schema.
+Render-time validation enforces the seam:
+
+- All required top-level blocks present: `schema_version`, `system`,
+  `os`, `fabric`, `modules_system`, `vendor_cray` (may be null),
+  `compilers_external`, `mpi`, `gpu_toolkit_modules`, `filesystem`,
+  `node_types`, `capabilities`.
+- Required fields populated with `probed` or `inferred` confidence;
+  `unknown` is allowed only for fields the selected stack does not need.
+- At least one `node_types[*]` entry with `role: build_host` or `both`.
+- Cray MPI lane capability appears only when a matching
+  `vendor_cray.cray_mpich.flavors.<compiler>` exists.
+- AMD GPU node types have coherent ROCm component externals under
+  `gpu_toolkit_modules.rocm.spack_components`.
+- Capability entries (`capabilities.lanes_capable[*].runtime_node_types`)
+  reference node types that are actually present.
+
+The inspector is **not** the only producer. A hand-written profile that
+satisfies the same schema is just as valid; the manual workflow remains
+the baseline.
 
 ### Explicit non-goals
 
-These belong to other stages and are *not* ClusterInspector's job:
+These belong to other stages and are *not* `cluster-inspector`'s job.
+The non-goals are restated here because every one of them is a seam the
+renderer relies on:
 
-- **No render.** ClusterInspector does not produce `spack.yaml`, scopes, or
+- **No render.** `cluster-inspector` does not produce `spack.yaml`, scopes, or
   modulefiles. Those are the render step's outputs.
-- **No Spack calls.** ClusterInspector does not run `spack concretize`,
+- **No templates or contracts.** `cluster-inspector` does not generate
+  `templates/<set>/contract.yaml`, `stack-defaults.yaml`, or template trees.
+  Profile corpora may feed `spack-composer assess-profiles` and
+  `spack-composer scaffold-templates`, but those advisory maintainer tools live
+  on the stack side.
+- **No Spack calls.** `cluster-inspector` does not run `spack concretize`,
   `spack install`, or any other Spack command. Spack may be installed on the
   same host, but the inspector does not depend on it.
-- **No deploy.** ClusterInspector does not copy files anywhere, does not
+- **No `packages.yaml` emission.** Externalization is a render-step decision;
+  the inspector emits raw facts such as install prefixes, module names, vendor
+  strings, and languages present, then stops there.
+- **No provenance classification.** The four-class provenance taxonomy
+  (`Stack-built`, `Platform-backed`, `Site-external`, `Spack-built`) is derived
+  at render time from raw profile facts plus the contract. The inspector does
+  not label packages with a provenance class, and the profile schema has no
+  `provenance:` field for the inspector to populate.
+- **No deploy.** `cluster-inspector` does not copy files anywhere, does not
   modify the system, and does not interact with Ansible.
 - **No package decisions.** Anything that depends on "what the stack wants
   to build" is stack intent and lives in `stack.yaml`, not the profile.
 
-### What ClusterInspector probes
-
-The probes correspond directly to keys in the profile schema. For each
-probe, the inspector emits a result, a confidence (`probed` / `inferred` /
-`unknown`), and the underlying evidence (the command run, the file read).
-
-Probes are split between **system-wide** (run once per system, typically
-on the login node) and **per-node-type** (run once per node class, then
-merged into the per-class entries of `profile.node_types`).
-
-| Scope | Probe | Profile keys | Source |
-|---|---|---|---|
-| System | System identity | `system.name`, `system.family` | `/etc/os-release`, `uname`, `hostname` |
-| System | OS and glibc | `os.name`, `os.major`, `os.minor`, `os.glibc` | `/etc/os-release`, `ldd --version` |
-| System | Fabric | `fabric.*` | `ibstat`, `fi_info`, `ucx_info -d`, `/sys/class/infiniband`, module enumeration |
-| System | Module system | `modules_system.tool`, `modules_system.version` | which `lmod`/`modulecmd`, `module --version` |
-| System | Cray PE | `vendor_cray.*` | `module avail`, `/opt/cray/pe/*` enumeration |
-| System | Other compilers | `compilers_external[*]` | module enumeration, `/opt/*/bin/*` probing |
-| System | MPI implementations | `mpi[*]` | module enumeration, `mpicc -show` decode, vendor-stack identification |
-| System | Filesystem candidates | `filesystem.*` | `mount`, `stat -f`, lock test on shared install-tree path |
-| Per node type | CPU targets | `node_types[<n>].cpu.detected`, `cpu.preferred`, `cpu.alternates` | `archspec cpu`, `/proc/cpuinfo` on the node class |
-| Per node type | GPU | `node_types[<n>].gpu.*` (or `null`) | `nvidia-smi`, `rocm-smi`, `lspci` on the node class; vendor table lookup |
-| Per node type | Build-stage candidates | `node_types[<n>].build_stage[*]` | writable-path scan with quick I/O probe on the node class |
-| Per node type | Role classification | `node_types[<n>].role` | observed plus operator hint (login vs compute vs both) |
-| Derived | Capabilities | `capabilities.lanes_capable` | post-merge derivation from the system + per-node facts |
-
-### Multi-node probing and merge
-
-A login node alone cannot probe a compute node's CPU target or GPU
-presence — it has to ask the compute node itself. ClusterInspector
-handles this in two phases: a per-node probe that runs on each node class
-and emits a single-node fragment, and a merge step that consolidates
-fragments plus a system-wide probe into one `profile.yaml`.
-
-```bash
-# Phase 1 — per-node probe, on the login node itself
-cluster-inspector probe-node \
-    --node-type login --role build_host \
-    --output probes/login.yaml
-
-# Phase 1 — per-node probe, on each compute node class (one srun each)
-srun -N1 -n1 --partition=cpu_compute \
-    cluster-inspector probe-node \
-        --node-type cpu_compute --role runtime \
-        --output probes/cpu_compute.yaml
-
-srun -N1 -n1 --partition=gpu --constraint=mi250x \
-    cluster-inspector probe-node \
-        --node-type gpu_compute_mi250x --role runtime \
-        --output probes/gpu_compute_mi250x.yaml
-
-srun -N1 -n1 --partition=gpu --constraint=mi300a \
-    cluster-inspector probe-node \
-        --node-type gpu_compute_mi300a --role runtime \
-        --output probes/gpu_compute_mi300a.yaml
-
-# Phase 2 — merge: system-wide probe + per-node fragments → one profile.yaml
-cluster-inspector merge \
-    --system example-cray \
-    --system-probe-on-this-host \
-    --node probes/login.yaml \
-    --node probes/cpu_compute.yaml \
-    --node probes/gpu_compute_mi250x.yaml \
-    --node probes/gpu_compute_mi300a.yaml \
-    --output systems/example-cray/profile.yaml
-```
-
-Phase-1 fragments are small (one `node_types[*]` entry plus a handful of
-verification fields each). Phase 2 runs on the login node, performs the
-system-wide probe directly, attaches the per-node fragments under
-`node_types:`, and derives `capabilities.lanes_capable` from the union.
-The merge step is deterministic — given the same fragments, it produces
-the same output — so it is safe to re-run.
-
-There is an all-in-one convenience for the common case where the operator
-already has scheduler access from the login node:
-
-```bash
-# All-in-one: log in, name the node types, let the inspector submit srun jobs.
-cluster-inspector profile \
-    --system example-cray \
-    --node-type login=this:role=build_host \
-    --node-type cpu_compute=srun:partition=cpu_compute:role=runtime \
-    --node-type gpu_compute_mi250x=srun:partition=gpu,constraint=mi250x:role=runtime \
-    --node-type gpu_compute_mi300a=srun:partition=gpu,constraint=mi300a:role=runtime \
-    --output systems/example-cray/profile.yaml
-```
-
-The `this:` keyword runs the per-node probe in the current shell (for
-classes the login is itself an instance of), and `srun:...` submits a
-short scheduler job (one node, a few seconds) for each compute class.
-The same syntax with `pbsdsh:...` covers PBS systems.
-
-**Manual override path.** Operators who want full control can also write
-the per-node fragments by hand — they are small files — and call only
-`cluster-inspector merge`. This is the fallback path when the scheduler
-is not reachable from the login node or when a node class is being
-brought online manually.
-
-### Module Enumeration: Auto-Discovery Plus Hints
-
-Most platform externals on the systems this stack targets are exposed as
-**system modules** — Cray PE compilers and cray-mpich, site compilers
-like AOCC, GPU toolkits like ROCm and CUDA, fabric userspace like
-libfabric. Detecting them is what ClusterInspector spends most of its
-work on, and the question of how it iterates through modules is worth
-making explicit. The committed model is **hybrid**: auto-discovery first,
-operator hints to narrow and override, then load-and-probe verification.
-
-Three phases, in order:
-
-**Phase 1 — auto-discovery (heuristic enumeration).** The inspector
-enumerates available modules via `module avail` and `MODULEPATH`
-directory walks, then classifies each candidate by name pattern:
-
-| Category | Patterns matched |
-|---|---|
-| Compilers | `gcc`, `gcc-native`, `cce`, `aocc`, `intel`, `oneapi`, `nvhpc`, `rocmcc`, `PrgEnv-*` |
-| MPI | `cray-mpich`, `openmpi`, `mpich`, `mvapich`, `intel-mpi`, `mpt` |
-| GPU toolkits | `rocm`, `cudatoolkit`, `cuda`, `nvhpc`, `cuda-compat` |
-| Fabric userspace | `libfabric`, `ucx` |
-
-Each match is recorded as a *candidate*, not a confirmed fact. Auto-
-discovery alone is brittle — a site might have `gcc-data/9.3`,
-`gcc-toolset/12`, and `gcc-native/13`, only one of which is a real
-compiler choice; or five CUDA versions where the stack should only see
-one. The next phase narrows the candidate list.
-
-**Phase 2 — operator hints (the committed override mechanism).** The
-operator writes a hints file alongside the profile to make the
-inspector's behavior reproducible across runs. The hints file lives in
-the stack repo at `systems/<system>/inspector-hints.yaml` and is the
-operator's persistent policy about how to interpret modules on this
-system:
-
-```yaml
-# systems/example-cray/inspector-hints.yaml
-schema_version: 1
-
-compilers:
-  include:                           # only these modules count as compiler externals
-    - cce/17.0.1
-    - gcc-native/13
-    - rocmcc/6.0.0
-  exclude_patterns:                  # never treat these as compilers, even if name matches
-    - "gcc-data/*"
-    - "gcc-toolset/*"
-
-mpi:
-  include:
-    - cray-mpich/8.1.29
-
-gpu_toolkits:
-  include:
-    - rocm/6.0.0
-    - cudatoolkit/12.4
-
-fabric_userspace:
-  include:
-    - libfabric/1.20
-    - ucx/1.15
-
-extras:                              # declare an external the heuristic missed
-  compilers:
-    - module: mycompiler/1.0
-      name:    mycompiler
-      version: "1.0"
-      prefix:  /opt/site/mycompiler/1.0
-      languages: [c, c++, fortran]
-```
-
-Rules the inspector applies:
-
-| Hint | Effect |
-|---|---|
-| `<category>.include` is a non-empty list | Only those modules are kept in that category; other auto-discovered matches are dropped. |
-| `<category>.include` is empty or absent | All auto-discovered matches in that category are kept. |
-| `<category>.exclude_patterns` | Anything matching is dropped, even if it would have passed `include`. |
-| `extras.<category>[*]` | Added to the category even if auto-discovery missed it. |
-
-**Phase 3 — load-and-probe verification.** For every surviving candidate
-the inspector spawns a clean shell, runs `module load <candidate>`, and
-probes what the module actually exposes:
-
-| Probe | What it confirms |
-|---|---|
-| `which cc gcc g++ gfortran craycc` | Compiler driver paths under the resolved prefix |
-| `mpicc -show`, `mpicxx -show` | MPI compiler wrappers point at a real underlying compiler |
-| `$ROCM_PATH`, `$CUDA_HOME`, `$NVHPC_ROOT` | GPU toolkit prefix variables set by the module |
-| `ls $prefix/lib`, `ls $prefix/bin` | The resolved prefix actually contains a build artifact |
-| `ldconfig -p \| grep libfabric` | Fabric userspace libraries are loadable |
-
-The shell exits after each candidate; nothing persists. Each result is
-recorded with `probed: true` and the evidence (commands run, what they
-returned). A candidate that fails verification gets `probed: false` and
-a reason — the operator decides whether to fix or exclude via the hints
-file.
-
-**Why a hints file instead of CLI flags.** CLI flags work for one-off
-probes (`cluster-inspector profile --compiler-modules ...`), but the
-hints file is the **committed override policy** and lives in source
-control next to the profile. Without it, every operator re-discovers the
-same site-specific quirks on their first run; with it, the answer is
-already in the repo and reproducible. The hints file converges quickly
-and only changes when the system genuinely changes (PE upgrade, new GPU
-partition added). It is *additive* to the profile, not a substitute —
-the profile is what the stack consumes; the hints file is how the
-inspector decides what to put in the profile.
-
-**Iterative discovery in practice.** Bringing up a new system follows a
-short loop:
-
-1. Run `cluster-inspector profile --system <name> ...` with default
-   heuristics (no hints file yet).
-2. Review the emitted profile. Anything wrong? Anything missing? A
-   `gcc-toolset/12` that got classified as a compiler but isn't a real
-   choice for the stack? A `cudatoolkit/12.4` that should be the only
-   CUDA included?
-3. Write `systems/<name>/inspector-hints.yaml` to fix those cases.
-4. Re-run. Iterate until the profile is clean.
-5. Commit profile + hints together; both are durable artifacts.
-
-The iteration converges in two or three rounds on a typical system. PE
-upgrades and driver bumps later require a hints touch-up only if the
-upgrade introduces a new module-naming convention; otherwise re-running
-the inspector against the same hints just refreshes the versions in
-place.
-
-**Multi-node-type interaction.** Hints apply per-category but not
-per-node-type — the compiler set, MPI set, and GPU toolkit set are
-system-wide facts, declared once in the hints file and reused across
-every node-type probe. Node-type-specific facts (CPU target, GPU arch,
-build-stage paths) come from the per-node probe and are not affected by
-the hints file.
-
-### Operational rules
-
-- The inspector is **read-only** on the system. It runs commands that read
-  state; it never modifies state. (One exception: it may write a tiny test
-  file in candidate build-stage paths to confirm `writable: true`, and it
-  removes that file before reporting.)
-- The inspector emits **one artifact**: `profile.yaml` on stdout (or a
-  named file). No log files, no caches, no side outputs.
-- The inspector **does not need to be the only profile producer.** A
-  hand-written profile that follows the schema is just as valid. The
-  inspector exists to reduce error and to capture facts a human would have
-  to look up by hand (Cray PE flavor prefixes, GPU driver-to-toolkit ceiling
-  tables).
-
-### Helper-style example invocations
-
-```bash
-# Probe the current host and print the profile to stdout
-cluster-inspector profile
-
-# Probe and write to a file, with a system identifier override
-cluster-inspector profile --system example-cray > systems/example-cray/profile.yaml
-
-# Print only the GPU block (useful for partial updates)
-cluster-inspector profile --section gpu
-
-# Validate an existing profile against the current host
-cluster-inspector verify systems/example-cray/profile.yaml
-```
-
-### ClusterInspector pseudo-code
-
-The inspector has three entry points: `probe_system` (system-wide facts;
-runs on the login node), `probe_node` (one node-type's facts; runs on
-each node class), and `merge_profile` (consolidate fragments into
-`profile.yaml`).
-
-```text
-function probe_system(args) -> system_fragment:
-    s = empty_system_fragment(schema_version=1)
-    s.system           = detect_system_identity(args.system_name_override)
-    s.os               = read_os_release() + read_glibc_version()
-    s.modules_system   = detect_module_tool()           # tcl | lmod
-    s.fabric           = probe_fabric()
-    s.vendor_cray      = probe_cray_pe()                # may be None
-    s.filesystem       = probe_install_tree_candidates()
-
-    # Module enumeration follows the three-phase model:
-    #   1) auto-discover candidates via `module avail` + MODULEPATH walk
-    #   2) apply operator hints (include / exclude / extras) per category
-    #   3) load-and-probe verify each surviving candidate in a clean shell
-    hints = load_hints(args.hints_file)                 # may be empty
-
-    candidates_compilers = enumerate_module_candidates(category="compilers")
-    candidates_mpi       = enumerate_module_candidates(category="mpi")
-    candidates_gpu_tk    = enumerate_module_candidates(category="gpu_toolkits")
-    candidates_fabric_us = enumerate_module_candidates(category="fabric_userspace")
-
-    s.compilers_external = verify_modules(
-        apply_hints(candidates_compilers, hints.compilers))
-    s.mpi                = verify_modules(
-        apply_hints(candidates_mpi, hints.mpi))
-    s.gpu_toolkit_modules = verify_modules(
-        apply_hints(candidates_gpu_tk, hints.gpu_toolkits))
-    s.fabric.userspace   = verify_modules(
-        apply_hints(candidates_fabric_us, hints.fabric_userspace))
-
-    return s
-
-
-function enumerate_module_candidates(category) -> list:
-    # Run `module avail` and walk MODULEPATH directories, then classify each
-    # entry by name pattern against the category's pattern list. Returns a
-    # list of {module_name, classified_category, pattern_matched} records.
-    # No module loads yet — this is name-pattern matching only.
-    candidates = []
-    for module_name in enumerate_all_modules():
-        for pattern in patterns_for(category):
-            if module_name.matches(pattern):
-                candidates.append({
-                    module: module_name,
-                    category: category,
-                    pattern: pattern,
-                })
-                break
-    return candidates
-
-
-function apply_hints(candidates, hints) -> list:
-    out = candidates
-    if hints.include is not empty:
-        out = [c for c in out if c.module in hints.include]
-    for pat in hints.exclude_patterns:
-        out = [c for c in out if not c.module.matches(pat)]
-    for extra in hints.extras:
-        out.append({module: extra.module, category: extra.category,
-                    declared: extra})
-    return out
-
-
-function verify_modules(candidates) -> list:
-    # For each candidate, spawn a clean shell, load the module, probe what
-    # it exposes (compiler driver paths, MPI wrapper, toolkit prefix vars),
-    # unload, exit. Record probed: true plus evidence, or probed: false
-    # plus the reason.
-    results = []
-    for c in candidates:
-        evidence = run_in_clean_shell(steps=[
-            "module load " + c.module,
-            probe_commands_for(c.category),   # which, mpicc -show, etc.
-        ])
-        if evidence.ok:
-            results.append({
-                name:      derived_name(c, evidence),
-                version:   derived_version(c, evidence),
-                prefix:    derived_prefix(c, evidence),
-                modules:   [c.module] + extra_modules_needed(c, evidence),
-                probed:    true,
-                evidence:  evidence.summary,
-            })
-        else:
-            results.append({
-                module:   c.module,
-                probed:   false,
-                reason:   evidence.failure_reason,
-            })
-    return results
-
-
-function probe_node(args) -> node_fragment:
-    n = empty_node_fragment()
-    n.name        = args.node_type_name              # e.g. "gpu_compute_mi250x"
-    n.role        = args.role                        # build_host | runtime | both
-    n.description = args.description or ""
-    n.cpu         = run("archspec cpu") + detect_alternates()
-    n.gpu         = probe_gpu()                      # None if no GPU
-    n.build_stage = probe_writable_executable_fast_paths()
-    return n
-
-
-function merge_profile(system_frag, node_frags, output_path) -> profile:
-    p = empty_profile(schema_version=1)
-    p ← system_frag                                  # all system-wide keys
-
-    p.node_types = {}
-    for nf in node_frags:
-        require(nf.name not in p.node_types, "duplicate node type: " + nf.name)
-        p.node_types[nf.name] = {
-            role:        nf.role,
-            description: nf.description,
-            cpu:         nf.cpu,
-            gpu:         nf.gpu,
-            build_stage: reject_noexec(nf.build_stage),
-        }
-
-    p.capabilities = derive_capabilities(p)
-    require(at_least_one_role_in(p.node_types, "build_host", "both"),
-            "no node type can serve as a build host")
-
-    write_yaml(output_path, p)
-    return p
-
-
-function inspect_system_all_in_one(args) -> profile:
-    # Convenience: probe system + node types in one invocation when the
-    # operator has scheduler access from the current shell.
-    system_frag = probe_system(args)
-    node_frags  = []
-    for spec in args.node_type_specs:
-        # spec.name, spec.runner ("this" | "srun" | "pbsdsh"), spec.opts, spec.role
-        if spec.runner == "this":
-            node_frags.append(probe_node(spec))
-        else:
-            node_frags.append(submit_remote_probe(spec))   # short scheduler job
-    return merge_profile(system_frag, node_frags, args.output_path)
-
-
-function probe_fabric() -> fabric_block:
-    drivers  = enumerate_kernel_drivers()
-            # rdma-core, CXI, OFED — names, versions, prefixes
-    userlibs = detect_userspace(["ucx", "libfabric"])
-            # version + prefix per library; empty list if absent
-    mpis = []
-    for m in enumerate_mpi_modules_and_prefixes():
-        mpis.append({
-            name:       m.name,
-            version:    m.version,
-            prefix:     m.prefix,
-            provenance: classify(m),    # site | system | vendor_bundled
-        })
-    return {
-        type:       classify_fabric_type(),     # slingshot | infiniband | ...
-        generation: detect_generation(),
-        drivers:    drivers,
-        userspace:  userlibs,
-        mpis:       mpis,
-    }
-
-
-function probe_gpu() -> gpu_block_or_None:
-    if has_nvidia_smi():
-        driver  = read_nvidia_driver_version()
-        ceiling = lookup_cuda_max_for_driver(driver)   # vendor table
-        arch    = "sm_" + detect_compute_capability()  # profile label: sm_80, sm_90, ...
-        return {
-            vendor: "nvidia",
-            driver_version:    driver,
-            toolkit_ceiling:   ceiling,
-            arch_target:       arch,
-            cuda_compat_available: has_cuda_compat(),
-        }
-    if has_rocm_smi() or has_amdgpu():
-        driver  = read_amdgpu_kfd_version()
-        ceiling = lookup_rocm_max_for_driver(driver)
-        arch    = detect_gfx_target()                  # gfx90a, gfx942
-        return {
-            vendor: "amd",
-            driver_version:  driver,
-            toolkit_ceiling: ceiling,
-            arch_target:     arch,
-        }
-    return None
-
-
-function probe_writable_fast_paths() -> list:
-    candidates = ["/local_scratch/$user/spack-stage",
-                  "/scratch/$user/spack-stage",
-                  "$tempdir/$user/spack-stage",
-                  "/shared/stack/spack/stage/$user"]
-    out = []
-    for raw in candidates:
-        path = expand(raw)
-        if not path.exists or not is_writable(path):
-            continue
-        t = quick_write_throughput(path)        # small fio or dd
-        out.append({
-            path:             raw,
-            visibility:       classify_visibility(path),    # login-only | compute-only | shared
-            writable:         true,
-            free_gb:          free_capacity_gb(path),
-            free_inodes:      free_inodes(path),
-            mount_opts:       mount_options(path),
-            throughput_class: classify_throughput(t),
-        })
-    return out
-
-
-# Invariants the implementation must honor:
-#   - Read-only on every host the inspector touches. Any temp file used
-#     for a writability test is removed before the function returns.
-#   - probe_system, probe_node, and merge_profile are all idempotent:
-#     given the same inputs they produce the same outputs.
-#   - merge_profile is the only writer of the final profile.yaml.
-#     probe_system and probe_node emit fragments; merging is a separate
-#     deterministic step.
-#   - The inspector is optional; anyone may write profile.yaml (or any
-#     fragment) by hand against the schema.
-#   - The inspector does not call Spack and does not render anything.
-#   - Per-node probes are short, side-effect-free scheduler jobs (no
-#     compilation, no module manipulation, no allocation beyond a few
-#     seconds). They never modify shared state on the compute node.
-#   - Vendor-table lookups (driver-to-toolkit ceilings) are part of the
-#     inspector; the rest of the stack does not need that table.
-```
+### Operational rules visible at the seam
+
+The renderer and downstream tooling rely on these properties of any
+profile producer (the inspector or a human):
+
+- **Read-only on the host.** The producer never modifies system state.
+  A writability test for a build-stage candidate may create a tiny probe
+  file and must remove it before reporting.
+- **Deterministic output.** Same inputs and observed facts produce the
+  same `profile.yaml` bytes. The producer is safe to re-run; the renderer
+  caches and validation rely on stable output.
+- **One artifact.** The durable output is `profile.yaml`. Diagnostics,
+  evidence reports, and rejected candidates may exist as sibling files
+  but are not consumed by the renderer.
+- **Inspector is optional.** A hand-authored `profile.yaml` against the
+  schema in §Durable Inputs is equally valid input to the renderer.
+
+### CLI shape used in the worked examples
+
+The end-to-end walkthroughs (§Example Cray Flow, §Example Generic Linux
+HPC Flow) use the inspector's committed CLI verbs: `cluster-inspector
+profile` (all-in-one), `cluster-inspector probe-system`, `cluster-inspector
+probe-node`, `cluster-inspector merge`, and `cluster-inspector verify`.
+A hints file at `systems/<system>/inspector-hints.yaml` is the committed
+override mechanism for module discovery; see the canonical inspector
+design for the full hints schema, discovery flow, and shell discipline
+rules (non-login shells; controlled module verification).
 
 ## Ansible — Specification
 
-Ansible is the orchestration layer. Like ClusterInspector and the render
+Ansible is the orchestration layer. Like `cluster-inspector` and the render
 step, it is optional: a human with `rsync`, `srun`, and `spack` can do
 everything Ansible does. The value of Ansible is consistency across
 deploys, not capability.
@@ -2786,7 +2842,7 @@ deploys, not capability.
 - Interpreting profile facts deeply. The profile has been consumed already
   by the render step; Ansible just passes the workspace through.
 - Rendering many Spack files directly with Ansible templates. The render
-  step is the rendering authority. Ansible may call the render helper, but
+  step is the rendering authority. Ansible may call `spack-composer render`, but
   it does not duplicate its work.
 - Replacing Spack. Spack is the build engine; Ansible drives it, does not
   substitute for it.
@@ -2796,7 +2852,7 @@ deploys, not capability.
 | Role | Responsibility |
 |---|---|
 | `preflight` | Validate profile, stack, and release inputs exist; check Spack version on the host; refuse to proceed on schema mismatch. |
-| `render-if-needed` | If a pre-rendered workspace was supplied, skip. Otherwise call the render helper locally. |
+| `render-if-needed` | If a pre-rendered workspace was supplied, skip. Otherwise call `spack-composer render` locally. |
 | `provision` | Create shared directories (`install_tree`, `source_cache`, executable `build_stage`, `buildcache`, release dirs); set permissions; place the rendered workspace at the release dir before any Spack command runs. |
 | `concretize-fetch` | On the build host, run `spack -e <env> concretize` and `fetch -D` per rendered lane; save `spack.lock`. |
 | `install-core` | Build each compiler's Core lane first and push successful Core specs to the foundation cache. |
@@ -2818,7 +2874,7 @@ deploys, not capability.
   `promote=true` on the play; `auto` is available but discouraged for
   production.
 - **Per-system data is in inventory, not in playbooks.** The lane matrix,
-  runtime module lists, scheduler args, and mirror URLs live in
+  platform-module prerequisite lists, scheduler args, and mirror URLs live in
   `inventory/host_vars/<host>.yml` (or equivalent group vars). One
   playbook serves every system; the playbook reads its data.
 
@@ -2856,7 +2912,7 @@ roles:
       - if workspace_already_supplied:
           set_fact: skip_render = true
         else:
-          run_locally: stack-render
+          run_locally: spack-composer render
             --profile     {{ profile }}
             --stack       {{ stack }}
             --release     {{ release }}
@@ -2970,7 +3026,7 @@ roles:
 #     templates. Fixes go to the source repo and re-render.
 #   - Promotion is gated by default; never automatic without
 #     stack.yaml.release.promotion: auto AND an explicit promote=true.
-#   - Per-system data (lane matrix, runtime modules, scheduler args, mirror
+#   - Per-system data (lane matrix, platform-module prereqs, scheduler args, mirror
 #     URLs) lives in inventory/host_vars, not in the playbook.
 #   - Failures of one lane do not silently skip subsequent lanes; the
 #     play either fails-fast or collects-and-reports per stack policy.
@@ -2978,7 +3034,7 @@ roles:
 
 ### Inventory shape
 
-The lane matrix, runtime module lists, and scheduler arguments are per-host
+The lane matrix, platform-module prerequisite lists, and scheduler arguments are per-host
 data. The playbook above reads `inventory/host_vars/<host>.yml`; a Cray
 host's file looks like:
 
@@ -3298,9 +3354,9 @@ GPU layer to add. The lanes conflict; the user picks one.
 
 1. **Runtime targeting differs.** A plain MPI lane runs on a CPU compute
    partition; a GPU lane runs on a specific GPU partition. Their
-   `runtime_node_type` values differ, their `runtime_modules` differ (the
-   GPU lane loads `rocm/<v>` or `cudatoolkit/<v>` at runtime; the MPI lane
-   does not), and Ansible places each lane's install job on the matching
+   `runtime_node_type` values differ, their `platform_module_prereqs` differ
+   (the GPU lane requires `rocm/<v>` or `cudatoolkit/<v>` at runtime; the MPI
+   lane does not), and Ansible places each lane's install job on the matching
    node class. Folding them into one lane breaks this targeting.
 
 2. **GPU architecture is a build-time pin, not a runtime switch.**
@@ -3340,12 +3396,14 @@ module load hdf5                            # MPI HDF5, from the GPU lane's view
 module load kokkos                          # GPU-pinned, from the GPU lane's view
 ```
 
-Two module loads. The same shape as a plain MPI user. The lane *choice* is wider
-on a system with multiple GPU classes (for example eight CSE lanes instead of
-the smaller CPU-only menu), but the *user actions* are unchanged. The front-door
-module is the single point that hides the per-lane runtime module fan-out
-(`PrgEnv-gnu` + `rocm/<v>` + `cray-mpich/<v>` for a GPU lane vs. just
-`PrgEnv-gnu` + `cray-mpich/<v>` for an MPI lane).
+Two user-facing stack module loads. The same shape as a plain MPI user. The lane
+*choice* is wider on a system with multiple GPU classes (for example eight CSE
+lanes instead of the smaller CPU-only menu), but the stack workflow is unchanged.
+The front-door module is the single point that records/checks the per-lane
+platform-module requirements (`PrgEnv-gnu` + `rocm/<v>` + `cray-mpich/<v>` for a
+GPU lane vs. just `PrgEnv-gnu` + `cray-mpich/<v>` for an MPI lane). A site that
+opts into autoload may have the front-door module load those platform modules,
+but the default is prerequisite checking.
 
 **Edge case: a GPU-only code with no MPI use.** A code like NCCL- or
 RCCL-only deep-learning workloads that never call MPI still loads the
@@ -3367,6 +3425,19 @@ require them to know the partition does not match the lane, and the
 design avoids forcing that knowledge.
 
 ### Lane Matrix Sizing
+
+**Lanes are derived, not enumerated.** The renderer computes the lane set by
+intersecting profile facts (compilers, MPIs, GPU classes, node types) with
+template-contract constraints (which compiler, lane kind, language, and runtime
+node combinations are buildable). The result is the full set of viable lanes for
+that `(profile, contract, stack)` tuple. There is no separate `lane-sets/`
+directory and no hand-maintained lane list; the lane set is a function of the
+inputs, not a stored artifact.
+
+The `per_system:` blocks in `stack.yaml` exist only to **prune** entries from the
+derived set. They cannot add lanes the derivation would not have produced. If a
+lane is missing, the gap is in `profile.yaml` or the template contract, and that
+is the right place to fix it.
 
 Realistic lane counts per system. The matrix grows linearly with
 compilers and node classes, not multiplicatively, because Core is
@@ -3665,6 +3736,35 @@ The `buildable` setting has three practical postures:
 | `buildable: true` with no requirement | External is available, but Spack may build a newer/different one. |
 | `buildable: true` with `require` or `prefer` | Steer toward the external while allowing a build when necessary. |
 
+**Two-tier rule for inspector-detected externals.** The render step partitions
+externals the inspector reports into two tiers:
+
+- **Strict tier (`buildable: false`).** The only general Linux libraries that
+  belong here by default are **OpenSSL and curl**. Site administrators patch them
+  through the distro package manager; rebuilding them under the stack duplicates
+  that CVE treadmill and produces a parallel binary the OS does not know about.
+  Vendor compilers, vendor MPI on fabric-coupled systems, Slurm, glibc, and the
+  system Python that invokes Spack may also be force-external, but those are
+  platform contracts rather than promoted general-library hints.
+- **Hint tier (`buildable: true`).** Other system libraries the inspector finds,
+  such as PMIx, libfabric, UCX, ncurses, hwloc, libpciaccess, and rdma-core, are
+  declared as externals so the solver may reuse them, but `buildable: true` is
+  preserved so the solver may build a newer version when a consumer's constraints
+  exceed what the site provides. The external is a hint, not a pin.
+
+The render step does not allow new general Linux libraries to migrate into the
+strict tier without an explicit design decision. The strict list is intentionally
+small.
+
+**Why hints, not pins.** The PMIx failure mode is the canonical case. A system
+PMIx 2.2.x external emitted as `buildable: false` can satisfy an
+under-constrained `depends_on("pmix")` in the solver even when a consumer such as
+MPICH 4.x uses PMIx 4.x symbols. The solve succeeds, but the build fails on
+missing symbols. Keeping PMIx as `buildable: true` lets the solver build a newer
+PMIx when constraints require it. If an upstream recipe is under-constrained,
+carry the version floor in the stack-controlled root spec, such as
+`mpich ... ^pmix@4`, not in the external declaration.
+
 Force-external candidates:
 
 - Vendor compilers.
@@ -3743,27 +3843,33 @@ before committing to it.
 
 ### OpenSSL And Curl
 
-OpenSSL and curl should generally be system externals because the site
-administrators patch them. If the stack builds its own OpenSSL or curl, the
-stack owns the CVE rebuild treadmill for those packages and their consumers.
+OpenSSL and curl are the only general Linux libraries that ship as strict-tier
+(`buildable: false`) externals by default. Site administrators patch them through
+the distro package manager, so the stack should not duplicate that CVE rebuild
+treadmill with parallel binaries.
 
 Rules:
 
 - Declare the true system version (run `spack external find openssl curl` on
-  the target to get it).
+  the target to get it). The version string is an assertion Spack trusts; do not
+  falsely relabel a patched distro OpenSSL 1.1.1 as 3.x to satisfy a newer API
+  claim.
+- Set `buildable: false` for both in every rendered `packages.yaml`.
+- Variant declarations matter. A `buildable: false` external must list every
+  relevant variant the recipe expects, or Spack may report that no external
+  satisfies concretization. curl in particular needs its TLS and common feature
+  variants declared explicitly, such as `+nghttp2 +libidn2 tls=openssl`, when
+  those match the system build.
 - **Do not attach a compiler to system externals** — `openssl %gcc` on an
   external is wrong. See the *Externals Carry No `%compiler` Attachment* rule
   above; OpenSSL and curl are pure system externals and have no compiler tag.
-- Do not falsely relabel a patched distro OpenSSL as a newer API version. A
-  distro that backports security fixes into 1.1.1 keeps the version string
-  1.1.1; renaming it to 3.x lies to the solver and breaks at build or runtime.
-- Do not set `buildable: false` naively. If no matching external is found,
-  `buildable: false` hard-fails concretization. Leave OpenSSL/curl
-  `buildable: true` and steer with `require:`/`prefer` toward the external —
-  a consumer requiring a genuinely newer API can then build it as a
-  documented, per-consumer exception.
-- If a stack-built OpenSSL is needed for that exception, link it against the
-  system CA certificate bundle so cert updates cost nothing.
+- Use a per-consumer escape, not a site-wide flip. If a specific consumer
+  genuinely needs OpenSSL 3.x APIs that the system does not provide, add
+  `^openssl@3` to that consumer's spec and declare a second openssl external, or
+  allow a stack-built OpenSSL only for that consumer. Do not relax the site-wide
+  system OpenSSL entry to `buildable: true`. If a stack-built OpenSSL is needed
+  for that exception, link it against the system CA certificate bundle so cert
+  updates cost nothing.
 
 **Vendored library copies inside tools are acceptable.** Some tools bundle
 private copies of libraries (CMake's internal curl, Python's bundled pieces).
@@ -3808,25 +3914,52 @@ When the lane targets a GPU, **device-code performance is controlled by
 the GPU toolchain** (nvcc/CUDA on NVIDIA, hipcc/ROCm on AMD), not by the
 host compiler. The host compiler only compiles the CPU-side scaffolding,
 which is rarely the bottleneck in a GPU-bound application. That observation
-sets the host-compiler default for GPU lanes:
+sets the host-compiler default for GPU lanes, but the framework's full lane
+vocabulary is a three-kind taxonomy.
 
-- **GNU + CUDA on NVIDIA systems** is the committed default.
-- **GNU + ROCm on AMD systems** is the committed default (including on
-  Cray, where GNU + ROCm works well in practice).
+#### The Three Lane Kinds
 
-The vendor host compilers (NVHPC, ROCmCC, AOCC) are not the GPU-lane
-default. They appear as **narrow exception lanes** for codes that
-specifically need them:
+| Kind | Shape | Members | Typical spec coverage |
+|---|---|---|---|
+| **Kind-1 — Pure CPU** | `(compiler, mpi)` | compiler from the general-purpose set such as gcc, aocc, intel, or cce; MPI from the profile inventory | Wide. Any spec that builds under the compiler. |
+| **Kind-2 — GPU with general-purpose host compiler** | `(host_compiler, mpi, gpu_toolkit)` | host compiler from the general-purpose set; toolkit is cuda or rocm and is invoked per spec for `+cuda` / `+rocm` variants | Wide: same as kind-1 for non-GPU specs, plus the GPU-toolkit-pinned subset. This is the default GPU lane shape. |
+| **Kind-3 — GPU-aware compiler** | `(gpu_aware_compiler, mpi)` | compiler is nvhpc or rocmcc/amdclang; the GPU toolkit is bundled into the compiler family | Restricted. Covers specs that genuinely benefit from the compiler's GPU-side features. |
 
-| Vendor host compiler | When the exception applies | Why it is narrow |
+**Kind-2 is the committed default for GPU deployment.** On NVIDIA systems this
+means GCC or another general-purpose host plus CUDA toolkit. On AMD systems it
+means GCC or another general-purpose host plus ROCm component externals. The
+general-purpose host compiler handles the wide spec graph; the GPU toolkit is
+invoked only where a package asks for GPU support.
+
+**Kind-3 is an opt-in specialist lane**, not a deprecated form:
+
+| Kind-3 compiler | When it is the right tool | Coverage shape |
 |---|---|---|
-| **NVHPC** | OpenACC code, CUDA Fortran, `-stdpar` GPU offload, codes written against the NVIDIA HPC SDK | A whole-stack trial of NVHPC on generic Linux went poorly; many general-stack packages do not build cleanly under it. NVHPC is the right tool for the codes it is the right tool for, and not the right tool for building the stack. |
-| **ROCmCC** | AMD-vendor codes that specifically need amdclang/amdflang features | Same caveat: not validated as a general stack compiler in the design. |
-| **AOCC** | Genuinely CPU-bound host code on Zen where measured improvement vs. GCC justifies the lane | GPU-bound applications get nearly no benefit from AOCC on the host side; it is justified only when CPU performance is the bottleneck. |
+| **NVHPC** | OpenACC code, CUDA Fortran, `-stdpar` GPU offload, codes written against the NVIDIA HPC SDK | Drops general-stack specs that do not build under NVHPC. |
+| **ROCmCC / amdclang** | HIP single-source compilation, AMD-vendor codes that need amdclang/amdflang features, OpenMP target offload to AMD | Restricted to languages and packages ROCmCC can honestly provide for that ROCm release. |
 
-The committed default keeps the matrix small: GPU lanes are GNU-hosted by
-default, and vendor host compilers appear only where a specific code's
-programming model or CPU profile demands them.
+AOCC is a kind-1 question, not kind-3: it has no GPU relationship, so its
+inclusion is governed by whether measured CPU performance versus GCC justifies a
+parallel CPU lane on Zen.
+
+**Compiler-family lane purity rule.** When a lane's compiler cannot build a spec
+because a language is unsupported, the recipe gates a provider, or the upstream
+build is broken under that compiler, drop the spec from the lane and document
+why. Do not silently route the unbuildable language to another compiler. Silent
+fallback makes the lane name lie about what built the package and can introduce
+mixed-compiler ABI risk.
+
+Slug convention:
+
+- Kind-1: `<compiler>-<mpi>`, such as `gcc-openmpi` or `cce-craympich`.
+- Kind-2: `<host_compiler>-<mpi>-<gpu_toolkit>`, such as
+  `gcc-craympich-rocm` or `gcc-openmpi-cuda`.
+- Kind-3: `<gpu_aware_compiler>-<mpi>`, such as `nvhpc-nvompi` or
+  `rocmcc-craympich`.
+
+The Cray PE version carve-out in the committed decisions applies when the MPI is
+`cray-mpich`: the slug gains a PE-version token, and a rolling window of two PE
+versions may coexist.
 
 ### Cray PE + GPU: How To Express The Lane
 
@@ -3967,22 +4100,22 @@ spack:
 — compiler is `%gcc_craympich` (Option B's GNU host), not `%rocmcc_craympich`
 (which would be Option A). The ROCm toolkit comes from `configs/gpu/amd-rocm`
 (the externals declared there for `hip`, `hsa-rocr-dev`, etc.), and the lane's
-front-door module loads `PrgEnv-gnu` + `rocm/<version>` + `cray-mpich/<version>`
-at runtime:
+front-door module requires `PrgEnv-gnu` + `rocm/<version>` +
+`cray-mpich/<version>` at runtime:
 
 ```tcl
 # Front-door module for the gfx90a lane under Option B
-if { ![is-loaded PrgEnv-gnu] }    { module load PrgEnv-gnu }
-if { ![is-loaded gcc-native/13] } { module load gcc-native/13 }
-if { ![is-loaded rocm/6.0.0] }    { module load rocm/6.0.0 }
-if { ![is-loaded cray-mpich/8.1.29] } { module load cray-mpich/8.1.29 }
+prereq PrgEnv-gnu
+prereq gcc-native/13
+prereq rocm/6.0.0
+prereq cray-mpich/8.1.29
 ```
 
 The exception-lane equivalents would substitute `PrgEnv-amd` + `rocm/...`
 (Option A — used only for an NVHPC- or ROCmCC-specific code) or
 `PrgEnv-cray` + `rocm/...` (Option C — used only for a CCE-host GPU code).
 The lane name, the spec compiler, the `runtime_node_type`, and the
-front-door module loads all move together — the render step keeps them
+front-door module prerequisites all move together — the render step keeps them
 consistent because they all come from the same lane entry in `stack.yaml`.
 
 **NVIDIA on Cray: same shape, different modules.** Where the PE exposes
@@ -3992,7 +4125,7 @@ choice applies and the same default (Option B: GNU + CUDA toolkit module)
 holds. The NVHPC exception lane uses `PrgEnv-nvidia` directly because the
 code wants NVHPC's compiler driver, not just its libraries.
 
-| Option | Committed use | Lane compiler | Lane front-door modules |
+| Option | Committed use | Lane compiler | Lane platform-module prereqs |
 |---|---|---|---|
 | A — PrgEnv-vendor all-in-one | Narrow exception lanes (NVHPC for OpenACC/CUDA Fortran; ROCmCC for AMD-vendor codes) | `%rocmcc_craympich` / `%nvhpc_craympich` | PrgEnv-amd or PrgEnv-nvidia + cray-mpich |
 | B — PrgEnv-gnu + GPU toolkit module | **Default GPU lane** | `%gcc_craympich` | PrgEnv-gnu + GPU toolkit module + cray-mpich |
@@ -4183,15 +4316,15 @@ Front-door lane modules, when `modules.exposure: front_door`, should:
 - Set view metadata such as `STACK_VIEW`; package modules, not front-door
   modules, prepend package-specific paths from clean views.
 - Declare conflicts with other mutually exclusive lane modules.
-- Load required platform modules for module-provided externals (see Lane
-  Runtime Module Requirements below).
+- Check or declare required platform-module prerequisites for module-provided
+  externals (see Lane Runtime Module Requirements below).
 
 Direct or lane package modules should:
 
 - Expose package-specific roots from clean views.
 - Avoid broad implicit dependency pollution.
 - Make provenance visible (see Provenance In Modulefiles below).
-- In `direct` exposure mode, carry the runtime external module loads and
+- In `direct` exposure mode, carry the runtime external module checks and
   conflicts that a front-door lane module would otherwise carry.
 
 Module generation outputs depend on the exposure mode. In `front_door` mode the
@@ -4212,7 +4345,7 @@ exposure mode before user workflow verification runs.
 A lane's runtime dependency on system modules follows from what kind of
 external the lane was built on. The rule is structural, not platform-specific:
 
-- **Module-provided external lane → runtime modules required.** A lane built on
+- **Module-provided external lane → platform modules required.** A lane built on
   module-provided externals — the canonical case is Cray PE compilers and
   cray-mpich — carries a runtime dependency on those same modules. Without them
   loaded, user-fresh compiles fail to find the compiler driver and MPI programs
@@ -4221,40 +4354,43 @@ external the lane was built on. The rule is structural, not platform-specific:
   module-provided MPI launcher's search.
 - **Prefix-only site external → no automatic module load.** A site MPI declared
   only by stable `prefix:` is exposed through the lane's view and package
-  modules. The lane's public entry module loads an MPI module only when the
+  modules. The lane's public entry module requires an MPI module only when the
   consumed profile external declares one in `modules:`.
 - **Spack-built lane → self-contained.** A lane where the compiler is
   Spack-built and the MPI is Spack-built is fully RPATH'd, the compiler
   driver is on the lane's view PATH, and no system modules need to be
-  loaded for users to compile or run. The public entry module declares no
+  present for users to compile or run. The public entry module declares no
   platform module prereqs.
 
-The public entry module for a site-external lane must either `module load` the
-external's declared modules or declare them as prerequisites so a user without
-them loaded sees a clear error rather than a missing-library failure. In
+The public entry module for a site-external lane checks the external's declared
+modules by default and fails with a clear message if they are absent. On module
+systems that support prerequisites, this can be emitted as `prereq` or
+`depends-on`; otherwise the Tcl module can inspect `LOADEDMODULES` and raise an
+explicit error. A site may opt into `modules.platform_module_policy: autoload` to
+emit `module load` lines instead, but silent autoload is not the default. In
 `front_door` exposure mode, that public entry is the lane module. In `direct`
 exposure mode, each public application module for that lane carries the same
-loads or prerequisites. The runtime module list is per-lane data: the render
-step takes it from `profile.yaml` (the `modules:` lists on the externals the
-lane consumes) and emits the corresponding `module load` or `prereq` lines into
-the rendered front-door module template or direct application module template.
+checks or optional autoloads. The platform-module prerequisite list is per-lane
+data: the render step takes it from `profile.yaml` (the `modules:` lists on the
+externals the lane consumes) and emits the corresponding checks into the rendered
+front-door module template or direct application module template.
 
 The Cray case is the canonical worked example: a CCE + cray-mpich lane's public
-entry module must establish `PrgEnv-cray` and `cray-mpich/<version>` at load
-time, because (1) the CCE compiler driver is found through the PrgEnv, (2)
-cray-mpich's `mpirun` and shared libraries are exposed through its module, and
-(3) the matched PrgEnv guarantees a user fresh compile with the PE wrappers
-resolves to the same `ofi/<flavor>` cray-mpich the lane was built against. The
-same rule applies to a generic Linux HPC AOCC + site-OpenMPI lane: the public
-entry module loads `aocc/4.2.0` if AOCC is module-provided; it loads an OpenMPI
-module only if the site-OpenMPI external declares one. A prefix-only site OpenMPI
-is exposed through the stack's view/package-module paths instead.
+entry module must require `PrgEnv-cray` and `cray-mpich/<version>` at load time,
+because (1) the CCE compiler driver is found through the PrgEnv, (2) cray-mpich's
+`mpirun` and shared libraries are exposed through its module, and (3) the matched
+PrgEnv guarantees a user fresh compile with the PE wrappers resolves to the same
+`ofi/<flavor>` cray-mpich the lane was built against. The same rule applies to a
+generic Linux HPC AOCC + site-OpenMPI lane: the public entry module requires
+`aocc/4.2.0` if AOCC is module-provided; it requires an OpenMPI module only if
+the site-OpenMPI external declares one. A prefix-only site OpenMPI is exposed
+through the stack's view/package-module paths instead.
 
 Verify per lane with `ldd` on a built binary whether PE/site runtime
 libraries resolve via RPATH (public entry module can be light) or require the
-external's `LD_LIBRARY_PATH` (public entry module must load the external's
-modules). The answer is per-system and worth recording on the first build
-of a new lane.
+external's `LD_LIBRARY_PATH` (public entry module must require the external's
+modules, or autoload them only when the site opted in). The answer is per-system
+and worth recording on the first build of a new lane.
 
 ### Provenance In Modulefiles
 
@@ -4311,18 +4447,14 @@ conflict CSE/GCC/gpu-craympich-gfx942
 conflict CSE/ROCmCC/core
 conflict CSE/ROCmCC/gpu-craympich-gfx90a
 
-# ── Runtime modules (site-external lane): load the PE the lane was built on
-# Lane Runtime Module Requirements section: cray-mpich and CCE are module-
-# provided externals, so users of this lane need their modules loaded.
-if { ![is-loaded PrgEnv-cray] } {
-    module load PrgEnv-cray
-}
-if { ![is-loaded cce/17.0.1] } {
-    module load cce/17.0.1
-}
-if { ![is-loaded cray-mpich/8.1.29] } {
-    module load cray-mpich/8.1.29
-}
+# ── Platform module prerequisites (site-external lane) ────────────────────
+# cray-mpich and CCE are module-provided externals, so users of this lane
+# need the matching platform modules already present. Sites that opt into
+# modules.platform_module_policy: autoload can render guarded module load
+# lines here instead, but prereq/check is the default.
+prereq PrgEnv-cray
+prereq cce/17.0.1
+prereq cray-mpich/8.1.29
 
 # ── Stack identity: discoverable env vars ─────────────────────────────────
 setenv STACK_RELEASE   "2026.06"
@@ -4354,11 +4486,12 @@ prepend-path MODULEPATH "/shared/stack/releases/2026.06/example-cray/cse/modules
   semantics — `module swap` works, `module load` of a second lane fails
   loudly — without relying on Lmod's `family` directive (which is
   Lmod-only and not available in the Tcl baseline).
-- **Runtime module loads.** Present on site-external lanes only. The
-  `is-loaded` guard makes the load idempotent for the common case where a
-  user already has the PE loaded. On a Spack-built lane (Spack-built
-  compiler + Spack-built MPI) this block is empty — the lane is
-  self-contained.
+- **Platform module prerequisites.** Present on site-external lanes only. The
+  default `prereq`/check behavior gives users a clear missing-module error
+  without silently changing their platform environment. On a Spack-built lane
+  (Spack-built compiler + Spack-built MPI) this block is empty — the lane is
+  self-contained. Sites that choose `modules.platform_module_policy: autoload`
+  may render guarded `module load` lines instead.
 - **Stack identity env vars.** A user script or build system can inspect
   `STACK_*` to know the active lane, view path, compiler version, and MPI
   provider without parsing `module list` output. `STACK_VIEW` is
@@ -4794,7 +4927,7 @@ the lifecycle explicit without doubling the lookup surface.
 | Phase | Written by | Fields populated |
 |---|---|---|
 | `draft` | render step | source-derived: profile/stack/package-set digests, render-tool identity, explicit `rendered_at` release var, lane definitions (env path, kind, compiler, target, spec source, runtime_node_type), planned install/view/module paths, planned buildcache destinations |
-| `final` | publish step | adds: build host, lockfile digests per lane, provenance summary per lane, runtime modules per lane, actual buildcache push destinations + lanes pushed, verification results, promoted_at / promoted_by, previous_release |
+| `final` | publish step | adds: build host, lockfile digests per lane, provenance summary per lane, platform-module prereqs per lane, actual buildcache push destinations + lanes pushed, verification results, promoted_at / promoted_by, previous_release |
 
 A draft manifest is valid input to Ansible's deploy roles; the publish
 role overwrites it with the final phase when the build completes
@@ -4821,7 +4954,7 @@ release:
 # ── Source-derived (filled at render, present in both draft and final) ──
 stack:
   name:       cse                              # from stack.yaml.name
-  source_repo: "git@gitlab:stacks/cse-stack"   # repo URL
+  source_repo: "git@gitlab:stacks/spack-composer"   # repo URL
   source_commit: "0375b16f..."                 # exact commit the render used
   source_dirty: false                          # true if the working tree had uncommitted changes
 
@@ -4848,7 +4981,7 @@ templates:
   defaults_digest: "sha256:6f1b9c..."          # sha256 of templates/<set>/stack-defaults.yaml
   contract_digest: "sha256:58c1a3..."          # sha256 of templates/<set>/contract.yaml
   render_tool:                                 # which render step produced this workspace
-    name:    stack-render                      # or manual
+    name:    spack-composer render             # or manual
     version: "0.4.2"                           # null when name is manual
   applied_narrowing:                           # null when no per_system block matched profile.system.name
     system: example-cray                       # which per_system.<system> key matched
@@ -4865,9 +4998,10 @@ templates:
 spack:
   version: "1.1.1"                             # `spack --version` on the build host
   commit:  "ba9d6a01..."                       # exact commit, if Spack is a git checkout
-  package_repos:                               # custom repos registered for this build
-    - name: stack-overlay
-      path: "configs/repo"
+  package_repos:                               # selected stack-owned repos registered for this build
+    - name: cse
+      namespace: cse
+      path: "package-repos/cse"
       commit: "0375b16f..."
 
 build_host:
@@ -4877,7 +5011,7 @@ build_host:
   glibc:     "2.28"
   cpu:       "zen3"
 
-# ── Lanes (rendered lanes only; skeleton at render; lockfile/install/provenance/runtime_modules at publish) ──
+# ── Lanes (rendered lanes only; skeleton at render; lockfile/install/provenance/prereqs at publish) ──
 lanes:                                         # one entry per environment in the release
   - name: gcc-core
     source_build: core                          # render-filled; stack.yaml.builds[*].name
@@ -4898,7 +5032,7 @@ lanes:                                         # one entry per environment in th
       platform_backed: 0
       site_external: 0
       spack_built: 0
-    runtime_modules: []                        # platform modules the public entry module must load
+    platform_module_prereqs: []                # platform modules the public entry module checks/prereqs
 
   - name: cce-mpi-craympich
     source_build: mpi
@@ -4918,7 +5052,7 @@ lanes:                                         # one entry per environment in th
       platform_backed: 1                       # cray-mpich
       site_external: 0
       spack_built: 0
-    runtime_modules:                           # platform modules the public entry module loads
+    platform_module_prereqs:                   # platform modules the public entry module checks/prereqs
       - PrgEnv-cray
       - cce/17.0.1
       - cray-mpich/8.1.29
@@ -4941,7 +5075,7 @@ lanes:                                         # one entry per environment in th
       platform_backed: 8                       # cray-mpich + ROCm component externals (example count)
       site_external: 0
       spack_built: 0
-    runtime_modules:                           # Option B: PrgEnv-gnu + standalone rocm + cray-mpich
+    platform_module_prereqs:                   # Option B: PrgEnv-gnu + standalone rocm + cray-mpich
       - PrgEnv-gnu
       - gcc-native/13
       - rocm/6.0.0
@@ -4979,7 +5113,7 @@ previous_release: "2026.05"                    # for rollback; null on first rel
 
 ### Final Manifest Without A Helper
 
-`stack-publish-manifest` is an optional helper, not a required release engine.
+`spack-composer publish-manifest` is an optional helper, not a required release engine.
 A fully manual publish step writes the same `phase: final` manifest by filling
 the publish-time fields from files and commands already produced by the manual
 workflow:
@@ -4991,8 +5125,9 @@ workflow:
 4. Fill `build_host.*` from the host that performed the builds.
 5. For each rendered lane, copy the final `spack.lock` path and sha256 digest.
 6. For each rendered lane, record `install_root`, `view_root`,
-   `package_module_root`, provenance counts, and runtime modules loaded by the
-   public entry module (`front_door` lane module or direct application module).
+   `package_module_root`, provenance counts, and platform-module prereqs checked
+   by the public entry module (`front_door` lane module or direct application
+   module).
 7. Record actual buildcache push destinations and lanes pushed.
 8. Record verification results from `spack verify ...` and site smoke tests.
 9. Fill `promoted_at` and `promoted_by` only when promotion actually happens;
@@ -5031,9 +5166,27 @@ class of failure at the cheapest moment.
 | Spack config | Scope leakage, missing externals | `spack config scopes -vp`, `spack config blame`, `spack spec` |
 | Concrete solve | Bad concretization choices | `spack -e <env> concretize`, inspect `spack.lock` diffs |
 | Build | Build-recipe failures | `spack -e <env> install --fail-fast` |
-| Integrity | Broken install / missing libraries | `spack verify manifest`, `spack verify libraries` |
+| Integrity (manifest) | Broken install, post-install tampering, missing files | `spack verify manifest` |
+| Integrity (libraries, drift only) | New RPATH/RUNPATH gap since the last clean baseline | `spack verify libraries` compared against baseline |
 | User workflow | Lane composition / view exposure | clean shell, load public entry module, load package modules when applicable, compile smoke tests |
-| Runtime | Real MPI/GPU/scheduler interaction | scheduler launch, MPI hello-world, GPU device-query, multi-node smoke test |
+| Runtime (load-bearing) | Real MPI/GPU/scheduler interaction | `ldd <spec-binary>` resolves entries, `<tool> --version` runs, scheduler launch, MPI hello-world, GPU device-query, multi-node smoke test |
+
+**`spack verify libraries` is a drift detector, not a deploy gate.** It walks
+RPATH/RUNPATH. Spack filters `/usr` from RPATH by safety policy, so specs that
+link against `/usr` externals can report missing libraries even when the system
+loader resolves them correctly at runtime. Cray PE externals under `/opt/cray/pe`
+can produce the same shape of warning. A non-empty baseline is not automatically
+breakage.
+
+The correct use is to capture `verify libraries` output as a release baseline,
+then diff later rebuilds against that baseline. A new warning is a useful signal
+that something moved. The load-bearing runtime gate is the runtime row above:
+`ldd <spec-binary>` confirms the real loader path, and `<tool> --version` proves
+the binary actually loads and runs.
+
+`spack verify manifest` is different. It cross-checks installed files against
+the recorded manifest and catches mid-build crashes, missing files, and
+post-install tampering. Treat it as a deploy gate.
 
 Verification runs in the same context users will see, not in a dirty build
 shell. For each lane:
@@ -5047,9 +5200,10 @@ shell. For each lane:
    (`<modules.module_root>/<compiler>/<lane>`, for example
    `CSE/GCC/gpu-craympich-gfx90a`). In `direct` mode this is a direct package or
    application module such as `fun3d/14.2-gpu-gfx90a`.
-4. Confirm the public entry module loaded required platform modules for consumed
-   externals.
-5. Run `spack -e <env> verify libraries` and `verify manifest -a`.
+4. Confirm the public entry module checks/prereqs required platform modules for
+   consumed externals.
+5. Run `spack -e <env> verify manifest -a` and capture
+   `spack -e <env> verify libraries` for baseline/drift comparison.
 6. Load representative package modules from that lane when the workflow has a
    separate package-module step, then run compile/smoke tests.
 7. For MPI/GPU lanes, run scheduler-backed runtime smoke tests on the lane's
@@ -5157,10 +5311,12 @@ spack -e <env> verify manifest -a
 #   Pass: clean. Fail: a file was changed after install (or missing).
 
 spack -e <env> verify libraries
-#   Check that every installed binary's shared-library dependencies
-#   resolve under the RPATH and the system loader.
-#   Pass: clean. Fail: a missing or wrong-version library — typically
-#   a Cray PE module not loaded at runtime, or a broken RPATH.
+#   Walk RPATH/RUNPATH on every installed binary. This is a drift detector,
+#   not a deploy gate. /usr externals are filtered from RPATH by Spack policy
+#   and may report missing even when ld.so resolves them at runtime; on Cray,
+#   /opt/cray/pe can behave similarly. The signal is a NEW warning compared
+#   with the release baseline. The load-bearing runtime gate is
+#   `ldd <spec-binary>` plus `<tool> --version`.
 ```
 
 **Views and modules:**
@@ -5189,16 +5345,18 @@ spack buildcache list
 #   List available binaries in registered mirrors.
 ```
 
-**Cluster Inspector and render helpers (optional):**
+**cluster-inspector and spack-composer helpers (optional):**
 
 ```bash
 cluster-inspector profile [--system <name>]
 cluster-inspector verify <profile.yaml>
 
-stack-validate         --profile <profile> --stack <stack>
-stack-render           --profile <profile> --stack <stack> --release <tag> --output-root <dir>
-stack-explain          --profile <profile> --stack <stack> [--release <tag>]
-stack-publish-manifest --release-dir <release-dir> [--verification-results <file>]
+spack-composer assess-profiles --profiles <dir>
+spack-composer scaffold-templates --profiles <dir> --output templates/<set>
+spack-composer validate --profile <profile> --stack <stack>
+spack-composer explain  --profile <profile> --stack <stack> [--release <tag>]
+spack-composer render   --profile <profile> --stack <stack> --release <tag> --output-root <dir>
+spack-composer publish-manifest --release-dir <release-dir> [--verification-results <file>]
 ```
 
 ## Debug And Triage Policy
@@ -5246,15 +5404,15 @@ table — it is the single place the team's failure knowledge accumulates.
 | `spack concretize` fails with "no satisfying spec for compiler" | Profile declared the compiler but stack's `externals.compilers` policy did not honor it; or the toolchain pins a compiler the lane cannot reach | Cross-check the normalized compiler inventory (`vendor_cray.*` plus `compilers_external.*`) against `stack.externals.compilers`; check `toolchains.yaml` versions match the profile |
 | `spack concretize` fails with "no satisfying spec for mpi" | The MPI scope is missing from the lane's `include::` list, or `mpi: require:` points at a provider that is not present | Lane environment template's `include::` order; `configs/mpi/<provider>/packages.yaml` `require:` line |
 | Concretization picks the wrong cray-mpich flavor | The lane's `%toolchain` does not specify `%mpi`, or the per-flavor external `%cce` / `%gcc` / `%rocmcc` tags are absent in `configs/mpi/cray-mpich/packages.yaml` | `configs/mpi/cray-mpich/toolchains.yaml`, `configs/mpi/cray-mpich/packages.yaml` |
-| Build fails with "OpenSSL not found" | `openssl: buildable: false` and no external was detected, OR the external version pin is too narrow | `configs/os/<os>/packages.yaml` — use `buildable: true` with `prefer:` |
+| Build fails with "OpenSSL not found" | `openssl: buildable: false` but the rendered external is missing, incomplete, or falsely versioned | Fix `configs/os/<os>/packages.yaml` to declare the real system external and variants; if one consumer truly needs newer APIs, add a per-consumer `^openssl@3` escape plus a second external or stack-built exception |
 | Build fails with linker errors against zlib | Foundation `require:` pin missing in common scope, allowing two zlib versions | `configs/common/packages.yaml` — add `require:` on zlib |
-| `spack verify libraries` fails for a Cray build | The lane's public entry module does not load the PE modules at runtime; CSE binaries depend on PE runtime components | Module template for the selected exposure mode — add `module load PrgEnv-...` + `cray-mpich/...` |
-| `ldd` on a built binary shows "not found" for `libpgmath.so` or similar | Site compiler runtime not loaded; the lane is built on a module-provided external but the public entry module does not load its modules | Module template for the selected exposure mode — add `module load <compiler-module>` |
+| New `spack verify libraries` warning plus `ldd` reports `not found` for a Cray runtime library | The lane's public entry module does not require the PE modules at runtime; CSE binaries depend on PE runtime components | Module template for the selected exposure mode — add platform-module prereqs/checks for `PrgEnv-...` + `cray-mpich/...` |
+| `ldd` on a built binary shows "not found" for `libpgmath.so` or similar | Site compiler runtime not present; the lane is built on a module-provided external but the public entry module does not require its modules | Module template for the selected exposure mode — add a platform-module prereq/check for `<compiler-module>` |
 | GPU runtime fails with "CUDA driver version is insufficient for CUDA runtime version" | Toolkit version exceeds the GPU driver ceiling | Check the lane's `profile.node_types[<runtime_node_type>].gpu.toolkit_ceiling`; pin CUDA in `configs/gpu/nvidia-cuda/packages.yaml` at or under it |
 | GPU build fails with "no kernel image available for execution" | Rendered Spack GPU variant (`cuda_arch=90` or `amdgpu_target=gfx90a`) does not match the lane's profile arch label (`sm_90` or `gfx90a`) from `profile.node_types[<runtime_node_type>].gpu.arch_target` | `configs/gpu/<vendor>/packages.yaml` — map the profile label to the correct Spack variant |
 | User compile finds the wrong `hdf5` headers | Two `hdf5` versions on `CPATH` — typically a stale module not unloaded, or the wrong lane loaded | Verify with `module list`; lane conflict should prevent this |
 | `module load` of two lanes simultaneously succeeds | Conflict block in the public entry module is missing or stale | Module template for the selected exposure mode — add conflicts for mutually exclusive lane entries |
-| User script picks `mpirun` from system PATH instead of the lane | Site MPI's `mpirun` is not exposed by the lane (Spack-built lanes put it in the view PATH; site-external lanes rely on the site module) | Confirm the lane's runtime module loads include the MPI module |
+| User script picks `mpirun` from system PATH instead of the lane | Site MPI's `mpirun` is not exposed by the lane (Spack-built lanes put it in the view PATH; site-external lanes rely on the site module) | Confirm the lane's platform-module prereqs/checks include the MPI module |
 | Cache miss on a binary the foundation already built | Cache keyed by compiler; CCE lane is reading the wrong bucket; or the foundation mirror is not registered in the lane's `mirrors.yaml` | Re-key the cache by OS/glibc (label compiler in the path, not the key); register foundation mirror in `configs/common/mirrors.yaml` |
 | `spack ci generate` produces no rebuild jobs after a stack change | Pipeline env has `reuse: true` (the default); `spack ci` must run on `reuse: false` | Pipeline env's `concretizer.yaml` — set `reuse: false` |
 | Re-render produces a diff from the last release | The render step is consulting ambient state (shell vars, `module list`, etc.) | Render step implementation — remove the ambient lookup; renders must be deterministic from `(profile, stack, sets, templates, release_vars)` |
@@ -5263,7 +5421,7 @@ table — it is the single place the team's failure knowledge accumulates.
 | Different OS lanes share one cache and hashes seem to overlap | Cache lane is not keyed by OS/glibc; SLES and RHEL builds collided | Re-key cache by OS/glibc — `buildcache/foundation/<os-id>/glibc-<glibc>/<spack-generation>/<baseline>/` |
 | Two compilers' Core CMake collide in one view | One shared Core view across compilers — per-compiler Core needs per-compiler view roots | View root template — split into `views/<compiler>/core/` |
 | `module load` of a package finds a stale path that no longer exists | View was not regenerated after install | Run `spack -e <env> env view regenerate` — Ansible's `publish` role should do this automatically |
-| Site smoke test passes but `verify libraries` fails | Soft RPATH; runtime library happens to be available at test time but not via RPATH | Inspect with `readelf -d`; rebuild with explicit RPATH or fix the package recipe |
+| Site smoke test passes but `verify libraries` reports the same `/usr` or `/opt/cray/pe` warnings as the release baseline | Expected RPATH filtering for system/platform externals | Keep the baseline; investigate only new warnings or real runtime loader failures from `ldd` / smoke tests |
 
 ## Example Cray Flow (Helper-Assisted End-To-End Walkthrough)
 
@@ -5272,8 +5430,8 @@ Cray-class system named `example-cray` (RHEL8, Slingshot/CXI fabric, AMD
 GPU compute partitions for MI250X and MI300A). Every command shown is
 runnable; the values mirror the schema examples in §Durable Inputs.
 
-> **Helper-assisted.** This walkthrough uses ClusterInspector and the
-> render helper to reduce labor. The §Manual Workflow remains valid:
+> **Helper-assisted.** This walkthrough uses `cluster-inspector` and
+> `spack-composer render` to reduce labor. The §Manual Workflow remains valid:
 > write `profile.yaml` and `environments/*/spack.yaml` by hand against
 > the schemas in §Durable Inputs and §Lane Model, skip the inspector
 > and render steps, and run `spack -e <env> install` directly. The
@@ -5281,7 +5439,7 @@ runnable; the values mirror the schema examples in §Durable Inputs.
 
 ### Phase 1 — Author the profile
 
-Run ClusterInspector for the first time on the login node, no hints file
+Run `cluster-inspector` for the first time on the login node, no hints file
 yet. Use the all-in-one invocation to probe the login + each compute
 class in a single command:
 
@@ -5463,7 +5621,7 @@ Validate the full file, including the `per_system` block when present, before
 rendering:
 
 ```bash
-$ stack-validate \
+$ spack-composer validate \
     --profile systems/example-cray/profile.yaml \
     --stack stacks/cse/stack.yaml
 PASS  profile schema matches stack.profile_contract
@@ -5479,7 +5637,7 @@ PASS  every per_system narrowing name resolves in the profile or contract
 Materialize the rendered workspace:
 
 ```bash
-$ stack-render \
+$ spack-composer render \
     --profile     systems/example-cray/profile.yaml \
     --stack       stacks/cse/stack.yaml \
     --release     2026.06 \
@@ -5621,9 +5779,9 @@ Write the final manifest in the release directory:
 
 ```bash
 # The publish step rewrites the manifest with phase: final, adding
-# build-host, lockfile digests, provenance summaries, runtime modules,
+# build-host, lockfile digests, provenance summaries, platform-module prereqs,
 # buildcache push destinations, and verification results:
-$ stack-publish-manifest \
+$ spack-composer publish-manifest \
     --release-dir /shared/stack/releases/2026.06/example-cray/cse \
     --build-host  $(hostname) \
     --buildcache  foundation=file:///shared/stack/buildcache/foundation/rhel8/glibc-2.28/spack-1.1.1/repo-2026.06/x86_64_v3 \
@@ -5725,7 +5883,7 @@ resolved_lanes:
 ```
 
 ```bash
-$ stack-validate \
+$ spack-composer validate \
     --profile systems/example-linux/profile.yaml \
     --stack stacks/cse/stack.yaml
 ```
@@ -5733,7 +5891,7 @@ $ stack-validate \
 ### Phase 3 — Render
 
 ```bash
-$ stack-render \
+$ spack-composer render \
     --profile     systems/example-linux/profile.yaml \
     --stack       stacks/cse/stack.yaml \
     --release     2026.06 \
@@ -5950,7 +6108,7 @@ Render exactly as with CSE. On the example profile, the generic `cpu` and `gpu`
 build requests resolve to one CPU lane and one GPU lane:
 
 ```bash
-$ stack-render \
+$ spack-composer render \
     --profile     systems/example-aero/profile.yaml \
     --stack       stacks/fun3d/stack.yaml \
     --release     2026.06 \
@@ -6041,11 +6199,11 @@ $ ln -sfn /shared/stack/releases/2026.06/example-aero/fun3d/modules/public/fun3d
 ```
 
 Each direct module is generated from its lane, so it carries the same provenance,
-runtime external module loads, and conflicts that a front-door lane module would
+platform-module prerequisite checks, and conflicts that a front-door lane module would
 have carried. If the GPU lane consumed a module-provided ROCm external, for
-example, `fun3d/14.2-gpu-gfx90a` loads or prereqs the matching ROCm module. If
-the CPU and GPU FUN3D modules should not be loaded together, they conflict
-directly with each other.
+example, `fun3d/14.2-gpu-gfx90a` checks/prereqs the matching ROCm module unless
+the site explicitly enabled autoload policy. If the CPU and GPU FUN3D modules
+should not be loaded together, they conflict directly with each other.
 
 User workflow stays simple:
 
@@ -6076,28 +6234,31 @@ real-world evidence (a deployed system, a measured workload) to settle.
 
 | Question | Committed answer | May change when |
 |---|---|---|
-| Helper command names | `cluster-inspector` (the read-only system probe), `stack-render` (the render helper), `stack-validate` (validate-only mode), `stack-explain` (dry-run mode), and `stack-publish-manifest` (optional final-manifest writer). Ansible playbook names follow `deploy-stack`. | A naming review happens before the helpers are user-installable; until then these names are committed. The architectural rules in §Render Step would survive a rename. |
+| Helper command names | Stack-side helpers ship through **`spack-composer`**: `assess-profiles`, `scaffold-templates`, `validate-template-set`, `validate`, `explain`, `render`, and `publish-manifest`. The read-only system probe ships as **`cluster-inspector`** from its own repo. Ansible playbook names follow `deploy-stack`. | A naming review happens before the helpers are user-installable; until then these names are committed. The architectural rules in §Render Step would survive a rename. |
 | Location of `stack.yaml` | `stacks/<name>/stack.yaml` (one file per stack, top-level `stacks/` directory). No system-specific overlays — system facts live in `profile.yaml` and the render step composes them. | Never, unless the design ever lets one stack be defined as a composition of two stacks; that case would need overlay syntax, but it is not on the horizon. |
 | Multiple node types per system | **One `profile.yaml` per system with a `node_types:` block** containing one entry per node class (login, CPU compute, GPU compute per GPU model, etc.). System-shared facts (OS, glibc, fabric drivers, Cray PE, modules system, shared filesystem) live at the top level; per-class facts (CPU target, GPU presence, build-stage paths, role) live inside `node_types[*]`. A `stack.yaml` build request names a contract node selector such as `cpu` or `gpu`; the render step resolves that selector against `profile.node_types` and records the concrete `runtime_node_type` in the generated lane plan. | Never — one profile per system is the correct level of grouping; node-class facts scale inside it. |
 | Root spec source | Small stacks should put ordinary Spack root specs directly in `stack.yaml.builds[*].specs`. Reused spec lists live in `package-sets/<name>.yaml`, and `stack.yaml.builds[*].package_set` references one set by name. The render step expands either source into each generated lane's `spack.yaml`; toolchain, target, MPI, and GPU-arch decoration still comes from the profile and template contract, not from the reusable spec source. | A second reuse mechanism proves simpler than package sets; the inline-spec starter path and platform/intent split remain. |
+| Template authoring lifecycle | Template sets are source-controlled stack source. Maintainers may use profile corpora through `spack-composer assess-profiles` and `spack-composer scaffold-templates`, but scaffold output is advisory and must be reviewed, curated, and committed. `templates/<set>/contract.yaml` is the curated support policy; `profile.yaml` is only observed system fact. | A future implementation proves fully automatic template generation is safer than review, which is not assumed for v1. |
 | Minimum Spack version | **1.1.1** is the committed floor. Newer Spack (including 1.2) is supported and benefits from the jobserver and spec groups; older Spack lacks `include::` semantics and is not supported. | Spack 1.2 stabilizes and the team adopts it as the new floor; revisit the table in §Spack Version Floor. |
 | Lmod beyond the Tcl baseline | The committed module format is **Tcl** because Lmod reads Tcl and Tcl-only systems cannot read Lua. On Lmod-equipped systems, the same install tree can additionally produce an Lmod tree via `spack -e <env> module lmod refresh -y` and serve both module roots in parallel. Lmod's `family` directive and hierarchy features are *not* relied on; the design's conflict mechanism in front-door or direct modules gives the same behavior portably. | Never for the Tcl baseline; the optional Lmod tree is per-site choice and does not affect the core design. |
 | Release artifact storage | Lockfiles (`spack.lock` per lane) and the release manifest are committed to the source repository under `releases/<tag>/<system>/<stack>/`. The runtime release tree under `/shared/stack/releases/<tag>/<system>/<stack>/` uses the same relative shape but also contains rendered Spack inputs, views, and modulefiles. Build-cache contents are *not* committed — they live on the buildcache mirror (file URL or S3-compatible). Build logs are CI/Ansible artifacts, attached to the release record but not committed. | Build-cache contents grow past the source repo's practical size for some other reason; revisit per-system. |
 | Repo layout split | `cray-*` vs `linux-*` at the top level is **not** the split. The repository is system-agnostic; per-system reality lives in `profile.yaml` and per-platform behavior lives in the scopes the render step selects. | Never — this is the generic-repo decision. |
+| Internal package repositories | Stack-owned package repos live under `package-repos/<name>/` and are selected by template defaults or `stack.yaml.package_repositories`. Render materializes them into the workspace, emits `repos.yaml`, and records namespace, digest, priority, and source commit in the manifest. They are stack source, not `cluster-inspector` facts. | A stack needs to consume an externally versioned package repo directly; the manifest still records the selected repo identity. |
 | Core sharing across compilers | **Per-compiler Core** is the committed model — each compiler builds its own Core view at its own path. Cross-compiler shared Core is a future, evidence-gated optimization (see §Per-Compiler Core, Not Shared Core). | Measured overlap across compiler Cores is large and expensive enough to justify the `include_concrete`/foundation-cache extraction work. Until then, per-compiler Core stays. |
 | GPU lane Core composition | When a stack renders Core lanes, a GPU lane uses its own compiler's Core. Under the committed Option B default the GPU lane is GCC-hosted, so `gcc/gpu-craympich-<arch>` ↔ `gcc/core`. Named exception lanes follow the same rule with their own host compiler: a ROCmCC exception lane uses `rocmcc/core`, an NVHPC exception lane uses `nvhpc/core`. No separate "gpu-core" layer in any case; small direct application stacks may omit Core entirely. | Never — this falls out of the per-compiler Core model. |
 | GPU vs. MPI as lane kinds | **GPU is its own lane kind, not an MPI sub-type.** In CSE-style library stacks, a GPU lane is a *superset* of the matching MPI lane (it contains the same MPI-aware science libraries plus GPU-arch-pinned packages) and is pinned to one GPU class via `runtime_node_type`. One GPU lane per GPU class on a system. GPU lanes are not "MPI + a GPU add-on layer" — there is no GPU sub-load; users pick exactly one lane, and the GPU lane has everything that lane needs. See §Why GPU Is A Separate Lane Kind. | A real workload pattern materially benefits from a GPU-no-MPI sub-kind, which has not been observed yet. |
-| ClusterInspector module enumeration | **Three-phase hybrid: auto-discover by name pattern, narrow with operator hints, verify by load-and-probe.** The hints file lives in source control at `systems/<system>/inspector-hints.yaml` and is the committed override mechanism (CLI flags exist for one-off probes but the hints file is what persists). See §Module Enumeration: Auto-Discovery Plus Hints. | A site exposes externals through something other than modules (rare); add the appropriate discovery mechanism. The hints + verify model still applies. |
-| Host compiler for GPU lanes | **GNU host by default.** GNU + CUDA on NVIDIA, GNU + ROCm on AMD. For ROCm this means GNU host compiler plus ROCm component externals, not ROCmCC as the host compiler. NVHPC, ROCmCC, and AOCC appear only as narrow exception lanes scoped to codes that specifically need them (OpenACC/CUDA Fortran/`-stdpar` for NVHPC; AMD-vendor codes for ROCmCC; CPU-bound host code for AOCC). See §Host-Compiler Policy For GPU Lanes. | A specific code's programming model demands the vendor compiler; that lane is added without changing the default. |
-| Cray PE + GPU lane assembly | **Option B: `PrgEnv-gnu` + standalone GPU toolkit module** (`rocm/<v>`, `cudatoolkit/<v>`) + the GCC-flavor cray-mpich. The lane compiler is `%gcc_craympich`; CUDA is usually one `cuda` external, while ROCm is rendered as component externals in `configs/gpu/amd-rocm/packages.yaml`; the lane's public entry module loads PrgEnv-gnu + GPU toolkit module + cray-mpich at runtime. Option A (`PrgEnv-amd` / `PrgEnv-nvidia` all-in-one) appears only as the NVHPC or ROCmCC exception lane; Option C (`PrgEnv-cray` + GPU toolkit) only as the CCE-host GPU lane. | A vendor-PrgEnv-required code appears; the exception lane is added without changing the default. |
-| Concretizer `unify:` | **`unify: when_possible`** in every environment, because payload lanes carry multi-version stacks and the foundation single-version rule is enforced explicitly with `require:` in the common scope. | Multi-version policy is abandoned entirely. |
+| `cluster-inspector` module enumeration | **Three-phase hybrid: auto-discover by name pattern, narrow with operator hints, verify by load-and-probe.** The hints file lives in source control at `systems/<system>/inspector-hints.yaml` and is the committed override mechanism (CLI flags exist for one-off probes but the hints file is what persists). See `cluster_inspector_stack_profile_design_v1.md` (CLI/hints schema) and `cluster_inspector_profile_extraction_map_v1.md` (per-field discovery rules). | A site exposes externals through something other than modules (rare); add the appropriate discovery mechanism. The hints + verify model still applies. |
+| Host compiler for GPU lanes | **General-purpose host compiler by default, expressed through three lane kinds.** Kind-1 pure CPU `(compiler, mpi)`; Kind-2 GPU with general-purpose host `(host_compiler, mpi, gpu_toolkit)` where the GPU toolkit is CUDA or ROCm and the host compiler is GCC/AOCC/Intel/CCE; Kind-3 GPU-aware compiler `(gpu_aware_compiler, mpi)` for NVHPC or ROCmCC/amdclang specialist lanes. Kind-2 is the default GPU lane shape. All kinds obey the compiler-family lane purity rule: drop unbuildable specs honestly, never silently route a language to another compiler. See §Host-Compiler Policy For GPU Lanes. | A specific code's programming model demands a kind-3 lane that was not previously rendered; the lane is added without changing the kind-2 default. |
+| Cray PE + GPU lane assembly | **Option B: `PrgEnv-gnu` + standalone GPU toolkit module** (`rocm/<v>`, `cudatoolkit/<v>`) + the GCC-flavor cray-mpich. The lane compiler is `%gcc_craympich`; CUDA is usually one `cuda` external, while ROCm is rendered as component externals in `configs/gpu/amd-rocm/packages.yaml`; the lane's public entry module checks/prereqs PrgEnv-gnu + GPU toolkit module + cray-mpich at runtime unless `modules.platform_module_policy: autoload` is explicitly enabled. Option A (`PrgEnv-amd` / `PrgEnv-nvidia` all-in-one) appears only as the NVHPC or ROCmCC exception lane; Option C (`PrgEnv-cray` + GPU toolkit) only as the CCE-host GPU lane. | A vendor-PrgEnv-required code appears; the exception lane is added without changing the default. |
+| Concretizer `unify:` | CSE-style stack lanes with deliberate multi-version and variant cross-products use **`unify: false`**. Narrow application lanes may use `unify: when_possible` when deduplication is useful and duplicate roots are incidental. `unify: true` is not a production default for this multi-version design. | Multi-version/cross-product policy is abandoned entirely, or a measured narrow application stack proves `when_possible` gives materially better results. |
 | Concretizer `reuse:` | Build-time environments (payload lanes, core, foundation) → `reuse: true`. Pipeline-driving environments (input to `spack ci generate`) → `reuse: false`. See §Concretizer Posture Per Environment Kind. | Never — this is structural. |
 | Build-cache keying | **OS/glibc + Spack/package-repo generation**, with an optional profile external-ABI token when one mirror spans incompatible same-OS site/vendor external surfaces. Compiler/MPI/target are directory labels for human readability, not reuse boundaries. See §Build-Cache Keying. | Never — the hash already enforces spec correctness, but the bucket still needs clear reuse boundaries; per-compiler keying actively strands the foundation. |
-| OpenSSL / curl provenance | **System externals** with `buildable: true` and `prefer:`/`require:` steering. The system admins patch them; the stack does not own that treadmill. Stack-built OpenSSL is a per-consumer documented exception (e.g., a consumer needs a newer API than the system ships). | The system OpenSSL falls out of vendor support entirely; revisit per-system. |
+| OpenSSL / curl provenance | **System externals with `buildable: false`**: the strict tier of the two-tier externalization rule. Site admins patch them via `dnf`/`zypper`; the stack does not own that treadmill and does not produce a parallel binary. Variant declarations must be complete. A consumer needing a genuinely newer OpenSSL API gets a per-consumer escape (`^openssl@3` on that one spec plus a second openssl external entry), never a site-wide flip to `buildable: true`. | The system OpenSSL falls out of vendor support entirely; revisit per-system. |
+| Linux externals beyond OpenSSL/curl | **Hint tier: `buildable: true`**. PMIx, libfabric, UCX, ncurses, hwloc, libpciaccess, rdma-core, and similar libraries are reuse hints; the solver may build a newer version when a consumer's constraints require it. Under-constrained upstream `depends_on` gaps are closed with consumer-side `^pkg@<floor>` in the spec list, not by promoting the external to `buildable: false`. | A new general Linux external proves it can only ever live at the system-shipped version; promote with a committed decision and explicit evidence. |
 | Cray MPICH provenance | **Platform-backed external** with per-flavor `prefix:` and `modules:`. Spack-built MPI on Cray is forbidden for production lanes; the fabric tuning lives in cray-mpich. | Never on Cray. |
-| Cray PE version pinning | The initial build-out pins to **one** PE version (the latest the profile reports), and older point releases are out of support. PE version becomes a future lane dimension when a second version needs support. | A second PE version becomes required and is added as a parallel lane. |
+| Cray PE version pinning | **Carve-out for Cray PE family MPIs; default for everything else.** Non-Cray MPIs keep the default lane slug `<compiler>-<mpi>` with one MPI version per release. Cray PE family MPIs such as `cray-mpich` carry the PE version in the lane slug (`<compiler>-craympich-<peversion>`) and may keep a rolling window of two PE versions, current plus previous, in the same stack release. | A second non-Cray MPI version becomes required for a real workload; promote that MPI family to the same carve-out with explicit evidence. |
 | `modules:` external usage | Reserved for the **Cray PE** case (compilers + cray-mpich). Site MPI on non-vendor systems uses `prefix:` unless a concrete reason forces `modules:`. | Never as a default; case-by-case for new vendor stacks that genuinely require modules. |
-| Lane-runtime-module rule | A lane built on module-provided externals → its public entry module loads them at runtime (`front_door` lane module or `direct` application module). A fully Spack-built lane → self-contained, no platform module prereqs. See §Lane Runtime Module Requirements. | Never — this is structural. |
+| Lane-runtime-module rule | A lane built on module-provided externals → its public entry module checks/prereqs those platform modules at runtime (`front_door` lane module or `direct` application module). Silent autoload is disabled by default and requires explicit `modules.platform_module_policy: autoload`. A fully Spack-built lane → self-contained, no platform module prereqs. See §Lane Runtime Module Requirements. | Never — this is structural. |
 | Provenance taxonomy | Four classes: `Stack-built`, `Platform-backed`, `Site-external`, `Spack-built`. Emitted on every package module via `STACK_PACKAGE_PROVENANCE` and a `module-whatis` suffix. | Never; the four classes cover every real source. |
 | `link:` policy on views | **`link: roots`** everywhere. Spack's default `link: all` is not used. | Never — the per-package module model depends on roots-only. |
 | Default projection | **`{name}/{version}`** in every production view. Richer projections only for collisions a single view must actually hold. | Never as the default. |
