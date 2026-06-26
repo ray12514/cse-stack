@@ -24,3 +24,6 @@ profiles/*.yaml
 request.json
 manifest.json
 artifacts/
+
+# Local-only Docker pipelines (kept on disk, not under git control)
+/docker/
