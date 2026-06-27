@@ -1,0 +1,27 @@
+# Smallest stack.yaml that exercises the cluster-inspector + stack-composer
+# pipeline end-to-end inside the smoke container.
+#
+# - One build: kind `cpu`, no MPI, no GPU.
+# - Inline specs (no package_set lookup) so the workspace is self-contained.
+# - Targets the v6 template-set from stack-content when mounted.
+#
+# Render this against a profile produced by `cluster-inspector profile` inside
+# the smoke container.
+
+schema_version: 1
+name: cse-smoke
+
+profile_contract:
+  schema_version: 1
+
+templates:
+  set: v6
+
+spack:
+  version: ">=1.1.1,<2"
+
+builds:
+  - name: core
+    kind: cpu
+    specs: [zlib@1.3.1]
+    required: true
